@@ -1,5 +1,5 @@
 from data_collection.market_data import MarketData
-import factor_engineering.indicators as indicators
+import derived_features.indicators as indicators
 import database.market_data_repository as market_repo
 import database.indicator_repository as indicator_repo
 
