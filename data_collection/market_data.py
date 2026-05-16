@@ -32,9 +32,9 @@ class MarketData:
             # asof: str | None = None
         )
         raw = self.MarketDataClient.get_stock_bars(hData)  
-        dataList = []
+        data_list = []
         for item in raw[symbol]:
-            dataList.append({
+            data_list.append({
                 "symbol": item.symbol,
                 "date": item.timestamp.date(),
                 "open": item.open,
@@ -43,7 +43,5 @@ class MarketData:
                 "close": item.close,
                 "volume": item.volume,
             })
-        self.ohlcv = pd.DataFrame(dataList)
+        self.ohlcv = pd.DataFrame(data_list)
         return self.ohlcv
-
-print(MarketData().get_OHLCV("AAPL", "2023-01-01", "2023-12-31"))

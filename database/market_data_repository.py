@@ -1,13 +1,12 @@
 from database.db_connection import get_connection
 from data_collection.market_data import MarketData
-
+import pandas as pd
 
 def create_OHLCV_table():
     conn = get_connection()
     cur = conn.cursor()
 
     cur.execute("""
-        DROP TABLE IF EXISTS OHLCV_data;
         CREATE TABLE IF NOT EXISTS OHLCV_data (
             symbol TEXT NOT NULL,
             date DATE NOT NULL,
@@ -23,7 +22,16 @@ def create_OHLCV_table():
     conn.commit()
     cur.close()
     conn.close()
+    
+def drop_OHLCV_table():
+    conn = get_connection()
+    cur = conn.cursor()
 
+    cur.execute("DROP TABLE IF EXISTS OHLCV_data;")
+
+    conn.commit()
+    cur.close()
+    conn.close()
 
 def insert_OHLCV_table(df):
     conn = get_connection()
@@ -46,9 +54,32 @@ def insert_OHLCV_table(df):
     cur.close()
     conn.close()
 
-if __name__ == "__main__":
-    data = MarketData()
-    df = data.get_OHLCV("AAPL", "2023-01-01", "2023-12-31")
 
-    create_OHLCV_table()
-    insert_OHLCV_table(df)  
+def get_OHLCV(symbol, start_date=None, end_date=None):
+    conn = get_connection()
+    query = """SELECT symbol, date, open, high, low, close, volume
+        FROM OHLCV_data 
+        WHERE symbol = %s"""
+
+    if start_date is not None and end_date is not None:
+        query = """
+            SELECT symbol, date, open, high, low, close, volume
+            FROM OHLCV_data
+            WHERE symbol = %s
+              AND date BETWEEN %s AND %s
+            ORDER BY date ASC;
+        """
+        params = (symbol, start_date, end_date)
+    else:
+        query = """
+            SELECT symbol, date, open, high, low, close, volume
+            FROM OHLCV_data
+            WHERE symbol = %s
+            ORDER BY date ASC;
+        """
+        params = (symbol,)
+
+    df = pd.read_sql_query(query, conn, params=params)
+    conn.close()
+
+    return df
