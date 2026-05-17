@@ -1,85 +1,73 @@
 from database.db_connection import get_connection
-from data_collection.market_data import MarketData
 import pandas as pd
 
+from database.db_connection import get_connection
+import pandas as pd
+from sqlalchemy import text
+
+
 def create_OHLCV_table():
-    conn = get_connection()
-    cur = conn.cursor()
+    engine = get_connection()
 
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS OHLCV_data (
-            symbol TEXT NOT NULL,
-            date DATE NOT NULL,
-            open DOUBLE PRECISION,
-            high DOUBLE PRECISION,
-            low DOUBLE PRECISION,
-            close DOUBLE PRECISION,
-            volume BIGINT,
-            PRIMARY KEY (symbol, date)
-        );
-    """)
+    query = """CREATE TABLE IF NOT EXISTS OHLCV_data (
+                symbol TEXT NOT NULL,
+                date DATE NOT NULL,
+                open DOUBLE PRECISION,
+                high DOUBLE PRECISION,
+                low DOUBLE PRECISION,
+                close DOUBLE PRECISION,
+                volume BIGINT,
+                PRIMARY KEY (symbol, date));"""
 
-    conn.commit()
-    cur.close()
-    conn.close()
+    with engine.begin() as conn:
+        conn.execute(text(query))
+
     
 def drop_OHLCV_table():
-    conn = get_connection()
-    cur = conn.cursor()
+    engine = get_connection()
 
-    cur.execute("DROP TABLE IF EXISTS OHLCV_data;")
-
-    conn.commit()
-    cur.close()
-    conn.close()
+    with engine.begin() as conn:
+        conn.execute(text("DROP TABLE IF EXISTS OHLCV_data;"))
 
 def insert_OHLCV_table(df):
-    conn = get_connection()
-    cur = conn.cursor()
-    query  = """INSERT INTO OHLCV_data (symbol, date, open, high, low, close, volume)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
+    engine = get_connection()
+    query = """INSERT INTO OHLCV_data (
+                symbol, date, open, high, low, close, volume
+            )
+            VALUES (
+                :symbol, :date, :open, :high, :low, :close, :volume
+            )
             ON CONFLICT (symbol, date) DO NOTHING;"""
 
-    for _, row in df.iterrows():
-        cur.execute(query, 
-                    (row['symbol'], 
-                     row['date'], 
-                     row['open'], 
-                     row['high'], 
-                     row['low'], 
-                     row['close'], 
-                     row['volume']))
-
-    conn.commit()
-    cur.close()
-    conn.close()
+    with engine.begin() as conn:
+        for _, row in df.iterrows():
+            conn.execute(text(query), {
+                "symbol": row["symbol"],
+                "date": row["date"],
+                "open": row["open"],
+                "high": row["high"],
+                "low": row["low"],
+                "close": row["close"],
+                "volume": row["volume"],
+            })
 
 
 def get_OHLCV(symbol, start_date=None, end_date=None):
-    conn = get_connection()
-    query = """SELECT symbol, date, open, high, low, close, volume
-        FROM OHLCV_data 
-        WHERE symbol = %s"""
+    engine = get_connection()
+
+    query = """
+        SELECT symbol, date, open, high, low, close, volume
+        FROM OHLCV_data
+        WHERE symbol = :symbol
+    """
+
+    params = {"symbol": symbol}
 
     if start_date is not None and end_date is not None:
-        query = """
-            SELECT symbol, date, open, high, low, close, volume
-            FROM OHLCV_data
-            WHERE symbol = %s
-              AND date BETWEEN %s AND %s
-            ORDER BY date ASC;
-        """
-        params = (symbol, start_date, end_date)
-    else:
-        query = """
-            SELECT symbol, date, open, high, low, close, volume
-            FROM OHLCV_data
-            WHERE symbol = %s
-            ORDER BY date ASC;
-        """
-        params = (symbol,)
+        query += " AND date BETWEEN :start_date AND :end_date"
+        params["start_date"] = start_date
+        params["end_date"] = end_date
 
-    df = pd.read_sql_query(query, conn, params=params)
-    conn.close()
+    query += " ORDER BY date ASC;"
 
-    return df
+    return pd.read_sql_query(text(query), engine, params=params)

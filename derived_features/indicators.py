@@ -13,6 +13,11 @@ def compute_trading_indicators(df):
     df["sma_20"] = ta.sma(df["close"], length=20)
     df["sma_50"] = ta.sma(df["close"], length=50)
 
+    # Relative volume
+    df["volume_sma_10"] = ta.sma(df["volume"], length=10)
+    df["volume_sma_50"] = ta.sma(df["volume"], length=50)
+    df["volume_ratio"] = df["volume_sma_10"] / df["volume_sma_50"]
+
     # RSI
     df["rsi_14"] = ta.rsi(df["close"], length=14)
 
