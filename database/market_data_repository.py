@@ -1,55 +1,52 @@
 from database.db_connection import get_connection
 import pandas as pd
-
-from database.db_connection import get_connection
-import pandas as pd
 from sqlalchemy import text
 
 
 def create_OHLCV_table():
     engine = get_connection()
 
-    query = """CREATE TABLE IF NOT EXISTS OHLCV_data (
-                symbol TEXT NOT NULL,
-                date DATE NOT NULL,
-                open DOUBLE PRECISION,
-                high DOUBLE PRECISION,
-                low DOUBLE PRECISION,
-                close DOUBLE PRECISION,
-                volume BIGINT,
-                PRIMARY KEY (symbol, date));"""
+    query = text("""
+        CREATE TABLE IF NOT EXISTS OHLCV_data (
+            symbol TEXT NOT NULL,
+            date DATE NOT NULL,
+            open DOUBLE PRECISION,
+            high DOUBLE PRECISION,
+            low DOUBLE PRECISION,
+            close DOUBLE PRECISION,
+            volume BIGINT,
+            PRIMARY KEY (symbol, date)
+        );
+    """)
 
     with engine.begin() as conn:
-        conn.execute(text(query))
+        conn.execute(query)
 
-    
+
 def drop_OHLCV_table():
     engine = get_connection()
 
     with engine.begin() as conn:
         conn.execute(text("DROP TABLE IF EXISTS OHLCV_data;"))
 
+
 def insert_OHLCV_table(df):
     engine = get_connection()
-    query = """INSERT INTO OHLCV_data (
-                symbol, date, open, high, low, close, volume
-            )
-            VALUES (
-                :symbol, :date, :open, :high, :low, :close, :volume
-            )
-            ON CONFLICT (symbol, date) DO NOTHING;"""
+
+    query = text("""
+        INSERT INTO OHLCV_data (
+            symbol, date, open, high, low, close, volume
+        )
+        VALUES (
+            :symbol, :date, :open, :high, :low, :close, :volume
+        )
+        ON CONFLICT (symbol, date) DO NOTHING;
+    """)
+
+    records = df.to_dict(orient="records")
 
     with engine.begin() as conn:
-        for _, row in df.iterrows():
-            conn.execute(text(query), {
-                "symbol": row["symbol"],
-                "date": row["date"],
-                "open": row["open"],
-                "high": row["high"],
-                "low": row["low"],
-                "close": row["close"],
-                "volume": row["volume"],
-            })
+        conn.execute(query, records)
 
 
 def get_OHLCV(symbol, start_date=None, end_date=None):
@@ -69,5 +66,21 @@ def get_OHLCV(symbol, start_date=None, end_date=None):
         params["end_date"] = end_date
 
     query += " ORDER BY date ASC;"
+
+    return pd.read_sql_query(text(query), engine, params=params)
+
+def get_latest_OHLCV(symbol, date):
+    engine = get_connection()
+
+    query = """
+        SELECT symbol, date, open, high, low, close, volume
+        FROM OHLCV_data
+        WHERE symbol = :symbol 
+            AND date <= :date
+        ORDER BY date DESC
+        LIMIT 1;
+    """
+
+    params = {"symbol": symbol, "date": date}
 
     return pd.read_sql_query(text(query), engine, params=params)

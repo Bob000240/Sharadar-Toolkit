@@ -1,11 +1,12 @@
 from database.db_connection import get_connection
 import pandas as pd
-from sqlalchemy import  text
+from sqlalchemy import text
+
 
 def create_indicators_table():
     engine = get_connection()
 
-    query = """
+    query = text("""
         CREATE TABLE IF NOT EXISTS indicators_data (
             symbol TEXT NOT NULL,
             date DATE NOT NULL,
@@ -24,51 +25,42 @@ def create_indicators_table():
             volatility_20 DOUBLE PRECISION,
             PRIMARY KEY (symbol, date)
         );
-    """
+    """)
 
     with engine.begin() as conn:
-        conn.execute(text(query))
+        conn.execute(query)
+
 
 def drop_indicators_table():
     engine = get_connection()
+
     with engine.begin() as conn:
         conn.execute(text("DROP TABLE IF EXISTS indicators_data;"))
+
 
 def insert_indicators(df):
     df = df.where(pd.notnull(df), None)
     engine = get_connection()
 
-    query = """INSERT INTO indicators_data (
-                symbol, date, return_1d, return_5d, return_20d,
-                sma_20, sma_50, volume_sma_10, volume_sma_50, volume_ratio,
-                rsi_14, macd, macd_signal, macd_hist, volatility_20
-            )
-            VALUES (
-                :symbol, :date, :return_1d, :return_5d, :return_20d,
-                :sma_20, :sma_50, :volume_sma_10, :volume_sma_50, :volume_ratio,
-                :rsi_14, :macd, :macd_signal, :macd_hist, :volatility_20
-            )
-            ON CONFLICT (symbol, date) DO NOTHING;"""
+    query = text("""
+        INSERT INTO indicators_data (
+            symbol, date, return_1d, return_5d, return_20d,
+            sma_20, sma_50, volume_sma_10, volume_sma_50, volume_ratio,
+            rsi_14, macd, macd_signal, macd_hist, volatility_20
+        )
+        VALUES (
+            :symbol, :date, :return_1d, :return_5d, :return_20d,
+            :sma_20, :sma_50, :volume_sma_10, :volume_sma_50, :volume_ratio,
+            :rsi_14, :macd, :macd_signal, :macd_hist, :volatility_20
+        )
+        ON CONFLICT (symbol, date) DO NOTHING;
+    """)
+
+    records = df.to_dict(orient="records")
 
     with engine.begin() as conn:
-        for _, row in df.iterrows():
-            conn.execute(text(query), {
-                "symbol": row["symbol"],
-                "date": row["date"],
-                "return_1d": row["return_1d"],
-                "return_5d": row["return_5d"],
-                "return_20d": row["return_20d"],
-                "sma_20": row["sma_20"],
-                "sma_50": row["sma_50"],
-                "volume_sma_10": row["volume_sma_10"],
-                "volume_sma_50": row["volume_sma_50"],
-                "volume_ratio": row["volume_ratio"],
-                "rsi_14": row["rsi_14"],
-                "macd": row["macd"],
-                "macd_signal": row["macd_signal"],
-                "macd_hist": row["macd_hist"],
-                "volatility_20": row["volatility_20"],
-            })
+        conn.execute(query, records)
+
 
 def get_indicators(symbol, start_date=None, end_date=None):
     engine = get_connection()
@@ -89,5 +81,26 @@ def get_indicators(symbol, start_date=None, end_date=None):
         params["end_date"] = end_date
 
     query += " ORDER BY date ASC;"
+
+    return pd.read_sql_query(text(query), engine, params=params)
+
+def get_latest_indicators(symbol, signal_day):
+    engine = get_connection()
+
+    query = """
+        SELECT symbol, date, return_1d, return_5d, return_20d,
+               sma_20, sma_50, volume_sma_10, volume_sma_50, volume_ratio,
+               rsi_14, macd, macd_signal, macd_hist, volatility_20
+        FROM indicators_data
+        WHERE symbol = :symbol
+          AND date <= :signal_day
+        ORDER BY date DESC
+        LIMIT 1;
+    """
+
+    params = {
+        "symbol": symbol,
+        "signal_day": signal_day.date() if hasattr(signal_day, "date") else signal_day
+    }
 
     return pd.read_sql_query(text(query), engine, params=params)

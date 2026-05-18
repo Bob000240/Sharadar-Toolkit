@@ -2,13 +2,14 @@ from data_collection.market_data import MarketData
 import derived_features.indicators as indicators
 import database.market_data_repository as market_repo
 import database.indicator_repository as indicator_repo
+import pandas as pd
 
 if __name__ == "__main__":
     symbols = [
-        "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "BRK.B", "JPM", "AVGO", "LLY",
+        "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "BRK.B", "JPM", "AVGO", "LLY", "SPY"
     ]
     start_date = "2020-02-01"
-    end_date = "2026-04-30"
+    end_date = pd.Timestamp.today()
     
     market_repo.drop_OHLCV_table()
     market_repo.create_OHLCV_table()
@@ -21,6 +22,6 @@ if __name__ == "__main__":
         df = market_repo.get_OHLCV(symbol, start_date, end_date)
         df = indicators.compute_trading_indicators(df)
         indicator_repo.insert_indicators(df)
-        
-    df_apple = indicator_repo.get_indicators("AAPL", start_date, end_date)
+
+    df_apple = indicator_repo.get_indicators("SPY", start_date, end_date)
     print(df_apple.sort_values("date", ascending=False).head())
