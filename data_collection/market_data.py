@@ -1,7 +1,6 @@
 from alpaca.data.historical import StockHistoricalDataClient
 from alpaca.data.timeframe import TimeFrame
 import alpaca.data.requests as DataRequest
-from datetime import datetime, timedelta
 import pandas as pd
 
 import os
@@ -18,7 +17,7 @@ class MarketData:
         self.MarketDataClient = StockHistoricalDataClient(API_KEY, SECRET_KEY)
         self.ohlcv = pd.DataFrame()
 
-    def get_OHLCV(self, symbol, start_date, end_date):
+    def get_OHLCV(self, symbol: str, start_date: pd.Timestamp, end_date: pd.Timestamp):
         hData = DataRequest.StockBarsRequest(
             symbol_or_symbols = symbol,
             start = start_date,

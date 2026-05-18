@@ -1,7 +1,5 @@
-import database.market_data_repository as market_repo
 import database.indicator_repository as indicator_repo
 import pandas as pd
-import numpy as np
 
 WEIGHTS = {
     "5d": 0.20,
@@ -13,7 +11,7 @@ WEIGHTS = {
 }
 
 class MomentumFactorsModel:
-    def __init__(self, signal_day, stock_symbols, benchmark_symbol):
+    def __init__(self, signal_day : pd.Timestamp, stock_symbols: list[str], benchmark_symbol: str):
         self.signal_day = signal_day
         self.stock_symbols = stock_symbols
         self.benchmark_symbol = benchmark_symbol
@@ -42,7 +40,7 @@ class MomentumFactorsModel:
         if self.benchmark_data.empty:
             raise ValueError(f"No benchmark data found for {self.benchmark_symbol}")
 
-    def fetch_factor_series(self, column_name):
+    def fetch_factor_series(self, column_name : str):
         factor_df = pd.DataFrame()
 
         for symbol in self.stock_symbols:
@@ -51,7 +49,7 @@ class MomentumFactorsModel:
 
         return factor_df.iloc[-1]
 
-    def fetch_benchmark_value(self, column_name):
+    def fetch_benchmark_value(self, column_name : str):
         return self.benchmark_data.set_index("date")[column_name].iloc[-1]
 
     def compute_5d(self):
@@ -89,41 +87,42 @@ class MomentumFactorsModel:
             "volume_ratio": self.compute_volume_ratio(),
             "rsi": self.compute_rsi()
         }
-        score = sum(WEIGHTS[key] * value for key, value in factors.items())
+        score = pd.Series(0.0, index=self.stock_symbols)
+        for key, value in factors.items():
+            score += WEIGHTS[key] * value
         return score
 
 
 
-def z_score(series):
+def z_score(series: pd.Series, clip : float = 3.0):
     mean = series.mean()
-    std = series.std()
+    std = series.std(ddof=1)
     if std == 0 or pd.isna(std):
         return pd.Series(0.0, index=series.index)
-    return (series - mean) / std
+    return ((series - mean) / std).clip(-clip, clip)
 
-def five_days_momentum(ind_series):
+def five_days_momentum(ind_series : pd.Series):
     return z_score(ind_series)
 
-def twenty_days_momentum(ind_series):
+def twenty_days_momentum(ind_series : pd.Series):
     return z_score(ind_series)
 
-def relative_five_days_momentum(ind_series, benchmark_value):
+def relative_five_days_momentum(ind_series : pd.Series, benchmark_value : pd.Series):
     return z_score(ind_series - benchmark_value)
 
-
-def relative_twenty_days_momentum(ind_series, benchmark_value):
+def relative_twenty_days_momentum(ind_series : pd.Series, benchmark_value : pd.Series):
     return z_score(ind_series - benchmark_value)
 
-def volume_ratio_momentum(mkt_series):
+def volume_ratio_momentum(mkt_series : pd.Series):
     return z_score(mkt_series)
 
-def rsi_momentum(rsi_series):
-    return z_score(rsi_series)
+def rsi_momentum(rsi_series : pd.Series):
+    return z_score(rsi_series - 50)
 
 if __name__ == "__main__":
     mf = MomentumFactorsModel(
         signal_day= pd.Timestamp.today(),
-        stock_symbols=["NVDA", "AAPL", "MSFT"],
+        stock_symbols=["NVDA", "AAPL", "MSFT", "AMZN", "GOOGL"],
         benchmark_symbol="SPY"
     )
 

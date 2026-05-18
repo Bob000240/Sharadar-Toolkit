@@ -30,7 +30,7 @@ def drop_OHLCV_table():
         conn.execute(text("DROP TABLE IF EXISTS OHLCV_data;"))
 
 
-def insert_OHLCV_table(df):
+def insert_OHLCV_table(df : pd.DataFrame):
     engine = get_connection()
 
     query = text("""
@@ -49,7 +49,7 @@ def insert_OHLCV_table(df):
         conn.execute(query, records)
 
 
-def get_OHLCV(symbol, start_date=None, end_date=None):
+def get_OHLCV(symbol : str, start_date : pd.Timestamp | None = None, end_date : pd.Timestamp | None = None):
     engine = get_connection()
 
     query = """
@@ -69,7 +69,7 @@ def get_OHLCV(symbol, start_date=None, end_date=None):
 
     return pd.read_sql_query(text(query), engine, params=params)
 
-def get_latest_OHLCV(symbol, date):
+def get_latest_OHLCV(symbol : str, date : pd.Timestamp):
     engine = get_connection()
 
     query = """

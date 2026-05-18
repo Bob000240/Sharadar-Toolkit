@@ -1,7 +1,7 @@
 import pandas as pd
 import pandas_ta as ta
 
-def compute_trading_indicators(df):
+def compute_trading_indicators(df : pd.DataFrame):
     df = df.copy()
     df = df.sort_values("date").reset_index(drop=True)
     # Returns
@@ -29,5 +29,7 @@ def compute_trading_indicators(df):
 
     # Volatility
     df["volatility_20"] = df["return_1d"].rolling(20).std()
+
+    df = df.dropna().reset_index(drop=True)
 
     return df

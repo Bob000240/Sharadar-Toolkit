@@ -38,7 +38,7 @@ def drop_indicators_table():
         conn.execute(text("DROP TABLE IF EXISTS indicators_data;"))
 
 
-def insert_indicators(df):
+def insert_indicators(df : pd.DataFrame):
     df = df.where(pd.notnull(df), None)
     engine = get_connection()
 
@@ -62,7 +62,7 @@ def insert_indicators(df):
         conn.execute(query, records)
 
 
-def get_indicators(symbol, start_date=None, end_date=None):
+def get_indicators(symbol : str, start_date : pd.Timestamp | None, end_date : pd.Timestamp | None):
     engine = get_connection()
 
     query = """
@@ -84,7 +84,7 @@ def get_indicators(symbol, start_date=None, end_date=None):
 
     return pd.read_sql_query(text(query), engine, params=params)
 
-def get_latest_indicators(symbol, signal_day):
+def get_latest_indicators(symbol : str, signal_day : pd.Timestamp):
     engine = get_connection()
 
     query = """

@@ -6,9 +6,16 @@ import pandas as pd
 
 if __name__ == "__main__":
     symbols = [
-        "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "BRK.B", "JPM", "AVGO", "LLY", "SPY"
+        "AAPL", "MSFT", "NVDA", "AVGO", "AMD", "INTC", "QCOM", "TXN", "MU", "AMAT",
+        "GOOGL", "META", "NFLX", "DIS", "CMCSA", "T", "VZ",
+        "AMZN", "TSLA", "HD", "MCD", "NKE", "SBUX", "TGT", "COST", "WMT",
+        "JPM", "BAC", "GS", "MS", "WFC", "BLK", "V", "MA",
+        "LLY", "JNJ", "UNH", "PFE", "ABBV", "MRK", "TMO",
+        "CAT", "BA", "HON", "GE", "UPS",
+        "XOM", "CVX",
+        "SPY"
     ]
-    start_date = "2020-02-01"
+    start_date = "2016-01-01"
     end_date = pd.Timestamp.today()
     
     market_repo.drop_OHLCV_table()
@@ -22,6 +29,6 @@ if __name__ == "__main__":
         df = market_repo.get_OHLCV(symbol, start_date, end_date)
         df = indicators.compute_trading_indicators(df)
         indicator_repo.insert_indicators(df)
-
+    
     df_apple = indicator_repo.get_indicators("SPY", start_date, end_date)
     print(df_apple.sort_values("date", ascending=False).head())
