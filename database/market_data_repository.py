@@ -49,16 +49,18 @@ def insert_OHLCV_table(df : pd.DataFrame):
         conn.execute(query, records)
 
 
-def get_OHLCV(symbol : str, start_date : pd.Timestamp | None = None, end_date : pd.Timestamp | None = None):
+def get_OHLCV(symbol : str | list[str], start_date : pd.Timestamp | None = None, end_date : pd.Timestamp | None = None):
     engine = get_connection()
+
+    symbols = [symbol] if isinstance(symbol, str) else symbol
 
     query = """
         SELECT symbol, date, open, high, low, close, volume
         FROM OHLCV_data
-        WHERE symbol = :symbol
+        WHERE symbol = ANY(:symbols)
     """
 
-    params = {"symbol": symbol}
+    params = {"symbols": symbols}
 
     if start_date is not None and end_date is not None:
         query += " AND date BETWEEN :start_date AND :end_date"

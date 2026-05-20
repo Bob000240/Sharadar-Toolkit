@@ -1,7 +1,9 @@
 from data_collection.market_data import MarketData
-import derived_features.indicators as indicators
+from data_collection.sector_data import sector_mapping
+from derived_features.indicators import compute_indicators
 import database.market_data_repository as market_repo
 import database.indicator_repository as indicator_repo
+import database.sector_data_repository as sector_repo
 import pandas as pd
 
 if __name__ == "__main__":
@@ -20,15 +22,26 @@ if __name__ == "__main__":
     
     market_repo.drop_OHLCV_table()
     market_repo.create_OHLCV_table()
-    for symbol in symbols:
-        market_repo.insert_OHLCV_table(MarketData().get_OHLCV(symbol, start_date, end_date))
-
+    market_repo.insert_OHLCV_table(MarketData().get_OHLCV(symbols, start_date, end_date))
+    
     indicator_repo.drop_indicators_table()
     indicator_repo.create_indicators_table()
+
+    sector_repo.drop_sector_mapping_table()
+    sector_repo.create_sector_mapping_table()
+
     for symbol in symbols:
         df = market_repo.get_OHLCV(symbol, start_date, end_date)
-        df = indicators.compute_trading_indicators(df)
+        df = compute_indicators(df)
         indicator_repo.insert_indicators(df)
+
     
-    df_apple = indicator_repo.get_indicators("SPY", start_date, end_date)
-    print(df_apple.sort_values("date", ascending=False).head())
+    sector_repo.insert_sector_mapping(sector_mapping(symbols))
+
+    df = market_repo.get_OHLCV(["SPY", "AAPL"], start_date, end_date)
+    print(df.sort_values("date", ascending=False).head())
+    df = indicator_repo.get_indicators(["SPY", "AAPL"], start_date, end_date)
+    print(df.sort_values("date", ascending=False).head())
+    df = sector_repo.get_sector_mapping(["SPY", "AAPL"])
+    print(df)
+
