@@ -86,8 +86,12 @@ def get_indicators(symbol: str | list[str], start_date: pd.Timestamp | None = No
 
     query = """
         SELECT symbol, date, return_1d, return_5d, return_20d,
-               sma_20, sma_50, volume_sma_10, volume_sma_50, volume_ratio,
-               rsi_14, macd, macd_signal, macd_hist, volatility_20
+                return_60d, return_252d,
+                sma_20, sma_50, sma_200, above_sma_200,
+                volume_sma_10, volume_sma_50, volume_ratio,
+                rsi_14, macd, macd_signal, macd_hist,
+                atr_14, atr_pct, volatility_20,
+                high_52, obv, dollar_volume, dollar_volume_20d_avg
         FROM indicators_data
         WHERE symbol = ANY(:symbols)
     """
@@ -110,8 +114,12 @@ def get_latest_indicators(symbol : str, signal_day : pd.Timestamp):
 
     query = """
         SELECT symbol, date, return_1d, return_5d, return_20d,
-               sma_20, sma_50, volume_sma_10, volume_sma_50, volume_ratio,
-               rsi_14, macd, macd_signal, macd_hist, volatility_20
+                return_60d, return_252d,
+                sma_20, sma_50, sma_200, above_sma_200,
+                volume_sma_10, volume_sma_50, volume_ratio,
+                rsi_14, macd, macd_signal, macd_hist,
+                atr_14, atr_pct, volatility_20,
+                high_52, obv, dollar_volume, dollar_volume_20d_avg
         FROM indicators_data
         WHERE symbol = :symbol
           AND date <= :signal_day
