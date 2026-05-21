@@ -1,19 +1,47 @@
 import yfinance as yf
 import pandas as pd
 
-def sector_mapping(symbols: list[str]) -> pd.DataFrame:
+SECTOR_ETF_MAPPING = {
+    "XLK":  "Technology",
+    "XLV":  "Healthcare",
+    "XLF":  "Financial Services",
+    "XLY":  "Consumer Cyclical",
+    "XLP":  "Consumer Staples",
+    "XLE":  "Energy",
+    "XLU":  "Utilities",
+    "XLI":  "Industrials",
+    "XLB":  "Basic Materials",
+    "XLRE": "Real Estate",
+    "XLC":  "Communication Services",
+}
+
+def get_sector(symbols: list[str]) -> pd.DataFrame:
     records = []
     for symbol in symbols:
-        ticker = yf.Ticker(symbol)
-        info = ticker.info
-        records.append({
-            "symbol": symbol,
-            "sector": info.get("sector", "Unknown"),
-            "industry": info.get("industry", "Unknown")
-        })
-    return pd.DataFrame(records)
+        if symbol in SECTOR_ETF_MAPPING:
+            records.append({
+                "symbol": symbol,
+                "sector": SECTOR_ETF_MAPPING[symbol],
+                "industry": "ETF"
+            })
+            continue
 
-if __name__ == "__main__":
-    symbols = ["AAPL", "MSFT", "GOOGL"]  # Example stock symbols
-    sm = sector_mapping(symbols)
-    print(sm)
+        try:
+            info = yf.Ticker(symbol).info
+
+            records.append({
+                "symbol": symbol,
+                "sector": info.get("sector", "Unknown"),
+                "industry": info.get("industry", "Unknown")
+            })
+
+        except Exception as e:
+            print(f"Failed to fetch sector data for {symbol}: {e}")
+
+            records.append({
+                "symbol": symbol,
+                "sector": "Unknown",
+                "industry": "Unknown"
+            })
+
+    return pd.DataFrame(records)

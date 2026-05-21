@@ -59,29 +59,3 @@ def get_sector_mapping(symbols : list[str] | str | None = None):
 
     return df
 
-def get_sector_relative_returns(symbols: list[str] | str, signal_day: pd.Timestamp):
-    if isinstance(symbols, str):
-        symbols = [symbols]
-    engine = get_connection()
-
-    query = text("""SELECT i.symbol, i.return_5d, i.return_20d, s.sector
-        FROM indicators_data i
-        JOIN sector_mapping s ON i.symbol = s.symbol
-        WHERE i.symbol = ANY(:symbols)
-          AND i.date <= :signal_day
-        ORDER BY i.symbol, i.date DESC""")
-
-    params = {"symbols": symbols, "signal_day": signal_day.date()}
-
-    df = pd.read_sql_query(query, engine, params=params)
-
-    df = df.groupby("symbol").first().reset_index()
-
-    sector_avg = df.groupby("sector")[["return_5d", "return_20d"]].mean()
-    sector_avg.columns = ["sector_avg_5d", "sector_avg_20d"]
-
-    df = df.join(sector_avg, on="sector")
-    df["sector_relative_5d"] = df["return_5d"] - df["sector_avg_5d"]
-    df["sector_relative_20d"] = df["return_20d"] - df["sector_avg_20d"]
-
-    return df[["symbol", "sector", "sector_relative_5d", "sector_relative_20d"]]

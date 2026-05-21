@@ -1,5 +1,5 @@
 from data_collection.market_data import MarketData
-from data_collection.sector_data import sector_mapping
+from data_collection.sector_data import get_sector
 from derived_features.indicators import compute_indicators
 import database.market_data_repository as market_repo
 import database.indicator_repository as indicator_repo
@@ -76,14 +76,15 @@ if __name__ == "__main__":
         "VLO", "VEEV", "VTR", "VLTO", "VRSN", "VRSK", "VZ", "VRTX", "VRT", "VTRS",
         "VICI", "V", "VST", "VMC", "WRB", "GWW", "WAB", "WMT", "DIS", "WBD",
         "WM", "WAT", "WEC", "WFC", "WELL", "WST", "WDC", "WY", "WSM", "WMB",
-        "WTW", "WDAY", "WYNN", "XEL", "XYL", "YUM", "ZBRA", "ZBH", "ZTS", "SPY"
-    ]
+        "WTW", "WDAY", "WYNN", "XEL", "XYL", "YUM", "ZBRA", "ZBH", "ZTS"]
+    benchmark_symbol = ["SPY", "XLK" , "XLY", "XLC", "XLF", "XLV", "XLI", "XLE", "XLB", "XLRE", "XLU", "XLP"]
+    all_symbols = symbols + benchmark_symbol
     start_date = "2025-01-01"
     end_date = pd.Timestamp.today()
 
     market_repo.drop_OHLCV_table()
     market_repo.create_OHLCV_table()
-    market_repo.insert_OHLCV_table(MarketData().get_OHLCV(symbols, start_date, end_date))
+    market_repo.insert_OHLCV_table(MarketData().get_OHLCV(all_symbols, start_date, end_date))
     
     indicator_repo.drop_indicators_table()
     indicator_repo.create_indicators_table()
@@ -91,7 +92,7 @@ if __name__ == "__main__":
     sector_repo.drop_sector_mapping_table()
     sector_repo.create_sector_mapping_table()
 
-    for symbol in symbols:
+    for symbol in all_symbols:
         print(f"Processing {symbol}")
 
         df = market_repo.get_OHLCV(symbol, start_date, end_date)
@@ -109,7 +110,7 @@ if __name__ == "__main__":
         indicator_repo.insert_indicators(df)
 
     
-    sector_repo.insert_sector_mapping(sector_mapping(symbols))
+    sector_repo.insert_sector_mapping(get_sector(all_symbols))
     
     df = market_repo.get_OHLCV(["SPY", "AAPL"], start_date, end_date)
     print(df.sort_values("date", ascending=False).head())
