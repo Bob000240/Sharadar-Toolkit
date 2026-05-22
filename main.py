@@ -11,6 +11,8 @@ def initial_filter(symbols: list[str]) -> list[str]:
     selections = []
     for symbol in symbols:
         df = indicator_repo.get_latest_indicators(symbol, pd.Timestamp("2026-05-19"))
+        if df.empty:
+            continue
         row = df.iloc[0]
         try:
             ma_test = row["above_sma_200"]

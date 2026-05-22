@@ -6,7 +6,7 @@ SECTOR_ETF_MAPPING = {
     "XLV": "Healthcare",
     "XLF": "Financial Services",
     "XLY": "Consumer Cyclical",
-    "XLP": "Consumer Staples",
+    "XLP": "Consumer Defensive",
     "XLE": "Energy",
     "XLU": "Utilities",
     "XLI": "Industrials",

@@ -10,56 +10,85 @@ from textwrap import dedent
 
 @dataclass
 class MomentumSnapshot:
-    """Raw momentum data for a single stock, formatted for AI agent interpretation."""
+    """Raw momentum data for a single stock."""
 
+    # Identity
     symbol: str
     signal_day: str
 
-    # Price returns
-    return_1d: float
+    # Absolute momentum
     return_5d: float
     return_20d: float
     return_60d: float
     return_252d: float
 
-    # Benchmark-relative returns (vs SPY)
+    # Composite momentum
+    momentum_composite_percentile: float
+    momentum_consistency: float
+    # Count of positive periods across 5d/20d/60d/252d (0–4)
+
+    # Benchmark-relative momentum (vs SPY)
     excess_return_5d: float
     excess_return_20d: float
 
-    # Sector-relative returns
+    # Sector-relative momentum
     sector_relative_5d: float
     sector_relative_20d: float
     sector: str
 
-    # Trend
+    # Trend / structure
     price: float
-    sma_20: float
-    sma_50: float
-    sma_200: float
     above_sma_200: bool
     pct_from_52w_high: float
+    new_52w_high: bool
 
-    # Momentum oscillators
-    rsi_14: float
-    macd: float
-    macd_signal: float
-    macd_hist: float
-    macd_crossover: str  # "bullish", "bearish", "neutral"
+    # Trend quality
+    r_squared_60d: float
+    # R² of price vs time regression (0–1)
 
-    # Volume
-    volume_ratio: float  # 10d avg / 50d avg
-    obv_trend: str  # "rising", "falling", "flat"
+    trend_slope_60d: float
+    # Annualized regression slope over 60d
+
+    slope_x_r2: float
+    # trend_slope_60d * r_squared_60d
+
+    drawdown_from_recent_high: float
+    # Max drawdown over trailing 20d
+
+    # Momentum acceleration
+    momentum_accel_20_60: float
+    # return_20d - return_60d
+
+    momentum_accel_5_20: float
+    # return_5d - return_20d
+
+    # Volume / participation
+    volume_ratio: float
+    # 10d avg volume / 50d avg volume
+
     dollar_volume_20d_avg: float
 
-    # Risk
+    # Risk / volatility
     volatility_20: float
     atr_pct: float
 
-    # Universe context
-    return_5d_percentile: float  # 0-100, where stock ranks in S&P 500
+    vol_adjusted_momentum: float
+    # return_60d / volatility_20
+
+    # Universe-relative ranks (0–100)
+    return_5d_percentile: float
     return_20d_percentile: float
+    return_60d_percentile: float
     return_252d_percentile: float
-    rsi_percentile: float
+
+
+    # Market regime
+    spy_above_sma_200: bool
+    spy_return_20d_percentile: float
+
+    # Breadth / regime quality
+    sp500_pct_above_sma_200: float
+    sp500_new_highs_ratio: float
 
     def to_agent_prompt(self) -> str:
         """
@@ -138,33 +167,36 @@ class MomentumFactorsModel:
 
     def _load_data(self):
         # One DB call for everything
-        all_indicator_df = indicator_repo.get_indicators(
-            self.all_symbols, start_date=None, end_date=self.signal_day
-        )
-        all_ohlcv_df = market_repo.get_OHLCV(self.all_symbols, end_date=self.signal_day)
+        all_ohlcv_df = market_repo.get_latest_OHLCV(self.all_symbols, self.signal_day)
+        all_indicator_df = indicator_repo.get_latest_indicators(self.all_symbols, self.signal_day)
 
         if all_indicator_df.empty:
             raise ValueError("No indicator data found.")
 
-        latest = all_indicator_df.sort_values("date").groupby("symbol").last()
-        latest_close = (
-            all_ohlcv_df.sort_values("date").groupby("symbol")["close"].last()
-        )
-        latest["close"] = latest_close
+        # Index by symbol so .loc[] works
+        all_indicator_df = all_indicator_df.set_index("symbol")
+        all_ohlcv_df = all_ohlcv_df.set_index("symbol")
+
+        # Add close from OHLCV (not stored in indicators table)
+        all_indicator_df["close"] = all_ohlcv_df["close"]
 
         # Split after fetching
-        self.stock_data = latest.loc[self.stock_symbols]
-        self.benchmark_data = latest.loc[[self.benchmark_symbol]]
-        self.etf_data = latest.loc[self.etf_symbols]
+        self.stock_data = all_indicator_df.loc[self.stock_symbols].copy()
+        self.benchmark_data = all_indicator_df.loc[[self.benchmark_symbol]].copy()
+        self.etf_data = all_indicator_df.loc[self.etf_symbols].copy()
 
-        sector_df = self.get_sector_relative_returns(
-            self.stock_symbols, self.signal_day
-        )
-        self.stock_data = self.stock_data.join(
-            sector_df.set_index("symbol")[
-                ["sector", "sector_relative_5d", "sector_relative_20d"]
-            ]
-        )
+
+        sector_map = sector_repo.get_sector_mapping(self.all_symbols).set_index("symbol")["sector"]
+        self.stock_data["sector"] = sector_map.reindex(self.stock_data.index)
+        self.etf_data["sector"] = sector_map.reindex(self.etf_data.index)
+
+        etf_returns = self.etf_data.set_index("sector")[["return_5d", "return_20d"]]
+        self.stock_data["sector_relative_5d"]  = self.stock_data["return_5d"]  - self.stock_data["sector"].map(etf_returns["return_5d"])
+        self.stock_data["sector_relative_20d"] = self.stock_data["return_20d"] - self.stock_data["sector"].map(etf_returns["return_20d"])
+
+        self.stock_data["momentum_composite_percentile"] = self.stock_data
+
+
 
         print("Data loaded successfully.")
         print(f"Stock data shape: {self.stock_data.shape}")
@@ -178,56 +210,6 @@ class MomentumFactorsModel:
         print("Sample stock columns:")
         print(self.stock_data.columns.to_list())
 
-    def get_sector_relative_returns(self, symbols: list[str], signal_day: pd.Timestamp):
-        if isinstance(symbols, str):
-            symbols = [symbols]
-
-        engine = db.get_connection()
-
-        query = text("""
-            WITH latest AS (
-                SELECT DISTINCT ON (i.symbol)
-                    i.symbol,
-                    i.return_5d,
-                    i.return_20d,
-                    s.sector
-                FROM indicators_data i
-                JOIN sector_mapping s ON i.symbol = s.symbol
-                WHERE i.symbol = ANY(:symbols)
-                AND i.date <= :signal_day
-                ORDER BY i.symbol, i.date DESC
-            ),
-
-            etf_latest AS (
-                SELECT DISTINCT ON (s.sector)
-                    s.sector,
-                    i.return_5d  AS etf_return_5d,
-                    i.return_20d AS etf_return_20d
-                FROM indicators_data i
-                JOIN sector_mapping s ON i.symbol = s.symbol
-                WHERE i.symbol = ANY(:etf_symbols)
-                AND i.date <= :signal_day
-                ORDER BY s.sector, i.date DESC
-            )
-
-            SELECT
-                l.symbol,
-                l.sector,
-                l.return_5d  - e.etf_return_5d  AS sector_relative_5d,
-                l.return_20d - e.etf_return_20d AS sector_relative_20d
-            FROM latest l
-            JOIN etf_latest e ON l.sector = e.sector
-            ORDER BY l.symbol
-        """)
-
-        params = {
-            "symbols": symbols,
-            "etf_symbols": self.etf_symbols,
-            "signal_day": signal_day.date(),
-        }
-
-        return pd.read_sql_query(query, engine, params=params)
-
     def get(self, symbol: str, col: str):
         if symbol not in self.stock_data.index:
             raise ValueError()
@@ -238,22 +220,49 @@ class MomentumFactorsModel:
     def build_snapshot(self, symbol: str):
         bench_5d = self.benchmark_data.loc[self.benchmark_symbol, "return_5d"]
         bench_20d = self.benchmark_data.loc[self.benchmark_symbol, "return_20d"]
-        sector_bench_5d = self.stock_data.loc[symbol, "sector_relative_5d"]
-        sector_bench_20d = self.stock_data.loc[symbol, "sector_relative_20d"]
         return MomentumSnapshot(
             symbol=symbol,
             signal_day=self.signal_day,
-            return_1d=self.get(symbol, "return_1d"),
+
             return_5d=self.get(symbol, "return_5d"),
             return_20d=self.get(symbol, "return_20d"),
             return_60d=self.get(symbol, "return_60d"),
             return_252d=self.get(symbol, "return_252d"),
+
+            #momentum_composite_percentile
+            momentum_consistency=sum([
+                self.get(symbol, "return_5d") > 0,
+                self.get(symbol, "return_20d") > 0,
+                self.get(symbol, "return_60d") > 0,
+                self.get(symbol, "return_252d") > 0,
+            ]),
+
             excess_return_5d=self.get(symbol, "return_5d") - bench_5d,
             excess_return_20d=self.get(symbol, "return_20d") - bench_20d,
+
             sector_relative_5d=self.get(symbol, "sector_relative_5d"),
             sector_relative_20d=self.get(symbol, "sector_relative_20d"),
             sector=self.get(symbol, "sector"),
+
             price=self.get(symbol, "close"),
+            above_sma_200=self.get(symbol, "above_sma_200"),
+            pct_from_52w_high=self.get(symbol, "pct_from_52w_high"),
+            new_52w_high=self.get(symbol, "new_52w_high"),
+
+            r_squared_60d=self.get(symbol, "r_squared_60d"),
+            trend_slope_60d=self.get(symbol, "trend_slope_60d"),
+            slope_x_r2=self.get(symbol, "slope_x_r2"),
+            drawdown_from_recent_high=self.get(symbol, "drawdown_from_recent_high"),
+
+            momentum_accel_20_60=self.get(symbol, "momentum_accel_20_60"),
+            momentum_accel_5_20=self.get(symbol, "momentum_accel_5_20"),
+
+            volume_ratio=self.get(symbol, "volume_ratio"),
+            dollar_volume_20d_avg=self.get(symbol, "dollar_volume_20d_avg"),
+
+            volatility_20=self.get(symbol, "volatility_20"),
+            atr_pct=self.get(symbol, "atr_pct"),
+            vol_adjusted_momentum=self.get(symbol, "vol_adjusted_momentum"),
         )
 
 

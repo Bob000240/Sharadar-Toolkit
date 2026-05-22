@@ -66,9 +66,11 @@ def get_OHLCV(
 
     params = {"symbols": symbols}
 
-    if start_date is not None and end_date is not None:
-        query += " AND date BETWEEN :start_date AND :end_date"
+    if start_date is not None:
+        query += " AND date >= :start_date"
         params["start_date"] = start_date
+    if end_date is not None:
+        query += " AND date <= :end_date"
         params["end_date"] = end_date
 
     query += " ORDER BY date ASC;"
@@ -76,18 +78,18 @@ def get_OHLCV(
     return pd.read_sql_query(text(query), engine, params=params)
 
 
-def get_latest_OHLCV(symbol: str, date: pd.Timestamp):
+def get_latest_OHLCV(symbols: str | list[str], signal_day: pd.Timestamp):
     engine = get_connection()
+    symbols = [symbols] if isinstance(symbols, str) else symbols
 
     query = """
-        SELECT symbol, date, open, high, low, close, volume
+        SELECT DISTINCT ON (symbol) symbol, date, open, high, low, close, volume
         FROM OHLCV_data
-        WHERE symbol = :symbol 
-            AND date <= :date
-        ORDER BY date DESC
-        LIMIT 1;
+        WHERE symbol = ANY(:symbols)
+            AND date <= :signal_day
+        ORDER BY symbol, date DESC
     """
 
-    params = {"symbol": symbol, "date": date}
+    params = {"symbols": symbols, "signal_day": signal_day}
 
     return pd.read_sql_query(text(query), engine, params=params)
