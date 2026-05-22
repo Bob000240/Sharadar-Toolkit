@@ -5,7 +5,7 @@ from sqlalchemy import text
 
 def create_indicators_table():
     engine = get_connection()
-    
+
     query = text("""
         CREATE TABLE IF NOT EXISTS indicators_data (
             symbol TEXT NOT NULL,
@@ -79,7 +79,11 @@ def insert_indicators(df: pd.DataFrame):
         conn.execute(query, records)
 
 
-def get_indicators(symbol: str | list[str], start_date: pd.Timestamp | None = None, end_date: pd.Timestamp | None = None):
+def get_indicators(
+    symbol: str | list[str],
+    start_date: pd.Timestamp | None = None,
+    end_date: pd.Timestamp | None = None,
+):
     engine = get_connection()
 
     symbols = [symbol] if isinstance(symbol, str) else symbol
@@ -109,7 +113,8 @@ def get_indicators(symbol: str | list[str], start_date: pd.Timestamp | None = No
     df["date"] = pd.to_datetime(df["date"])
     return df
 
-def get_latest_indicators(symbol : str, signal_day : pd.Timestamp):
+
+def get_latest_indicators(symbol: str, signal_day: pd.Timestamp):
     engine = get_connection()
 
     query = """
@@ -129,7 +134,7 @@ def get_latest_indicators(symbol : str, signal_day : pd.Timestamp):
 
     params = {
         "symbol": symbol,
-        "signal_day": signal_day.date() if hasattr(signal_day, "date") else signal_day
+        "signal_day": signal_day.date() if hasattr(signal_day, "date") else signal_day,
     }
 
     return pd.read_sql_query(text(query), engine, params=params)

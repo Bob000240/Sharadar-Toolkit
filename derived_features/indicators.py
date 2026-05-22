@@ -1,7 +1,8 @@
 import pandas as pd
 import pandas_ta as ta
 
-def compute_indicators(df : pd.DataFrame):
+
+def compute_indicators(df: pd.DataFrame):
     df = df.copy()
 
     df["return_1d"] = df["close"].pct_change()
@@ -17,9 +18,7 @@ def compute_indicators(df : pd.DataFrame):
     df["sma_50"] = ta.sma(df["close"], length=50)
     df["sma_200"] = ta.sma(df["close"], length=200)
     df["above_sma_200"] = (
-        df["close"].notna()
-        & df["sma_200"].notna()
-        & (df["close"] > df["sma_200"])
+        df["close"].notna() & df["sma_200"].notna() & (df["close"] > df["sma_200"])
     )
 
     # Relative volume
@@ -36,17 +35,17 @@ def compute_indicators(df : pd.DataFrame):
     df["macd_signal"] = macd["MACDs_12_26_9"]
     df["macd_hist"] = macd["MACDh_12_26_9"]
 
-    #ATR
+    # ATR
     df["atr_14"] = ta.atr(df["high"], df["low"], df["close"], length=14)
     df["atr_pct"] = df["atr_14"] / df["close"]
 
     # Volatility
     df["volatility_20"] = df["return_1d"].rolling(20).std()
 
-    #high
+    # high
     df["high_52"] = df["high"].rolling(252).max()
 
-    #volume based
+    # volume based
     df["obv"] = ta.obv(df["close"], df["volume"])
     df["dollar_volume"] = df["close"] * df["volume"]
     df["dollar_volume_20d_avg"] = df["dollar_volume"].rolling(20).mean()

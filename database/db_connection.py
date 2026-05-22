@@ -4,6 +4,7 @@ from sqlalchemy import create_engine
 
 load_dotenv()
 
+
 def get_connection():
     user = os.getenv("DB_USER", "postgres")
     password = os.getenv("DB_PASSWORD")

@@ -19,7 +19,9 @@ class MarketData:
         self.MarketDataClient = StockHistoricalDataClient(API_KEY, SECRET_KEY)
         self.ohlcv = pd.DataFrame()
 
-    def get_OHLCV(self, symbols: list[str] | str, start_date: pd.Timestamp, end_date: pd.Timestamp):
+    def get_OHLCV(
+        self, symbols: list[str] | str, start_date: pd.Timestamp, end_date: pd.Timestamp
+    ):
         if isinstance(symbols, str):
             symbols = [symbols]
 
@@ -37,15 +39,17 @@ class MarketData:
 
         for symbol in symbols:
             for item in raw.data[symbol]:
-                data_list.append({
-                    "symbol": item.symbol,
-                    "date": item.timestamp.date(),
-                    "open": item.open,
-                    "high": item.high,
-                    "low": item.low,
-                    "close": item.close,
-                    "volume": item.volume,
-                })
+                data_list.append(
+                    {
+                        "symbol": item.symbol,
+                        "date": item.timestamp.date(),
+                        "open": item.open,
+                        "high": item.high,
+                        "low": item.low,
+                        "close": item.close,
+                        "volume": item.volume,
+                    }
+                )
 
         self.ohlcv = pd.DataFrame(data_list)
         self.ohlcv["date"] = pd.to_datetime(self.ohlcv["date"])

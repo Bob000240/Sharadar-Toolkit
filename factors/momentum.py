@@ -7,9 +7,11 @@ import pandas as pd
 from dataclasses import dataclass
 from textwrap import dedent
 
+
 @dataclass
 class MomentumSnapshot:
     """Raw momentum data for a single stock, formatted for AI agent interpretation."""
+
     symbol: str
     signal_day: str
 
@@ -42,11 +44,11 @@ class MomentumSnapshot:
     macd: float
     macd_signal: float
     macd_hist: float
-    macd_crossover: str   # "bullish", "bearish", "neutral"
+    macd_crossover: str  # "bullish", "bearish", "neutral"
 
     # Volume
-    volume_ratio: float   # 10d avg / 50d avg
-    obv_trend: str        # "rising", "falling", "flat"
+    volume_ratio: float  # 10d avg / 50d avg
+    obv_trend: str  # "rising", "falling", "flat"
     dollar_volume_20d_avg: float
 
     # Risk
@@ -54,7 +56,7 @@ class MomentumSnapshot:
     atr_pct: float
 
     # Universe context
-    return_5d_percentile: float    # 0-100, where stock ranks in S&P 500
+    return_5d_percentile: float  # 0-100, where stock ranks in S&P 500
     return_20d_percentile: float
     return_252d_percentile: float
     rsi_percentile: float
@@ -64,7 +66,9 @@ class MomentumSnapshot:
         Returns a plain-English summary of all momentum signals for the AI agent.
         Designed to be interpretable without any quant background.
         """
-        sma_trend = _describe_sma_trend(self.price, self.sma_20, self.sma_50, self.sma_200)
+        sma_trend = _describe_sma_trend(
+            self.price, self.sma_20, self.sma_50, self.sma_200
+        )
         high_proximity = f"{self.pct_from_52w_high * 100:.1f}% below 52-week high"
 
         return dedent(f"""
@@ -111,13 +115,21 @@ class MomentumSnapshot:
 
 
 class MomentumFactorsModel:
-    def __init__(self, signal_day: pd.Timestamp, stock_symbols: list[str] | str, benchmark_symbol: str, etf_symbols : list[str] | str):
+    def __init__(
+        self,
+        signal_day: pd.Timestamp,
+        stock_symbols: list[str] | str,
+        benchmark_symbol: str,
+        etf_symbols: list[str] | str,
+    ):
         self.signal_day = signal_day
         self.stock_symbols = stock_symbols
         self.benchmark_symbol = benchmark_symbol
         self.etf_symbols = etf_symbols
 
-        self.all_symbols = self.stock_symbols + [self.benchmark_symbol] + self.etf_symbols
+        self.all_symbols = (
+            self.stock_symbols + [self.benchmark_symbol] + self.etf_symbols
+        )
 
         self.stock_data = None
         self.benchmark_data = None
@@ -126,14 +138,18 @@ class MomentumFactorsModel:
 
     def _load_data(self):
         # One DB call for everything
-        all_indicator_df = indicator_repo.get_indicators(self.all_symbols, start_date=None, end_date=self.signal_day)
+        all_indicator_df = indicator_repo.get_indicators(
+            self.all_symbols, start_date=None, end_date=self.signal_day
+        )
         all_ohlcv_df = market_repo.get_OHLCV(self.all_symbols, end_date=self.signal_day)
 
         if all_indicator_df.empty:
             raise ValueError("No indicator data found.")
 
         latest = all_indicator_df.sort_values("date").groupby("symbol").last()
-        latest_close = all_ohlcv_df.sort_values("date").groupby("symbol")["close"].last()
+        latest_close = (
+            all_ohlcv_df.sort_values("date").groupby("symbol")["close"].last()
+        )
         latest["close"] = latest_close
 
         # Split after fetching
@@ -141,9 +157,14 @@ class MomentumFactorsModel:
         self.benchmark_data = latest.loc[[self.benchmark_symbol]]
         self.etf_data = latest.loc[self.etf_symbols]
 
-        sector_df = self.get_sector_relative_returns(self.stock_symbols, self.signal_day)
-        self.stock_data = self.stock_data.join(sector_df.set_index("symbol")[["sector", "sector_relative_5d", "sector_relative_20d"]])
-
+        sector_df = self.get_sector_relative_returns(
+            self.stock_symbols, self.signal_day
+        )
+        self.stock_data = self.stock_data.join(
+            sector_df.set_index("symbol")[
+                ["sector", "sector_relative_5d", "sector_relative_20d"]
+            ]
+        )
 
         print("Data loaded successfully.")
         print(f"Stock data shape: {self.stock_data.shape}")
@@ -202,51 +223,58 @@ class MomentumFactorsModel:
         params = {
             "symbols": symbols,
             "etf_symbols": self.etf_symbols,
-            "signal_day": signal_day.date()
+            "signal_day": signal_day.date(),
         }
 
         return pd.read_sql_query(query, engine, params=params)
-        
-    def get(self, symbol : str, col : str):
+
+    def get(self, symbol: str, col: str):
         if symbol not in self.stock_data.index:
             raise ValueError()
         if col not in self.stock_data.columns:
             raise ValueError()
         return self.stock_data.loc[symbol, col]
-    
-    def build_snapshot(self, symbol : str):
+
+    def build_snapshot(self, symbol: str):
         bench_5d = self.benchmark_data.loc[self.benchmark_symbol, "return_5d"]
         bench_20d = self.benchmark_data.loc[self.benchmark_symbol, "return_20d"]
         sector_bench_5d = self.stock_data.loc[symbol, "sector_relative_5d"]
         sector_bench_20d = self.stock_data.loc[symbol, "sector_relative_20d"]
         return MomentumSnapshot(
             symbol=symbol,
-            signal_day = self.signal_day,
-            return_1d = self.get(symbol, "return_1d"),
-            return_5d = self.get(symbol, "return_5d"),
-            return_20d = self.get(symbol, "return_20d"),
-            return_60d = self.get(symbol, "return_60d"),
-            return_252d = self.get(symbol, "return_252d"),
-
-            excess_return_5d = self.get(symbol, "return_5d") - bench_5d,
-            excess_return_20d = self.get(symbol, "return_20d") - bench_20d,
-
-            sector_relative_5d = self.get(symbol, "sector_relative_5d"),
-            sector_relative_20d = self.get(symbol, "sector_relative_20d")
-            
+            signal_day=self.signal_day,
+            return_1d=self.get(symbol, "return_1d"),
+            return_5d=self.get(symbol, "return_5d"),
+            return_20d=self.get(symbol, "return_20d"),
+            return_60d=self.get(symbol, "return_60d"),
+            return_252d=self.get(symbol, "return_252d"),
+            excess_return_5d=self.get(symbol, "return_5d") - bench_5d,
+            excess_return_20d=self.get(symbol, "return_20d") - bench_20d,
+            sector_relative_5d=self.get(symbol, "sector_relative_5d"),
+            sector_relative_20d=self.get(symbol, "sector_relative_20d"),
+            sector=self.get(symbol, "sector"),
+            price=self.get(symbol, "close"),
         )
 
 
-
-    
-
 if __name__ == "__main__":
     symbols = ["NVDA", "AAPL", "MSFT", "AMZN", "GOOGL"]
-    etf_symbol = [ "XLK" , "XLY", "XLC", "XLF", "XLV", "XLI", "XLE", "XLB", "XLRE", "XLU", "XLP"]
+    etf_symbol = [
+        "XLK",
+        "XLY",
+        "XLC",
+        "XLF",
+        "XLV",
+        "XLI",
+        "XLE",
+        "XLB",
+        "XLRE",
+        "XLU",
+        "XLP",
+    ]
     benchmark = "SPY"
     signal_day = pd.Timestamp.today()
     print(signal_day)
 
     agent = MomentumFactorsModel(signal_day, symbols, benchmark, etf_symbol)
     print(agent.get("NVDA", "return_5d"))
-    
