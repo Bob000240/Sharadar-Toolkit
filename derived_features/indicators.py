@@ -78,7 +78,9 @@ def compute_indicators(df: pd.DataFrame):
 
     # Drawdown from recent high
     df["rolling_20d_high"] = df["close"].rolling(20).max()
-    df["drawdown_from_recent_high"] = (df["close"] - df["rolling_20d_high"]) / df["rolling_20d_high"]
+    df["drawdown_from_recent_high"] = (df["close"] - df["rolling_20d_high"]) / df[
+        "rolling_20d_high"
+    ]
 
     # Acceleration
     df["momentum_accel_20_60"] = df["return_20d"] - df["return_60d"]
