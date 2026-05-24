@@ -4,15 +4,16 @@ import database.market_data_repository as market_repo
 
 import pandas as pd
 from dataclasses import dataclass
+from signals.sig_base import SignalSnapshot, SignalModel
 
 
 @dataclass
-class MomentumSnapshot:
+class MomentumSnapshot(SignalSnapshot):
     """Raw momentum data for a single stock."""
 
     # Identity
     symbol: str
-    signal_day: str
+    signal_day: pd.Timestamp
 
     # Absolute momentum
     return_5d: float
@@ -135,7 +136,7 @@ class MomentumSnapshot:
         return "\n".join(lines)
 
 
-class MomentumFactorsModel:
+class MomentumFactorsModel(SignalModel):
     def __init__(
         self,
         signal_day: pd.Timestamp,

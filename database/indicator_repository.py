@@ -133,11 +133,6 @@ def insert_indicators(df: pd.DataFrame):
     with engine.begin() as conn:
         conn.execute(query, records)
 
-
-def _select_query(where_clause: str) -> str:
-    return f"SELECT {_COL_LIST} FROM indicators_data WHERE {where_clause}"
-
-
 def get_indicators(
     symbol: str | list[str],
     start_date: pd.Timestamp | None = None,
@@ -146,19 +141,25 @@ def get_indicators(
     engine = get_connection()
     symbols = [symbol] if isinstance(symbol, str) else symbol
 
-    query = _select_query("symbol IN :symbols")
-    params: dict = {"symbols": symbols}
+    sql = f"""
+        SELECT {_COL_LIST}
+        FROM indicators_data
+        WHERE symbol IN :symbols
+    """
+
+    params = {"symbols": symbols}
 
     if start_date is not None:
-        query += " AND date >= :start_date"
+        sql += " AND date >= :start_date"
         params["start_date"] = start_date
+
     if end_date is not None:
-        query += " AND date <= :end_date"
+        sql += " AND date <= :end_date"
         params["end_date"] = end_date
 
-    query += " ORDER BY symbol ASC, date ASC;"
+    sql += " ORDER BY symbol ASC, date ASC"
 
-    stmt = text(query).bindparams(bindparam("symbols", expanding=True))
+    stmt = text(sql).bindparams(bindparam("symbols", expanding=True))
 
     df = pd.read_sql_query(stmt, engine, params=params)
 
@@ -166,7 +167,6 @@ def get_indicators(
         df["date"] = pd.to_datetime(df["date"])
 
     return df
-
 
 def get_latest_indicators(symbols: str | list[str], signal_day: pd.Timestamp):
     engine = get_connection()

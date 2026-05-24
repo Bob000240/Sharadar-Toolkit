@@ -25,6 +25,7 @@ def drop_sector_mapping_table():
 
 
 def insert_sector_mapping(df: pd.DataFrame):
+    df = df.where(pd.notnull(df), None)
     engine = get_connection()
 
     query = text("""
