@@ -4,13 +4,9 @@ import database.market_data_repository as market_repo
 
 import pandas as pd
 from dataclasses import dataclass
-from signals.sig_base import SignalSnapshot, SignalModel
-
 
 @dataclass
-class MomentumSnapshot(SignalSnapshot):
-    """Raw momentum data for a single stock."""
-
+class MomentumSnapshot:
     # Identity
     symbol: str
     signal_day: pd.Timestamp
@@ -94,14 +90,14 @@ class MomentumSnapshot(SignalSnapshot):
         lines = [
             f"MOMENTUM ANALYSIS - {self.symbol} | Signal date: {self.signal_day}",
             f"Sector: {self.sector} | Current price: ${self.price:.2f}",
+            f"Composite rank: {rank(self.momentum_composite_percentile)} - average across all four windows",
+            f"Consistency:    {self.momentum_consistency}/4 periods positive (5d / 20d / 60d / 252d)",
             "",
             "--- ABSOLUTE MOMENTUM (raw price performance) ---",
             f"  5-day return:   {pct(self.return_5d)}   (universe rank: {rank(self.return_5d_percentile)})",
             f" 20-day return:   {pct(self.return_20d)}   (universe rank: {rank(self.return_20d_percentile)})",
             f" 60-day return:   {pct(self.return_60d)}   (universe rank: {rank(self.return_60d_percentile)})",
             f"252-day return:   {pct(self.return_252d)}   (universe rank: {rank(self.return_252d_percentile)})",
-            f"  Composite rank: {rank(self.momentum_composite_percentile)} - average across all four windows",
-            f"  Consistency:    {self.momentum_consistency}/4 periods positive (5d / 20d / 60d / 252d)",
             "",
             "--- BENCHMARK-RELATIVE MOMENTUM (vs S&P 500) ---",
             f"  5-day excess return:  {pct(self.excess_return_5d)}  (positive = outperforming the market)",
@@ -136,7 +132,7 @@ class MomentumSnapshot(SignalSnapshot):
         return "\n".join(lines)
 
 
-class MomentumFactorsModel(SignalModel):
+class MomentumFactorsModel:
     def __init__(
         self,
         signal_day: pd.Timestamp,
