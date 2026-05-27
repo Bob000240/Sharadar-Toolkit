@@ -1,72 +1,165 @@
+import database.macro_repository as macro_repo
+import database.indicator_repository as indicator_repo
 import pandas as pd
 from dataclasses import dataclass
 
 
+def _classify_regime(
+    vix: float,
+    spy_above_sma_200: bool,
+    yield_curve: float,
+    credit_spread_hy: float,
+) -> str:
+    risk_off_signals = sum([
+        vix > 25,
+        not spy_above_sma_200,
+        yield_curve < 0,
+        credit_spread_hy > 5.0,
+    ])
+    if risk_off_signals == 0:
+        return "risk_on"
+    elif risk_off_signals >= 3:
+        return "risk_off"
+    else:
+        return "caution"
+
+
 @dataclass
 class MacroSnapshot:
+    # Identity
     signal_day: pd.Timestamp
 
-    # Market regime
-    spy_above_200d_ma: bool
-    vix_level: float
-    vix_percentile_1y: float             # 0.0–1.0; where current VIX sits vs trailing 252 trading days
-    market_breadth_pct_above_200d: float # fraction of S&P 500 stocks above their 200d MA (0.0–1.0)
+    # Interest rates
+    yield_10y: float
+    yield_2y: float
+    yield_curve: float      # 10y - 2y; positive = normal, negative = inverted
+    real_yield: float       # 10y yield - CPI YoY
 
-    # Rates & credit
-    yield_10y: float                     # 10-year Treasury yield
-    yield_curve_2y10y: float             # 10Y minus 2Y; negative = inverted = late-cycle
-    hy_credit_spread: float              # high-yield OAS in bps; widening = risk-off, flight to quality
+    # Economic indicators
+    cpi_yoy: float
+    unemployment_rate: float
 
-    # Defensive sector rotation
-    defensive_rel_strength_20d: float    # avg excess return of XLV + XLP + XLU vs SPY over 20d
-    defensive_rel_strength_60d: float    # same over 60d; persistent = structural rotation into defensives
+    # Risk indicators
+    credit_spread_hy: float     # high-yield spread (%)
+    credit_spread_ig: float     # investment-grade spread (%)
+    vix: float
+    spy_above_sma_200: bool
 
-    # Market-wide earnings revision context
-    sp500_revision_breadth: float        # fraction of S&P 500 stocks with positive EPS revisions (0.0–1.0)
+    # Regime
+    risk_regime: str    # "risk_on", "caution", "risk_off"
+
+    @staticmethod
+    def _pct(v: float) -> str:
+        return f"{v:+.2f}%"
+
+    def _fmt_header(self) -> str:
+        regime_note = {
+            "risk_on":  "All clear — low volatility, positive trend, tight spreads.",
+            "caution":  "Mixed signals — monitor closely before new entries.",
+            "risk_off": "Elevated risk — defensive posture recommended.",
+        }.get(self.risk_regime, "")
+        return "\n".join([
+            f"MACRO SNAPSHOT | Signal date: {self.signal_day}",
+            f"Risk regime: {self.risk_regime.upper()}  — {regime_note}",
+        ])
+
+    def _fmt_rates(self) -> str:
+        curve_note = "normal (positive slope)" if self.yield_curve >= 0 else "INVERTED (recessionary signal)"
+        return "\n".join([
+            "--- INTEREST RATES ---",
+            f"  10-year Treasury yield:   {self.yield_10y:.2f}%",
+            f"   2-year Treasury yield:   {self.yield_2y:.2f}%",
+            f"  Yield curve (10y - 2y):   {self.yield_curve:+.2f}%  ({curve_note})",
+            f"  Real yield (10y - CPI):   {self.real_yield:+.2f}%  (positive = restrictive for growth)",
+        ])
+
+    def _fmt_economy(self) -> str:
+        return "\n".join([
+            "--- ECONOMIC CONDITIONS ---",
+            f"  CPI (year-over-year):      {self.cpi_yoy:.1f}%  (Fed target: ~2%)",
+            f"  Unemployment rate:         {self.unemployment_rate:.1f}%",
+        ])
+
+    def _fmt_risk_indicators(self) -> str:
+        vix_note = "low" if self.vix < 20 else ("elevated" if self.vix < 30 else "HIGH — fear dominant")
+        hy_note = "tight" if self.credit_spread_hy < 4 else ("widening" if self.credit_spread_hy < 6 else "WIDE — stress signal")
+        return "\n".join([
+            "--- RISK INDICATORS ---",
+            f"  VIX (fear index):          {self.vix:.1f}  ({vix_note}; <20 = calm, >30 = fear)",
+            f"  High-yield credit spread:  {self.credit_spread_hy:.2f}%  ({hy_note})",
+            f"  Inv-grade credit spread:   {self.credit_spread_ig:.2f}%",
+            f"  SPY above 200-day SMA:     {self.spy_above_sma_200}  (True = broad market uptrend intact)",
+        ])
+
+    def _fmt_regime_assessment(self) -> str:
+        signals = {
+            "Yield curve":      "positive" if self.yield_curve >= 0 else "negative",
+            "VIX level":        "low" if self.vix < 20 else ("moderate" if self.vix < 30 else "high"),
+            "Credit spreads":   "tight" if self.credit_spread_hy < 4 else "wide",
+            "SPY trend":        "above SMA200" if self.spy_above_sma_200 else "below SMA200",
+            "Real yield":       "negative (accommodative)" if self.real_yield < 0 else "positive (restrictive)",
+        }
+        lines = ["--- REGIME SIGNAL SUMMARY ---"]
+        for label, state in signals.items():
+            lines.append(f"  {label:<22}: {state}")
+        return "\n".join(lines)
 
     def to_agent_prompt(self) -> str:
-        def pct(v: float) -> str:
-            return f"{v:+.1%}"
+        return "\n\n".join([
+            self._fmt_header(),
+            self._fmt_rates(),
+            self._fmt_economy(),
+            self._fmt_risk_indicators(),
+            self._fmt_regime_assessment(),
+        ])
 
-        def bps(v: float) -> str:
-            return f"{v:.0f}bps"
 
-        regime = "RISK-ON" if self.spy_above_200d_ma else "RISK-OFF"
-        vix_context = (
-            "elevated" if self.vix_percentile_1y > 0.7
-            else "low" if self.vix_percentile_1y < 0.3
-            else "moderate"
-        )
-        curve_context = "INVERTED (late-cycle)" if self.yield_curve_2y10y < 0 else "normal"
-        breadth_context = (
-            "weak" if self.market_breadth_pct_above_200d < 0.4
-            else "strong" if self.market_breadth_pct_above_200d > 0.65
-            else "mixed"
-        )
-        defensive_bias = (
-            "rotating INTO defensives" if self.defensive_rel_strength_20d > 0
-            else "rotating OUT of defensives"
+class MacroFactorsModel:
+    def __init__(self, signal_day: pd.Timestamp):
+        self.signal_day = signal_day
+        self._macro = None
+        self._spy_above_sma_200 = False
+        self._load_data()
+
+    def _load_data(self):
+        macro_df = macro_repo.get_latest_macro(self.signal_day)
+        spy_df = indicator_repo.get_latest_indicators(["SPY"], self.signal_day)
+
+        if macro_df.empty:
+            raise ValueError(f"No macro data found on or before {self.signal_day}")
+
+        self._macro = macro_df.iloc[0]
+
+        if not spy_df.empty:
+            spy_row = spy_df[spy_df["symbol"] == "SPY"]
+            if not spy_row.empty:
+                self._spy_above_sma_200 = bool(spy_row["above_sma_200"].iloc[0])
+
+    def build_snapshot(self) -> MacroSnapshot:
+        m = self._macro
+        return MacroSnapshot(
+            signal_day=self.signal_day,
+            yield_10y=m["yield_10y"],
+            yield_2y=m["yield_2y"],
+            yield_curve=m["yield_curve"],
+            real_yield=m["real_yield"],
+            cpi_yoy=m["cpi_yoy"],
+            unemployment_rate=m["unemployment_rate"],
+            credit_spread_hy=m["credit_spread_hy"],
+            credit_spread_ig=m["credit_spread_ig"],
+            vix=m["vix"],
+            spy_above_sma_200=self._spy_above_sma_200,
+            risk_regime=_classify_regime(
+                m["vix"],
+                self._spy_above_sma_200,
+                m["yield_curve"],
+                m["credit_spread_hy"],
+            ),
         )
 
-        lines = [
-            f"MACRO SNAPSHOT | Signal date: {self.signal_day}",
-            "",
-            "--- MARKET REGIME ---",
-            f"  SPY vs 200d MA:  {regime}  (SPY {'above' if self.spy_above_200d_ma else 'below'} long-term trend)",
-            f"  VIX level:       {self.vix_level:.1f}  ({vix_context}, {self.vix_percentile_1y:.0%} percentile vs trailing year)",
-            f"  Market breadth:  {self.market_breadth_pct_above_200d:.0%} of S&P 500 above 200d MA  ({breadth_context})",
-            "",
-            "--- RATES & CREDIT ---",
-            f"  10Y Treasury yield:    {self.yield_10y:.2%}",
-            f"  Yield curve (10Y-2Y):  {self.yield_curve_2y10y:+.2%}  ({curve_context})",
-            f"  HY credit spread:      {bps(self.hy_credit_spread)}  (wide = risk-off; quality stocks benefit)",
-            "",
-            "--- DEFENSIVE ROTATION ---",
-            f"  20d defensive vs SPY:  {pct(self.defensive_rel_strength_20d)}  ({defensive_bias} short-term)",
-            f"  60d defensive vs SPY:  {pct(self.defensive_rel_strength_60d)}  (persistent = structural shift)",
-            "",
-            "--- EARNINGS REVISION CONTEXT ---",
-            f"  S&P 500 revision breadth:  {self.sp500_revision_breadth:.0%} of stocks with positive EPS revisions",
-            f"  (interpret individual stock revisions against this market-wide baseline)",
-        ]
-        return "\n".join(lines)
+
+if __name__ == "__main__":
+    signal_day = pd.Timestamp.today()
+    model = MacroFactorsModel(signal_day)
+    snapshot = model.build_snapshot()
+    print(snapshot.to_agent_prompt())

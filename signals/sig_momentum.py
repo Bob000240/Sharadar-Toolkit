@@ -34,6 +34,7 @@ class MomentumSnapshot:
     # Trend / structure
     price: float
     above_sma_200: bool
+    above_sma_50: bool
     pct_from_52w_high: float
     new_52w_high: bool
 
@@ -76,60 +77,91 @@ class MomentumSnapshot:
     return_60d_percentile: float
     return_252d_percentile: float
 
-    def to_agent_prompt(self):
-        """
-        Returns a plain-English summary of all momentum signals for the AI agent.
-        Designed to be most LLM token friendly using NLP.
-        """
-        def pct(v: float):
-            return f"{v:+.1%}"
+    @staticmethod
+    def _pct(v: float) -> str:
+        return f"{v:+.1%}"
 
-        def rank(v: float):
-            return f"{v:.0f}th percentile"
+    @staticmethod
+    def _rank(v: float) -> str:
+        return f"{v:.0f}th percentile"
 
-        lines = [
+    def _fmt_header(self) -> str:
+        return "\n".join([
             f"MOMENTUM ANALYSIS - {self.symbol} | Signal date: {self.signal_day}",
             f"Sector: {self.sector} | Current price: ${self.price:.2f}",
-            f"Composite rank: {rank(self.momentum_composite_percentile)} - average across all four windows",
+            f"Composite rank: {self._rank(self.momentum_composite_percentile)} - average across all four windows",
             f"Consistency:    {self.momentum_consistency}/4 periods positive (5d / 20d / 60d / 252d)",
-            "",
+        ])
+
+    def _fmt_absolute_momentum(self) -> str:
+        return "\n".join([
             "--- ABSOLUTE MOMENTUM (raw price performance) ---",
-            f"  5-day return:   {pct(self.return_5d)}   (universe rank: {rank(self.return_5d_percentile)})",
-            f" 20-day return:   {pct(self.return_20d)}   (universe rank: {rank(self.return_20d_percentile)})",
-            f" 60-day return:   {pct(self.return_60d)}   (universe rank: {rank(self.return_60d_percentile)})",
-            f"252-day return:   {pct(self.return_252d)}   (universe rank: {rank(self.return_252d_percentile)})",
-            "",
+            f"  5-day return:   {self._pct(self.return_5d)}   (universe rank: {self._rank(self.return_5d_percentile)})",
+            f" 20-day return:   {self._pct(self.return_20d)}   (universe rank: {self._rank(self.return_20d_percentile)})",
+            f" 60-day return:   {self._pct(self.return_60d)}   (universe rank: {self._rank(self.return_60d_percentile)})",
+            f"252-day return:   {self._pct(self.return_252d)}   (universe rank: {self._rank(self.return_252d_percentile)})",
+        ])
+
+    def _fmt_benchmark_relative(self) -> str:
+        return "\n".join([
             "--- BENCHMARK-RELATIVE MOMENTUM (vs S&P 500) ---",
-            f"  5-day excess return:  {pct(self.excess_return_5d)}  (positive = outperforming the market)",
-            f" 20-day excess return:  {pct(self.excess_return_20d)}",
-            "",
+            f"  5-day excess return:  {self._pct(self.excess_return_5d)}  (positive = outperforming the market)",
+            f" 20-day excess return:  {self._pct(self.excess_return_20d)}",
+        ])
+
+    def _fmt_sector_relative(self) -> str:
+        return "\n".join([
             "--- SECTOR-RELATIVE MOMENTUM (vs sector ETF) ---",
-            f"  5-day vs sector:  {pct(self.sector_relative_5d)}  (positive = outperforming sector peers)",
-            f" 20-day vs sector:  {pct(self.sector_relative_20d)}",
-            "",
+            f"  5-day vs sector:  {self._pct(self.sector_relative_5d)}  (positive = outperforming sector peers)",
+            f" 20-day vs sector:  {self._pct(self.sector_relative_20d)}",
+        ])
+
+    def _fmt_trend_structure(self) -> str:
+        return "\n".join([
             "--- TREND STRUCTURE ---",
             f"  Above 200-day moving average: {self.above_sma_200}  (True = long-term uptrend intact)",
-            f"  Distance from 52-week high:   {pct(self.pct_from_52w_high)}  (0% = at new high)",
+            f"  Above 50-day moving average:  {self.above_sma_50}  (True = medium-term uptrend intact)",
+            f"  Distance from 52-week high:   {self._pct(self.pct_from_52w_high)}  (0% = at new high)",
             f"  New 52-week high today:        {self.new_52w_high}",
             f"  60-day trend R^2:               {self.r_squared_60d:.2f}  (0 = chaotic, 1 = perfectly linear climb)",
-            f"  60-day annualized trend slope: {pct(self.trend_slope_60d)} per year",
+            f"  60-day annualized trend slope: {self._pct(self.trend_slope_60d)} per year",
             f"  Trend quality score (slope*R^2):{self.slope_x_r2:.3f}  (higher = stronger, smoother uptrend)",
-            f"  Drawdown from 20-day high:     {pct(self.drawdown_from_recent_high)}  (0% = at recent peak)",
-            "",
+            f"  Drawdown from 20-day high:     {self._pct(self.drawdown_from_recent_high)}  (0% = at recent peak)",
+        ])
+
+    def _fmt_momentum_acceleration(self) -> str:
+        return "\n".join([
             "--- MOMENTUM ACCELERATION ---",
-            f"  Short-term (5d vs 20d):   {pct(self.momentum_accel_5_20)}  (positive = recent acceleration)",
-            f"  Medium-term (20d vs 60d): {pct(self.momentum_accel_20_60)}  (positive = broadening momentum)",
-            "",
+            f"  Short-term  (5d vs 20d):  {self._pct(self.momentum_accel_5_20)}  (positive = recent acceleration)",
+            f"  Medium-term (20d vs 60d): {self._pct(self.momentum_accel_20_60)}  (positive = broadening momentum)",
+        ])
+
+    def _fmt_volume_liquidity(self) -> str:
+        return "\n".join([
             "--- VOLUME & LIQUIDITY ---",
-            f"  Volume ratio (vs 50-day avg): {self.volume_ratio:.2f}x  (>1 = above-average participation)",
-            f"  Avg daily dollar volume (20d): ${self.dollar_volume_20d_avg:,.0f}",
-            "",
+            f"  Volume ratio (vs 50-day avg):  {self.volume_ratio:.2f}x  (>1 = above-average participation)",
+            f"  Avg daily dollar volume (20d):  ${self.dollar_volume_20d_avg:,.0f}",
+        ])
+
+    def _fmt_risk_volatility(self) -> str:
+        return "\n".join([
             "--- RISK & VOLATILITY ---",
             f"  20-day realised volatility (annualised): {self.volatility_20:.1%}",
             f"  ATR as % of price:                       {self.atr_pct:.2%}",
             f"  Risk-adjusted momentum (return / vol):   {self.vol_adjusted_momentum:.2f}",
-        ]
-        return "\n".join(lines)
+        ])
+
+    def to_agent_prompt(self) -> str:
+        return "\n\n".join([
+            self._fmt_header(),
+            self._fmt_absolute_momentum(),
+            self._fmt_benchmark_relative(),
+            self._fmt_sector_relative(),
+            self._fmt_trend_structure(),
+            self._fmt_momentum_acceleration(),
+            self._fmt_volume_liquidity(),
+            self._fmt_risk_volatility(),
+        ])
 
 
 class MomentumFactorsModel:
@@ -167,6 +199,7 @@ class MomentumFactorsModel:
 
         all_indicators["close"] = all_OHLCV["close"]
         all_indicators["sector"] = sector_mapping["sector"]
+        all_indicators["above_sma_50"] = all_indicators["close"] > all_indicators["sma_50"]
 
         self.stock_data = all_indicators.loc[self.stock_symbols].copy()
         self.benchmark_data = all_indicators.loc[[self.benchmark_symbol]].copy()
@@ -242,6 +275,7 @@ class MomentumFactorsModel:
             sector=self.get(symbol, "sector"),
             price=self.get(symbol, "close"),
             above_sma_200=self.get(symbol, "above_sma_200"),
+            above_sma_50=self.get(symbol, "above_sma_50"),
             pct_from_52w_high=self.get(symbol, "pct_from_52w_high"),
             new_52w_high=self.get(symbol, "new_52w_high"),
             r_squared_60d=self.get(symbol, "r_squared_60d"),
