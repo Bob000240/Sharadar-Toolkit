@@ -1,30 +1,43 @@
-import yfinance as yf
+"""
+FundamentalsData — pulls financial statement data from Financial Modeling Prep (FMP).
+Requires FMP_API_KEY in environment (or .env file).
+
+Note on eps_revision_3m: computing this correctly requires storing analyst estimate
+snapshots over time and comparing today's consensus to 90 days ago. No single API
+pull (FMP or otherwise) can reconstruct that history. The field is set to None here
+and must be populated by a scheduled snapshot job that writes to the DB.
+"""
+import os
+import requests
 import pandas as pd
-import time
+from datetime import date as date_cls
+from dotenv import load_dotenv
 
+load_dotenv()
 
-_ALL_COLUMNS = [
-    "symbol", "date",
-    "roe", "roic", "gross_margin", "operating_margin", "fcf_margin",
-    "cash_conversion", "accruals_ratio", "debt_to_equity", "interest_coverage",
-    "pe_ratio", "forward_pe", "peg_ratio", "pb_ratio", "ev_ebitda",
-    "price_to_fcf", "fcf_yield", "earnings_yield", "dividend_yield", "buyback_yield",
-    "revenue_ttm", "revenue_growth_yoy", "revenue_growth_qoq",
-    "eps_ttm", "eps_growth_yoy", "eps_growth_qoq",
-    "revenue_vs_sector_growth", "eps_revision_3m", "growth_consistency_score",
+BASE_URL = "https://financialmodelingprep.com/api"
+
+QUALITY_S = [
+    "roe", "roa", "roic",
+    "gross_margin", "operating_margin", "net_margin", "fcf_margin",
+    "cash_conversion", "accruals_ratio",
+    "debt_to_equity", "net_debt_to_ebitda", "interest_coverage",
+    "current_ratio", "asset_turnover",
 ]
 
+VALUE_S = [
+    "pe_ratio", "forward_pe", "peg_ratio", "earnings_yield",
+    "pb_ratio", "p_tangible_book",
+    "ev_ebitda", "ev_sales", "ev_fcf",
+    "price_to_fcf", "fcf_yield",
+    "dividend_yield", "buyback_yield", "shareholder_yield",
+]
 
-def _row(df: pd.DataFrame, *names: str) -> float | None:
-    """Return most-recent value from a statement DataFrame, trying multiple row name variants."""
-    if df is None or df.empty:
-        return None
-    for name in names:
-        if name in df.index:
-            series = df.loc[name].dropna()
-            if not series.empty:
-                return float(series.iloc[0])
-    return None
+GROWTH_S = [
+    "revenue_growth_yoy", "eps_growth_yoy",
+    "revenue_growth_qoq", "eps_growth_qoq",
+    "revenue_vs_sector_growth", "eps_revision_3m",
+]
 
 
 def _div(num, den) -> float | None:
@@ -36,213 +49,269 @@ def _div(num, den) -> float | None:
         return None
 
 
+def _f(d: dict | None, *keys: str) -> float | None:
+    """Extract the first non-null numeric value from a dict by trying multiple keys."""
+    if not d:
+        return None
+    for k in keys:
+        v = d.get(k)
+        if v is not None:
+            try:
+                f = float(v)
+                if f == f:  # reject NaN
+                    return f
+            except (TypeError, ValueError):
+                pass
+    return None
+
+
 class FundamentalsData:
-    """
-    Fetches quality, value, and growth fundamentals from yfinance.
+    def __init__(self, symbols: str | list[str]):
+        self.symbols = [symbols] if isinstance(symbols, str) else symbols
+        api_key = os.getenv("FMP_API_KEY")
+        if not api_key:
+            raise ValueError("FMP_API_KEY not set in environment.")
+        self._key = api_key
+        self._session = requests.Session()
+        self._cache: dict[str, list] = {}
 
-    Layer 1 — ticker.info: most fields, one call per symbol.
-    Layer 2 — financial statements: ROIC, accruals, interest coverage,
-               buyback yield, QoQ growth, growth consistency.
+    def _fetch(self, path: str, **params) -> list[dict]:
+        cache_key = f"{path}|{sorted(params.items())}"
+        if cache_key in self._cache:
+            return self._cache[cache_key]
+        r = self._session.get(
+            f"{BASE_URL}/{path}",
+            params={**params, "apikey": self._key},
+            timeout=30,
+        )
+        r.raise_for_status()
+        data = r.json()
+        if isinstance(data, dict):
+            if msg := data.get("Error Message"):
+                raise RuntimeError(f"FMP error ({path}): {msg}")
+            data = []
+        self._cache[cache_key] = data
+        return data
 
-    Limitation: yfinance provides current TTM/MRQ data only —
-    no point-in-time history. Date is tagged as today.
-    """
+    def _income(self, sym: str, period: str = "annual", limit: int = 5) -> list[dict]:
+        return self._fetch(f"v3/income-statement/{sym}", period=period, limit=limit)
 
-    def get_fundamentals(
-        self,
-        symbols: list[str],
-        sector_mapping: pd.DataFrame | None = None,
-    ) -> pd.DataFrame:
+    def _balance(self, sym: str, period: str = "annual", limit: int = 5) -> list[dict]:
+        return self._fetch(f"v3/balance-sheet-statement/{sym}", period=period, limit=limit)
+
+    def _cashflow(self, sym: str, period: str = "annual", limit: int = 5) -> list[dict]:
+        return self._fetch(f"v3/cash-flow-statement/{sym}", period=period, limit=limit)
+
+    def _key_metrics_ttm(self, sym: str) -> dict:
+        data = self._fetch(f"v3/key-metrics-ttm/{sym}")
+        return data[0] if data else {}
+
+    def _profile(self, sym: str) -> dict:
+        data = self._fetch(f"v3/profile/{sym}")
+        return data[0] if data else {}
+
+    def _analyst_estimates(self, sym: str, limit: int = 2) -> list[dict]:
+        return self._fetch(f"v3/analyst-estimates/{sym}", period="annual", limit=limit)
+
+    # --- Public getters — each returns a DataFrame ready for DB insertion ---
+
+    def get_quality(self) -> pd.DataFrame:
         """
-        Returns a DataFrame with one row per symbol, columns matching
-        the fundamentals_repository schema.
-
-        sector_mapping: DataFrame with columns [symbol, sector].
-        If provided, revenue_vs_sector_growth is computed here.
-        If None, that column is left as None.
+        One row per (symbol, fiscal_year_end_date), ~4–5 years of history.
+        All metrics computed from raw statements for calculation consistency.
         """
-        records = [self._fetch_one(s) for s in symbols]
-        df = pd.DataFrame(records, columns=_ALL_COLUMNS)
+        rows = []
+        for sym in self.symbols:
+            inc_list = self._income(sym)
+            bal_list = self._balance(sym)
+            cf_list  = self._cashflow(sym)
 
-        if sector_mapping is not None and not df.empty:
-            df = self._add_sector_relative_growth(df, sector_mapping)
+            if not inc_list:
+                continue
 
+            for i, ic in enumerate(inc_list):
+                bc = bal_list[i]     if i     < len(bal_list) else None
+                cc = cf_list[i]      if i     < len(cf_list)  else None
+                bp = bal_list[i + 1] if i + 1 < len(bal_list) else None
+
+                revenue    = _f(ic, "revenue")
+                gross_p    = _f(ic, "grossProfit")
+                ebit       = _f(ic, "operatingIncome")
+                ebitda     = _f(ic, "ebitda")
+                net_inc    = _f(ic, "netIncome")
+                int_exp    = _f(ic, "interestExpense")
+                tax        = _f(ic, "incomeTaxExpense")
+                pretax     = _f(ic, "incomeBeforeTax")
+
+                cfo        = _f(cc, "operatingCashFlow")
+                fcf        = _f(cc, "freeCashFlow")
+
+                tot_eq     = _f(bc, "totalStockholdersEquity")
+                tot_assets = _f(bc, "totalAssets")
+                ltd        = _f(bc, "longTermDebt")
+                cash_b     = _f(bc, "cashAndCashEquivalents", "cashAndShortTermInvestments")
+                cur_assets = _f(bc, "totalCurrentAssets")
+                cur_liab   = _f(bc, "totalCurrentLiabilities")
+
+                a1         = _f(bp, "totalAssets") if bp else None
+                avg_assets = _div((tot_assets or 0) + (a1 or 0), 2) if tot_assets and a1 else None
+
+                tax_rt  = _div(tax, pretax) or 0.21
+                nopat   = ebit * (1 - tax_rt) if ebit is not None else None
+                inv_cap = ((tot_eq or 0) + (ltd or 0) - (cash_b or 0)) or None
+                net_debt = ((ltd or 0) - (cash_b or 0)) if ltd is not None else None
+
+                rows.append({
+                    "symbol":             sym,
+                    "date":               ic.get("date", "")[:10],
+                    "roe":                _div(net_inc, tot_eq),
+                    "roa":                _div(net_inc, tot_assets),
+                    "roic":               _div(nopat, inv_cap),
+                    "gross_margin":       _div(gross_p, revenue),
+                    "operating_margin":   _div(ebit, revenue),
+                    "net_margin":         _div(net_inc, revenue),
+                    "fcf_margin":         _div(fcf, revenue),
+                    "cash_conversion":    _div(fcf, net_inc),
+                    "accruals_ratio":     _div(
+                        (net_inc - cfo) if net_inc is not None and cfo is not None else None,
+                        avg_assets,
+                    ),
+                    "debt_to_equity":     _div(ltd, tot_eq),
+                    "net_debt_to_ebitda": _div(net_debt, ebitda),
+                    "interest_coverage":  _div(ebit, abs(int_exp) if int_exp is not None else None),
+                    "current_ratio":      _div(cur_assets, cur_liab),
+                    "asset_turnover":     _div(revenue, tot_assets),
+                })
+
+        df = pd.DataFrame(rows)
+        if not df.empty:
+            df["date"] = pd.to_datetime(df["date"]).dt.date
         return df
 
-    # ------------------------------------------------------------------
-    # Private helpers
-    # ------------------------------------------------------------------
+    def get_value(self) -> pd.DataFrame:
+        """
+        One row per symbol at today's date.
+        Uses FMP key-metrics-ttm for pre-computed trailing ratios.
+        Forward PE is derived from analyst consensus EPS estimate / current price.
+        Shareholder yield = dividend yield + buyback yield (computed here).
+        """
+        rows = []
+        today = date_cls.today()
+        for sym in self.symbols:
+            km      = self._key_metrics_ttm(sym)
+            profile = self._profile(sym)
+            cf_list = self._cashflow(sym, limit=1)
+            est     = self._analyst_estimates(sym, limit=1)
 
-    def _fetch_one(self, symbol: str) -> dict:
-        record = {col: None for col in _ALL_COLUMNS}
-        record["symbol"] = symbol
-        record["date"] = pd.Timestamp.today().normalize()
-        record["eps_revision_3m"] = None   # no free source — requires paid provider
+            mkt     = _f(profile, "mktCap")
+            price   = _f(profile, "price")
+            fcf     = _f(cf_list[0], "freeCashFlow") if cf_list else None
+            buyback = _f(cf_list[0], "commonStockRepurchased") if cf_list else None
 
-        try:
-            ticker = yf.Ticker(symbol)
-            info = ticker.info
+            pe      = _f(km, "peRatioTTM")
+            fwd_eps = _f(est[0], "estimatedEpsAvg") if est else None
+            fwd_pe  = _div(price, fwd_eps)
 
-            # ---- Layer 1: direct from ticker.info ----
-            roe             = info.get("returnOnEquity")
-            gross_margin    = info.get("grossMargins")
-            op_margin       = info.get("operatingMargins")
-            d_to_e_raw      = info.get("debtToEquity")    # yfinance: % not ratio (150 = 1.5x)
-            pe              = info.get("trailingPE")
-            forward_pe      = info.get("forwardPE")
-            peg             = info.get("pegRatio")
-            pb              = info.get("priceToBook")
-            ev_ebitda       = info.get("enterpriseToEbitda")
-            div_yield       = info.get("dividendYield")
-            rev_growth_yoy  = info.get("revenueGrowth")
-            eps_growth_yoy  = info.get("earningsGrowth")
-            fcf             = info.get("freeCashflow")
-            op_cf           = info.get("operatingCashflow")
-            revenue_ttm     = info.get("totalRevenue")
-            net_income      = info.get("netIncomeToCommon")
-            market_cap      = info.get("marketCap")
-            eps_ttm         = info.get("trailingEps")
+            div_yield     = _f(km, "dividendYieldTTM", "dividendYieldPercentageTTM")
+            buyback_yield = _div(-buyback if buyback is not None else None, mkt)
+            shareholder_yield = (
+                (div_yield or 0) + (buyback_yield or 0)
+                if div_yield is not None or buyback_yield is not None
+                else None
+            )
 
-            record["roe"]               = roe
-            record["gross_margin"]      = gross_margin
-            record["operating_margin"]  = op_margin
-            record["debt_to_equity"]    = _div(d_to_e_raw, 100)
-            record["pe_ratio"]          = pe
-            record["forward_pe"]        = forward_pe
-            record["peg_ratio"]         = peg
-            record["pb_ratio"]          = pb
-            record["ev_ebitda"]         = ev_ebitda
-            record["dividend_yield"]    = div_yield
-            record["revenue_growth_yoy"] = rev_growth_yoy
-            record["eps_growth_yoy"]    = eps_growth_yoy
-            record["revenue_ttm"]       = revenue_ttm
-            record["eps_ttm"]           = eps_ttm
+            rows.append({
+                "symbol":           sym,
+                "date":             today,
+                "pe_ratio":         pe,
+                "forward_pe":       fwd_pe,
+                "peg_ratio":        _f(km, "pegRatioTTM"),
+                "earnings_yield":   _f(km, "earningsYieldTTM") or _div(1, pe),
+                "pb_ratio":         _f(km, "pbRatioTTM"),
+                "p_tangible_book":  _f(km, "ptbRatioTTM"),
+                "ev_ebitda":        _f(km, "enterpriseValueOverEBITDATTM"),
+                "ev_sales":         _f(km, "evToSalesTTM"),
+                "ev_fcf":           _f(km, "evToFreeCashFlowTTM"),
+                "price_to_fcf":     _f(km, "priceToFreeCashFlowsRatioTTM") or _div(mkt, fcf),
+                "fcf_yield":        _f(km, "freeCashFlowYieldTTM") or _div(fcf, mkt),
+                "dividend_yield":   div_yield,
+                "buyback_yield":    buyback_yield,
+                "shareholder_yield": shareholder_yield,
+            })
 
-            # Computed from info fields
-            record["earnings_yield"]    = _div(1, pe)
-            record["fcf_margin"]        = _div(fcf, revenue_ttm)
-            record["fcf_yield"]         = _div(fcf, market_cap)
-            record["price_to_fcf"]      = _div(market_cap, fcf)
-            record["cash_conversion"]   = _div(fcf, net_income)
+        return pd.DataFrame(rows)
 
-            # ---- Layer 2: financial statements ----
-            try:
-                fin  = ticker.financials
-                bs   = ticker.balance_sheet
-                cf   = ticker.cashflow
-                qfin = ticker.quarterly_financials
+    def get_growth(self) -> pd.DataFrame:
+        """
+        Two row types in the same table:
+          - Annual  (fiscal_year_end_date): revenue_growth_yoy, eps_growth_yoy
+          - Quarterly (quarter_end_date):   revenue_growth_qoq, eps_growth_qoq
+        Inapplicable columns per row type are None (stored as NULL).
+        revenue_vs_sector_growth: cross-universe, computed in signal model.
+        eps_revision_3m: requires stored estimate snapshots — always None here.
+        """
+        rows = []
+        for sym in self.symbols:
+            inc_list = self._income(sym, limit=5)
+            q_list   = self._income(sym, period="quarter", limit=8)
 
-                # ROIC = NOPAT / Invested Capital
-                ebit           = _row(fin, "EBIT", "Operating Income")
-                tax_expense    = _row(fin, "Tax Provision", "Income Tax Expense")
-                pretax_income  = _row(fin, "Pretax Income")
-                total_debt     = _row(bs,  "Total Debt", "Long Term Debt")
-                equity         = _row(bs,  "Stockholders Equity", "Common Stock Equity",
-                                          "Total Equity Gross Minority Interest")
-                cash_equiv     = _row(bs,  "Cash And Cash Equivalents",
-                                          "Cash Cash Equivalents And Short Term Investments")
-                total_assets   = _row(bs,  "Total Assets")
+            # Annual YoY
+            if len(inc_list) >= 2:
+                for i in range(len(inc_list) - 1):
+                    ic_now  = inc_list[i]
+                    ic_prev = inc_list[i + 1]
 
-                if ebit is not None and equity is not None:
-                    tax_rate = _div(tax_expense, pretax_income) or 0.21
-                    tax_rate = max(0.0, min(tax_rate, 0.40))   # clamp: anomalies happen
-                    nopat = ebit * (1 - tax_rate)
-                    invested_capital = (total_debt or 0) + equity - (cash_equiv or 0)
-                    record["roic"] = _div(nopat, invested_capital)
+                    rev_now  = _f(ic_now,  "revenue")
+                    rev_prev = _f(ic_prev, "revenue")
+                    eps_now  = _f(ic_now,  "epsDiluted", "eps")
+                    eps_prev = _f(ic_prev, "epsDiluted", "eps")
 
-                # Accruals ratio = (Net Income - Operating CF) / Total Assets
-                if net_income is not None and op_cf is not None and total_assets:
-                    record["accruals_ratio"] = (net_income - op_cf) / total_assets
+                    rows.append({
+                        "symbol":                   sym,
+                        "date":                     ic_now.get("date", "")[:10],
+                        "revenue_growth_yoy":       _div(rev_now - rev_prev, abs(rev_prev)) if rev_now and rev_prev else None,
+                        "eps_growth_yoy":           _div(eps_now - eps_prev, abs(eps_prev)) if eps_now and eps_prev else None,
+                        "revenue_growth_qoq":       None,
+                        "eps_growth_qoq":           None,
+                        "revenue_vs_sector_growth": None,
+                        "eps_revision_3m":          None,
+                    })
 
-                # Interest coverage = EBIT / |Interest Expense|
-                int_exp = _row(fin, "Interest Expense", "Interest Expense Non Operating")
-                if ebit is not None and int_exp is not None and int_exp != 0:
-                    record["interest_coverage"] = _div(ebit, abs(int_exp))
+            # Quarterly QoQ
+            if len(q_list) >= 2:
+                for i in range(len(q_list) - 1):
+                    q0 = q_list[i]
+                    q1 = q_list[i + 1]
 
-                # Buyback yield = |Repurchases| / Market Cap
-                repurchase = _row(cf, "Repurchase Of Capital Stock",
-                                      "Common Stock Repurchased",
-                                      "Purchase Of Business")
-                if repurchase is not None and market_cap:
-                    record["buyback_yield"] = _div(abs(repurchase), market_cap)
+                    rev_now  = _f(q0, "revenue")
+                    rev_prev = _f(q1, "revenue")
+                    eps_now  = _f(q0, "epsDiluted", "eps")
+                    eps_prev = _f(q1, "epsDiluted", "eps")
 
-                # Revenue growth QoQ (most recent quarter vs prior quarter)
-                if qfin is not None and not qfin.empty:
-                    rev_q = None
-                    for name in ("Total Revenue", "Operating Revenue"):
-                        if name in qfin.index:
-                            rev_q = qfin.loc[name].dropna()
-                            break
-                    if rev_q is not None and len(rev_q) >= 2:
-                        record["revenue_growth_qoq"] = _div(
-                            float(rev_q.iloc[0]) - float(rev_q.iloc[1]),
-                            abs(float(rev_q.iloc[1])),
-                        )
+                    rows.append({
+                        "symbol":                   sym,
+                        "date":                     q0.get("date", "")[:10],
+                        "revenue_growth_yoy":       None,
+                        "eps_growth_yoy":           None,
+                        "revenue_growth_qoq":       _div(rev_now - rev_prev, abs(rev_prev)) if rev_now and rev_prev else None,
+                        "eps_growth_qoq":           _div(eps_now - eps_prev, abs(eps_prev)) if eps_now and eps_prev else None,
+                        "revenue_vs_sector_growth": None,
+                        "eps_revision_3m":          None,
+                    })
 
-                    # EPS / Net Income growth QoQ
-                    ni_q = None
-                    for name in ("Net Income", "Net Income Common Stockholders",
-                                 "Net Income Including Noncontrolling Interests"):
-                        if name in qfin.index:
-                            ni_q = qfin.loc[name].dropna()
-                            break
-                    if ni_q is not None and len(ni_q) >= 2 and float(ni_q.iloc[1]) != 0:
-                        record["eps_growth_qoq"] = _div(
-                            float(ni_q.iloc[0]) - float(ni_q.iloc[1]),
-                            abs(float(ni_q.iloc[1])),
-                        )
-
-                # Growth consistency: fraction of annual periods with positive revenue growth
-                if fin is not None and not fin.empty:
-                    rev_a = None
-                    for name in ("Total Revenue", "Operating Revenue"):
-                        if name in fin.index:
-                            rev_a = fin.loc[name].dropna()
-                            break
-                    if rev_a is not None and len(rev_a) >= 2:
-                        n = min(len(rev_a) - 1, 4)
-                        positive = sum(
-                            float(rev_a.iloc[i]) > float(rev_a.iloc[i + 1])
-                            for i in range(n)
-                        )
-                        record["growth_consistency_score"] = positive / n
-
-            except Exception as e_stmt:
-                print(f"  [{symbol}] statement layer failed: {e_stmt}")
-
-        except Exception as e:
-            print(f"[{symbol}] fetch failed: {e}")
-
-        time.sleep(0.15)   # stay within yfinance rate limits for large universes
-        return record
-
-    def _add_sector_relative_growth(
-        self,
-        df: pd.DataFrame,
-        sector_mapping: pd.DataFrame,
-    ) -> pd.DataFrame:
-        df = df.copy()
-        sec = sector_mapping.set_index("symbol")["sector"]
-        df["_sector"] = df["symbol"].map(sec)
-
-        sector_avg = df.groupby("_sector")["revenue_growth_yoy"].transform("mean")
-        df["revenue_vs_sector_growth"] = df["revenue_growth_yoy"] - sector_avg
-        df = df.drop(columns=["_sector"])
+        df = pd.DataFrame(rows)
+        if not df.empty:
+            df["date"] = pd.to_datetime(df["date"]).dt.date
         return df
 
 
 if __name__ == "__main__":
-    import database.fundamentals_repository as fundamentals_repo
-    import database.sector_data_repository as sector_repo
+    symbols = ["AAPL", "MSFT", "NVDA"]
+    fd = FundamentalsData(symbols)
 
-    symbols = ["NVDA", "AAPL", "MSFT", "AMZN", "GOOGL"]
-
-    sector_df = sector_repo.get_sector_mapping(symbols)
-    fd = FundamentalsData()
-    df = fd.get_fundamentals(symbols, sector_mapping=sector_df)
-
-    print(df.T)
-
-    fundamentals_repo.create_fundamentals_table()
-    fundamentals_repo.insert_fundamentals(df)
-    print("Inserted successfully.")
+    print("=== QUALITY ===")
+    print(fd.get_quality().to_string())
+    print("\n=== VALUE ===")
+    print(fd.get_value().to_string())
+    print("\n=== GROWTH ===")
+    print(fd.get_growth().to_string())
