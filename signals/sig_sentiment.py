@@ -1,5 +1,5 @@
 import database.sentiment_repository as sentiment_repo
-import database.market_data_repository as market_repo
+import database.market_repository as market_repo
 import pandas as pd
 from dataclasses import dataclass
 

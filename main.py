@@ -1,16 +1,19 @@
 from data_collection.market_data import MarketData
 from data_collection.sector_data import get_sector
+from data_collection.fundamentals_data import FundamentalsData
 from derived_features.indicators import compute_indicators
-import database.market_data_repository as market_repo
+import database.market_repository as market_repo
 import database.indicator_repository as indicator_repo
-import database.sector_data_repository as sector_repo
+import database.sector_repository as sector_repo
+import database.fundamentals_repository as fund_repo
 import pandas as pd
 
 
-def initial_filter(symbols: list[str]) -> list[str]:
+def initial_filter(symbols: list[str], as_of: pd.Timestamp | None = None) -> list[str]:
+    as_of = as_of or pd.Timestamp.today()
     selections = []
     for symbol in symbols:
-        df = indicator_repo.get_latest_indicators(symbol, pd.Timestamp("2026-05-19"))
+        df = indicator_repo.get_latest_indicators(symbol, as_of)
         if df.empty:
             continue
         row = df.iloc[0]
@@ -28,7 +31,8 @@ def initial_filter(symbols: list[str]) -> list[str]:
 
 
 if __name__ == "__main__":
-    symbols = [
+    symbols  = ["MMM", "NVDA", "AAPL", "JPM", "MSFT"]
+    symbols2 = [
         "MMM",
         "AOS",
         "ABT",
@@ -551,7 +555,7 @@ if __name__ == "__main__":
         "XLP",
     ]
     all_symbols = symbols + benchmark_symbol
-    start_date = "2025-01-01"
+    start_date = "2020-01-01"
     end_date = pd.Timestamp.today()
 
     market_repo.drop_OHLCV_table()
@@ -565,6 +569,9 @@ if __name__ == "__main__":
 
     sector_repo.drop_sector_mapping_table()
     sector_repo.create_sector_mapping_table()
+
+    fund_repo.drop_fundamentals_tables()
+    fund_repo.create_fundamentals_tables()
 
     for symbol in all_symbols:
         print(f"Processing {symbol}")
@@ -585,11 +592,23 @@ if __name__ == "__main__":
 
     sector_repo.insert_sector_mapping(get_sector(all_symbols))
 
+    stock_symbols = [s for s in all_symbols if s not in benchmark_symbol]
+    fd = FundamentalsData(stock_symbols)
+    fund_repo.insert_quality(fd.get_quality())
+    fund_repo.insert_value(fd.get_value())
+    fund_repo.insert_growth(fd.get_growth())
+
     df = market_repo.get_OHLCV(["SPY", "AAPL"], start_date, end_date)
     print(df.sort_values("date", ascending=False).head())
     df = indicator_repo.get_indicators(["SPY", "AAPL"], start_date, end_date)
     print(df.sort_values("date", ascending=False).head())
     df = sector_repo.get_sector_mapping(["SPY", "AAPL"])
     print(df)
+    df = fund_repo.get_quality(["SPY", "AAPL"], start_date, end_date)
+    print(df.sort_values("date", ascending=False).head())
+    df = fund_repo.get_growth(["SPY", "AAPL"], start_date, end_date)
+    print(df.sort_values("date", ascending=False).head())
+    df = fund_repo.get_value(["SPY", "AAPL"], start_date, end_date)
+    print(df.sort_values("date", ascending=False).head())
 
-    print(initial_filter(symbols))
+    print(initial_filter(symbols, pd.Timestamp.today()))

@@ -1,5 +1,5 @@
 import database.insider_repository as insider_repo
-import database.sector_data_repository as sector_repo
+import database.sector_repository as sector_repo
 import pandas as pd
 from dataclasses import dataclass
 

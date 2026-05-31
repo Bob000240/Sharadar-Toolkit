@@ -1,5 +1,6 @@
 import database.fundamentals_repository as fundamentals_repo
-import database.sector_data_repository as sector_repo
+import database.indicator_repository as indicator_repo
+import database.sector_repository as sector_repo
 import pandas as pd
 from dataclasses import dataclass
 
@@ -25,6 +26,11 @@ class QualitySnapshot:
     # Balance sheet
     debt_to_equity: float
     interest_coverage: float
+
+    # Market risk (price-based)
+    volatility_20: float
+    atr_pct: float
+    drawdown_from_recent_high: float
 
     # Universe-relative ranks (0–100)
     roe_percentile: float
@@ -74,12 +80,22 @@ class QualitySnapshot:
             f"  Interest coverage (EBIT/Int):  {self.interest_coverage:.1f}x  (>3x = debt burden manageable)",
         ])
 
+    def _fmt_market_risk(self) -> str:
+        drawdown_note = "at recent peak" if self.drawdown_from_recent_high == 0 else f"{self.drawdown_from_recent_high:.1%} off 20-day high"
+        return "\n".join([
+            "--- MARKET RISK ---",
+            f"  20-day realised volatility (ann.):  {self.volatility_20:.1%}",
+            f"  ATR as % of price:                  {self.atr_pct:.2%}",
+            f"  Drawdown from 20-day high:          {drawdown_note}",
+        ])
+
     def to_agent_prompt(self) -> str:
         return "\n\n".join([
             self._fmt_header(),
             self._fmt_profitability(),
             self._fmt_cash_quality(),
             self._fmt_balance_sheet(),
+            self._fmt_market_risk(),
         ])
 
 
@@ -99,10 +115,15 @@ class QualityFactorsModel:
             self.stock_symbols, self.signal_day
         )
         sector_mapping = sector_repo.get_sector_mapping(self.stock_symbols)
+        indicators = indicator_repo.get_latest_indicators(self.stock_symbols, self.signal_day)
 
         fundamentals = fundamentals.set_index("symbol")
         sector_mapping = sector_mapping.set_index("symbol")
+        indicators = indicators.set_index("symbol")
+
         fundamentals["sector"] = sector_mapping["sector"]
+        for col in ("volatility_20", "atr_pct", "drawdown_from_recent_high"):
+            fundamentals[col] = indicators[col]
 
         for col in ["roe", "roic", "operating_margin", "fcf_margin"]:
             fundamentals[f"{col}_percentile"] = (
@@ -139,6 +160,9 @@ class QualityFactorsModel:
             accruals_ratio=self.get(symbol, "accruals_ratio"),
             debt_to_equity=self.get(symbol, "debt_to_equity"),
             interest_coverage=self.get(symbol, "interest_coverage"),
+            volatility_20=self.get(symbol, "volatility_20"),
+            atr_pct=self.get(symbol, "atr_pct"),
+            drawdown_from_recent_high=self.get(symbol, "drawdown_from_recent_high"),
             roe_percentile=self.get(symbol, "roe_percentile"),
             roic_percentile=self.get(symbol, "roic_percentile"),
             operating_margin_percentile=self.get(symbol, "operating_margin_percentile"),

@@ -1,5 +1,5 @@
 import database.fundamentals_repository as fundamentals_repo
-import database.sector_data_repository as sector_repo
+import database.sector_repository as sector_repo
 import pandas as pd
 from dataclasses import dataclass
 

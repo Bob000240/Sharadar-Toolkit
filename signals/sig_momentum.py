@@ -1,6 +1,6 @@
 import database.indicator_repository as indicator_repo
-import database.sector_data_repository as sector_repo
-import database.market_data_repository as market_repo
+import database.sector_repository as sector_repo
+import database.market_repository as market_repo
 
 import pandas as pd
 from dataclasses import dataclass
@@ -48,9 +48,6 @@ class MomentumSnapshot:
     slope_x_r2: float
     # trend_slope_60d * r_squared_60d
 
-    drawdown_from_recent_high: float
-    # Max drawdown over trailing 20d
-
     # Momentum acceleration
     momentum_accel_20_60: float
     # return_20d - return_60d
@@ -64,10 +61,7 @@ class MomentumSnapshot:
 
     dollar_volume_20d_avg: float
 
-    # Risk / volatility
-    volatility_20: float
-    atr_pct: float
-
+    # Risk-adjusted momentum
     vol_adjusted_momentum: float
     # return_60d / volatility_20
 
@@ -126,7 +120,6 @@ class MomentumSnapshot:
             f"  60-day trend R^2:               {self.r_squared_60d:.2f}  (0 = chaotic, 1 = perfectly linear climb)",
             f"  60-day annualized trend slope: {self._pct(self.trend_slope_60d)} per year",
             f"  Trend quality score (slope*R^2):{self.slope_x_r2:.3f}  (higher = stronger, smoother uptrend)",
-            f"  Drawdown from 20-day high:     {self._pct(self.drawdown_from_recent_high)}  (0% = at recent peak)",
         ])
 
     def _fmt_momentum_acceleration(self) -> str:
@@ -145,10 +138,8 @@ class MomentumSnapshot:
 
     def _fmt_risk_volatility(self) -> str:
         return "\n".join([
-            "--- RISK & VOLATILITY ---",
-            f"  20-day realised volatility (annualised): {self.volatility_20:.1%}",
-            f"  ATR as % of price:                       {self.atr_pct:.2%}",
-            f"  Risk-adjusted momentum (return / vol):   {self.vol_adjusted_momentum:.2f}",
+            "--- RISK-ADJUSTED MOMENTUM ---",
+            f"  Vol-adjusted momentum (60d return / 20d vol):  {self.vol_adjusted_momentum:.2f}",
         ])
 
     def to_agent_prompt(self) -> str:
@@ -281,13 +272,10 @@ class MomentumFactorsModel:
             r_squared_60d=self.get(symbol, "r_squared_60d"),
             trend_slope_60d=self.get(symbol, "trend_slope_60d"),
             slope_x_r2=self.get(symbol, "slope_x_r2"),
-            drawdown_from_recent_high=self.get(symbol, "drawdown_from_recent_high"),
             momentum_accel_20_60=self.get(symbol, "momentum_accel_20_60"),
             momentum_accel_5_20=self.get(symbol, "momentum_accel_5_20"),
             volume_ratio=self.get(symbol, "volume_ratio"),
             dollar_volume_20d_avg=self.get(symbol, "dollar_volume_20d_avg"),
-            volatility_20=self.get(symbol, "volatility_20"),
-            atr_pct=self.get(symbol, "atr_pct"),
             vol_adjusted_momentum=self.get(symbol, "vol_adjusted_momentum"),
             return_5d_percentile=self.get(symbol, "return_5d_percentile"),
             return_20d_percentile=self.get(symbol, "return_20d_percentile"),

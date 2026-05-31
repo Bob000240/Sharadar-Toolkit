@@ -1,11 +1,9 @@
 """
 FundamentalsData — pulls financial statement data from Financial Modeling Prep (FMP).
-Requires FMP_API_KEY in environment (or .env file).
-
-Note on eps_revision_3m: computing this correctly requires storing analyst estimate
-snapshots over time and comparing today's consensus to 90 days ago. No single API
-pull (FMP or otherwise) can reconstruct that history. The field is set to None here
-and must be populated by a scheduled snapshot job that writes to the DB.
+Note on eps_revision_3m: requires storing analyst estimate snapshots over time and
+comparing today's consensus to 90 days ago. No single API pull can reconstruct
+that history — the field is set to None and must be populated by a scheduled
+snapshot job.
 """
 import os
 import requests
@@ -15,7 +13,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-BASE_URL = "https://financialmodelingprep.com/api"
+BASE_URL = "https://financialmodelingprep.com/stable"
 
 QUALITY_S = [
     "roe", "roa", "roic",
@@ -36,7 +34,8 @@ VALUE_S = [
 GROWTH_S = [
     "revenue_growth_yoy", "eps_growth_yoy",
     "revenue_growth_qoq", "eps_growth_qoq",
-    "revenue_vs_sector_growth", "eps_revision_3m",
+    #"eps_revision_3m"
+    #"revenue_vs_sector_growth",
 ]
 
 
@@ -75,12 +74,12 @@ class FundamentalsData:
         self._session = requests.Session()
         self._cache: dict[str, list] = {}
 
-    def _fetch(self, path: str, **params) -> list[dict]:
-        cache_key = f"{path}|{sorted(params.items())}"
+    def _fetch(self, endpoint: str, **params) -> list[dict]:
+        cache_key = f"{endpoint}|{sorted(params.items())}"
         if cache_key in self._cache:
             return self._cache[cache_key]
         r = self._session.get(
-            f"{BASE_URL}/{path}",
+            f"{BASE_URL}/{endpoint}",
             params={**params, "apikey": self._key},
             timeout=30,
         )
@@ -88,30 +87,30 @@ class FundamentalsData:
         data = r.json()
         if isinstance(data, dict):
             if msg := data.get("Error Message"):
-                raise RuntimeError(f"FMP error ({path}): {msg}")
+                raise RuntimeError(f"FMP error ({endpoint}): {msg}")
             data = []
         self._cache[cache_key] = data
         return data
 
     def _income(self, sym: str, period: str = "annual", limit: int = 5) -> list[dict]:
-        return self._fetch(f"v3/income-statement/{sym}", period=period, limit=limit)
+        return self._fetch("income-statement", symbol=sym, period=period, limit=limit)
 
     def _balance(self, sym: str, period: str = "annual", limit: int = 5) -> list[dict]:
-        return self._fetch(f"v3/balance-sheet-statement/{sym}", period=period, limit=limit)
+        return self._fetch("balance-sheet-statement", symbol=sym, period=period, limit=limit)
 
     def _cashflow(self, sym: str, period: str = "annual", limit: int = 5) -> list[dict]:
-        return self._fetch(f"v3/cash-flow-statement/{sym}", period=period, limit=limit)
+        return self._fetch("cash-flow-statement", symbol=sym, period=period, limit=limit)
 
     def _key_metrics_ttm(self, sym: str) -> dict:
-        data = self._fetch(f"v3/key-metrics-ttm/{sym}")
+        data = self._fetch("key-metrics-ttm", symbol=sym)
         return data[0] if data else {}
 
     def _profile(self, sym: str) -> dict:
-        data = self._fetch(f"v3/profile/{sym}")
+        data = self._fetch("profile", symbol=sym)
         return data[0] if data else {}
 
     def _analyst_estimates(self, sym: str, limit: int = 2) -> list[dict]:
-        return self._fetch(f"v3/analyst-estimates/{sym}", period="annual", limit=limit)
+        return self._fetch("analyst-estimates", symbol=sym, period="annual", limit=limit)
 
     # --- Public getters — each returns a DataFrame ready for DB insertion ---
 
@@ -136,7 +135,7 @@ class FundamentalsData:
 
                 revenue    = _f(ic, "revenue")
                 gross_p    = _f(ic, "grossProfit")
-                ebit       = _f(ic, "operatingIncome")
+                ebit       = _f(ic, "ebit", "operatingIncome")
                 ebitda     = _f(ic, "ebitda")
                 net_inc    = _f(ic, "netIncome")
                 int_exp    = _f(ic, "interestExpense")
@@ -191,29 +190,40 @@ class FundamentalsData:
     def get_value(self) -> pd.DataFrame:
         """
         One row per symbol at today's date.
-        Uses FMP key-metrics-ttm for pre-computed trailing ratios.
-        Forward PE is derived from analyst consensus EPS estimate / current price.
-        Shareholder yield = dividend yield + buyback yield (computed here).
+        Uses key-metrics-ttm for trailing ratios; profile for price and market cap;
+        analyst-estimates for forward EPS (forward PE).
+        PE is derived as 1 / earningsYieldTTM (FMP stable API does not expose peRatio
+        directly in key-metrics-ttm). PB and P/TangibleBook are computed from market
+        cap and the most recent annual balance sheet.
         """
         rows = []
         today = date_cls.today()
         for sym in self.symbols:
             km      = self._key_metrics_ttm(sym)
             profile = self._profile(sym)
-            cf_list = self._cashflow(sym, limit=1)
-            est     = self._analyst_estimates(sym, limit=1)
+            bal_list = self._balance(sym, limit=1)
+            cf_list  = self._cashflow(sym, limit=1)
+            est      = self._analyst_estimates(sym, limit=1)
 
-            mkt     = _f(profile, "mktCap")
+            mkt     = _f(km, "marketCap")
             price   = _f(profile, "price")
-            fcf     = _f(cf_list[0], "freeCashFlow") if cf_list else None
-            buyback = _f(cf_list[0], "commonStockRepurchased") if cf_list else None
+            bc      = bal_list[0] if bal_list else None
+            cc      = cf_list[0]  if cf_list  else None
 
-            pe      = _f(km, "peRatioTTM")
-            fwd_eps = _f(est[0], "estimatedEpsAvg") if est else None
-            fwd_pe  = _div(price, fwd_eps)
+            tot_eq      = _f(bc, "totalStockholdersEquity")
+            intangibles = _f(bc, "goodwillAndIntangibleAssets", "goodwill")
+            fcf         = _f(cc, "freeCashFlow")
+            buyback     = _f(cc, "commonStockRepurchased")
+            div_paid    = _f(cc, "commonDividendsPaid")
 
-            div_yield     = _f(km, "dividendYieldTTM", "dividendYieldPercentageTTM")
-            buyback_yield = _div(-buyback if buyback is not None else None, mkt)
+            earnings_yield = _f(km, "earningsYieldTTM")
+            pe             = _div(1, earnings_yield)
+            fwd_eps        = _f(est[0], "epsAvg") if est else None
+            fwd_pe         = _div(price, fwd_eps)
+
+            tangible_eq    = (tot_eq - intangibles) if tot_eq is not None and intangibles is not None else tot_eq
+            div_yield      = _div(-div_paid if div_paid is not None else None, mkt)
+            buyback_yield  = _div(-buyback if buyback is not None else None, mkt)
             shareholder_yield = (
                 (div_yield or 0) + (buyback_yield or 0)
                 if div_yield is not None or buyback_yield is not None
@@ -225,15 +235,15 @@ class FundamentalsData:
                 "date":             today,
                 "pe_ratio":         pe,
                 "forward_pe":       fwd_pe,
-                "peg_ratio":        _f(km, "pegRatioTTM"),
-                "earnings_yield":   _f(km, "earningsYieldTTM") or _div(1, pe),
-                "pb_ratio":         _f(km, "pbRatioTTM"),
-                "p_tangible_book":  _f(km, "ptbRatioTTM"),
-                "ev_ebitda":        _f(km, "enterpriseValueOverEBITDATTM"),
+                "peg_ratio":        None,  # requires normalised LT growth rate — computed in signal model
+                "earnings_yield":   earnings_yield,
+                "pb_ratio":         _div(mkt, tot_eq),
+                "p_tangible_book":  _div(mkt, tangible_eq),
+                "ev_ebitda":        _f(km, "evToEBITDATTM"),
                 "ev_sales":         _f(km, "evToSalesTTM"),
                 "ev_fcf":           _f(km, "evToFreeCashFlowTTM"),
-                "price_to_fcf":     _f(km, "priceToFreeCashFlowsRatioTTM") or _div(mkt, fcf),
-                "fcf_yield":        _f(km, "freeCashFlowYieldTTM") or _div(fcf, mkt),
+                "price_to_fcf":     _div(mkt, fcf),
+                "fcf_yield":        _f(km, "freeCashFlowYieldTTM"),
                 "dividend_yield":   div_yield,
                 "buyback_yield":    buyback_yield,
                 "shareholder_yield": shareholder_yield,
@@ -273,8 +283,6 @@ class FundamentalsData:
                         "eps_growth_yoy":           _div(eps_now - eps_prev, abs(eps_prev)) if eps_now and eps_prev else None,
                         "revenue_growth_qoq":       None,
                         "eps_growth_qoq":           None,
-                        "revenue_vs_sector_growth": None,
-                        "eps_revision_3m":          None,
                     })
 
             # Quarterly QoQ
@@ -295,8 +303,6 @@ class FundamentalsData:
                         "eps_growth_yoy":           None,
                         "revenue_growth_qoq":       _div(rev_now - rev_prev, abs(rev_prev)) if rev_now and rev_prev else None,
                         "eps_growth_qoq":           _div(eps_now - eps_prev, abs(eps_prev)) if eps_now and eps_prev else None,
-                        "revenue_vs_sector_growth": None,
-                        "eps_revision_3m":          None,
                     })
 
         df = pd.DataFrame(rows)

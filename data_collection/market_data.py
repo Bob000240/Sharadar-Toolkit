@@ -22,8 +22,7 @@ class MarketData:
     def get_OHLCV(
         self, symbols: list[str] | str, start_date: pd.Timestamp, end_date: pd.Timestamp
     ):
-        if isinstance(symbols, str):
-            symbols = [symbols]
+        symbols = [symbols] if isinstance(symbols, str) else symbols
 
         hData = DataRequest.StockBarsRequest(
             symbol_or_symbols=symbols,
