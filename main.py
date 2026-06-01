@@ -31,7 +31,7 @@ def initial_filter(symbols: list[str], as_of: pd.Timestamp | None = None) -> lis
 
 
 if __name__ == "__main__":
-    symbols  = ["MMM", "NVDA", "AAPL", "JPM", "MSFT"]
+    symbols  = ["MMM", "NVDA", "AAPL", "JPM", "MSFT", "AMZN", "GOOGL"]
     symbols2 = [
         "MMM",
         "AOS",

@@ -1,10 +1,3 @@
-"""
-FundamentalsData — pulls financial statement data from Financial Modeling Prep (FMP).
-Note on eps_revision_3m: requires storing analyst estimate snapshots over time and
-comparing today's consensus to 90 days ago. No single API pull can reconstruct
-that history — the field is set to None and must be populated by a scheduled
-snapshot job.
-"""
 import os
 import requests
 import pandas as pd
@@ -92,22 +85,31 @@ class FundamentalsData:
         self._cache[cache_key] = data
         return data
 
-    def _income(self, sym: str, period: str = "annual", limit: int = 5) -> list[dict]:
+    def _income(self, sym: str, period: str = "annual", limit: int = 10) -> list[dict]:
         return self._fetch("income-statement", symbol=sym, period=period, limit=limit)
 
-    def _balance(self, sym: str, period: str = "annual", limit: int = 5) -> list[dict]:
+    def _balance(self, sym: str, period: str = "annual", limit: int = 10) -> list[dict]:
         return self._fetch("balance-sheet-statement", symbol=sym, period=period, limit=limit)
 
-    def _cashflow(self, sym: str, period: str = "annual", limit: int = 5) -> list[dict]:
+    def _cashflow(self, sym: str, period: str = "annual", limit: int = 10) -> list[dict]:
         return self._fetch("cash-flow-statement", symbol=sym, period=period, limit=limit)
+
+    def _key_metrics(self, sym: str, limit: int = 10) -> list[dict]:
+        return self._fetch("key-metrics", symbol=sym, period="annual", limit=limit)
 
     def _key_metrics_ttm(self, sym: str) -> dict:
         data = self._fetch("key-metrics-ttm", symbol=sym)
         return data[0] if data else {}
 
+    def _ratios(self, sym: str, limit: int = 10) -> list[dict]:
+        return self._fetch("ratios", symbol=sym, period="annual", limit=limit)
+
     def _profile(self, sym: str) -> dict:
         data = self._fetch("profile", symbol=sym)
         return data[0] if data else {}
+
+    def _financial_growth(self, sym: str, period: str = "annual", limit: int = 10) -> list[dict]:
+        return self._fetch("financial-growth", symbol=sym, period=period, limit=limit)
 
     def _analyst_estimates(self, sym: str, limit: int = 2) -> list[dict]:
         return self._fetch("analyst-estimates", symbol=sym, period="annual", limit=limit)
@@ -115,71 +117,75 @@ class FundamentalsData:
     # --- Public getters — each returns a DataFrame ready for DB insertion ---
 
     def get_quality(self) -> pd.DataFrame:
-        """
-        One row per (symbol, fiscal_year_end_date), ~4–5 years of history.
-        All metrics computed from raw statements for calculation consistency.
-        """
         rows = []
         for sym in self.symbols:
             inc_list = self._income(sym)
             bal_list = self._balance(sym)
             cf_list  = self._cashflow(sym)
+            km_list  = self._key_metrics(sym)
+            fr_list  = self._ratios(sym)
 
             if not inc_list:
                 continue
 
-            for i, ic in enumerate(inc_list):
-                bc = bal_list[i]     if i     < len(bal_list) else None
-                cc = cf_list[i]      if i     < len(cf_list)  else None
-                bp = bal_list[i + 1] if i + 1 < len(bal_list) else None
+            # Index statements by date so key-metrics / ratios align correctly
+            # even when list lengths differ across endpoints.
+            bal_by_date = {d.get("date", "")[:10]: d for d in bal_list}
+            cf_by_date  = {d.get("date", "")[:10]: d for d in cf_list}
+            km_by_date  = {d.get("date", "")[:10]: d for d in km_list}
+            fr_by_date  = {d.get("date", "")[:10]: d for d in fr_list}
 
-                revenue    = _f(ic, "revenue")
-                gross_p    = _f(ic, "grossProfit")
-                ebit       = _f(ic, "ebit", "operatingIncome")
-                ebitda     = _f(ic, "ebitda")
+            bal_dates = sorted(bal_by_date)  # ascending, for prev-year lookup
+
+            for ic in inc_list:
+                date_str = ic.get("date", "")[:10]
+                bc = bal_by_date.get(date_str)
+                cc = cf_by_date.get(date_str)
+                km = km_by_date.get(date_str)
+                fr = fr_by_date.get(date_str)
+
+                # Previous balance sheet: nearest date strictly before this one
+                earlier = [d for d in bal_dates if d < date_str]
+                bp = bal_by_date[earlier[-1]] if earlier else None
+
+                # Raw statement values (needed for accruals + interest coverage)
                 net_inc    = _f(ic, "netIncome")
                 int_exp    = _f(ic, "interestExpense")
-                tax        = _f(ic, "incomeTaxExpense")
-                pretax     = _f(ic, "incomeBeforeTax")
-
+                ebit       = _f(ic, "ebit")
+                revenue    = _f(ic, "revenue")
                 cfo        = _f(cc, "operatingCashFlow")
                 fcf        = _f(cc, "freeCashFlow")
-
-                tot_eq     = _f(bc, "totalStockholdersEquity")
                 tot_assets = _f(bc, "totalAssets")
-                ltd        = _f(bc, "longTermDebt")
-                cash_b     = _f(bc, "cashAndCashEquivalents", "cashAndShortTermInvestments")
-                cur_assets = _f(bc, "totalCurrentAssets")
-                cur_liab   = _f(bc, "totalCurrentLiabilities")
-
                 a1         = _f(bp, "totalAssets") if bp else None
                 avg_assets = _div((tot_assets or 0) + (a1 or 0), 2) if tot_assets and a1 else None
 
-                tax_rt  = _div(tax, pretax) or 0.21
-                nopat   = ebit * (1 - tax_rt) if ebit is not None else None
-                inv_cap = ((tot_eq or 0) + (ltd or 0) - (cash_b or 0)) or None
-                net_debt = ((ltd or 0) - (cash_b or 0)) if ltd is not None else None
+                # interest_coverage: FMP reports 0 when interestExpense == 0 (wrong).
+                # None is correct when a company has no interest expense.
+                int_cov = _div(ebit, abs(int_exp) if int_exp else None)
 
                 rows.append({
                     "symbol":             sym,
                     "date":               ic.get("date", "")[:10],
-                    "roe":                _div(net_inc, tot_eq),
-                    "roa":                _div(net_inc, tot_assets),
-                    "roic":               _div(nopat, inv_cap),
-                    "gross_margin":       _div(gross_p, revenue),
-                    "operating_margin":   _div(ebit, revenue),
-                    "net_margin":         _div(net_inc, revenue),
+                    # From FMP key-metrics (pre-computed per their definitions)
+                    "roe":                _f(km, "returnOnEquity"),
+                    "roa":                _f(km, "returnOnAssets"),
+                    "roic":               _f(km, "returnOnInvestedCapital"),
+                    "net_debt_to_ebitda": _f(km, "netDebtToEBITDA"),
+                    "current_ratio":      _f(km, "currentRatio"),
+                    # From FMP financial-ratios (debtToEquityRatio uses totalDebt)
+                    "gross_margin":       _f(fr, "grossProfitMargin"),
+                    "operating_margin":   _f(fr, "ebitMargin"),
+                    "net_margin":         _f(fr, "netProfitMargin"),
+                    "debt_to_equity":     _f(fr, "debtToEquityRatio"),
+                    "asset_turnover":     _f(fr, "assetTurnover"),
+                    # Computed from raw statements
                     "fcf_margin":         _div(fcf, revenue),
-                    "cash_conversion":    _div(fcf, net_inc),
+                    "cash_conversion":    _div(fcf, net_inc),   # FCF/NI per spec
                     "accruals_ratio":     _div(
                         (net_inc - cfo) if net_inc is not None and cfo is not None else None,
                         avg_assets,
                     ),
-                    "debt_to_equity":     _div(ltd, tot_eq),
-                    "net_debt_to_ebitda": _div(net_debt, ebitda),
-                    "interest_coverage":  _div(ebit, abs(int_exp) if int_exp is not None else None),
-                    "current_ratio":      _div(cur_assets, cur_liab),
-                    "asset_turnover":     _div(revenue, tot_assets),
+                    "interest_coverage":  int_cov,
                 })
 
         df = pd.DataFrame(rows)
@@ -188,14 +194,6 @@ class FundamentalsData:
         return df
 
     def get_value(self) -> pd.DataFrame:
-        """
-        One row per symbol at today's date.
-        Uses key-metrics-ttm for trailing ratios; profile for price and market cap;
-        analyst-estimates for forward EPS (forward PE).
-        PE is derived as 1 / earningsYieldTTM (FMP stable API does not expose peRatio
-        directly in key-metrics-ttm). PB and P/TangibleBook are computed from market
-        cap and the most recent annual balance sheet.
-        """
         rows = []
         today = date_cls.today()
         for sym in self.symbols:
@@ -252,58 +250,30 @@ class FundamentalsData:
         return pd.DataFrame(rows)
 
     def get_growth(self) -> pd.DataFrame:
-        """
-        Two row types in the same table:
-          - Annual  (fiscal_year_end_date): revenue_growth_yoy, eps_growth_yoy
-          - Quarterly (quarter_end_date):   revenue_growth_qoq, eps_growth_qoq
-        Inapplicable columns per row type are None (stored as NULL).
-        revenue_vs_sector_growth: cross-universe, computed in signal model.
-        eps_revision_3m: requires stored estimate snapshots — always None here.
-        """
         rows = []
         for sym in self.symbols:
-            inc_list = self._income(sym, limit=5)
-            q_list   = self._income(sym, period="quarter", limit=8)
+            ann_list = self._financial_growth(sym, period="annual",  limit=10)
+            qtr_list = self._financial_growth(sym, period="quarter", limit=10)
 
-            # Annual YoY
-            if len(inc_list) >= 2:
-                for i in range(len(inc_list) - 1):
-                    ic_now  = inc_list[i]
-                    ic_prev = inc_list[i + 1]
+            for g in ann_list:
+                rows.append({
+                    "symbol":              sym,
+                    "date":               g.get("date", "")[:10],
+                    "revenue_growth_yoy": _f(g, "revenueGrowth"),
+                    "eps_growth_yoy":     _f(g, "epsdilutedGrowth"),
+                    "revenue_growth_qoq": None,
+                    "eps_growth_qoq":     None,
+                })
 
-                    rev_now  = _f(ic_now,  "revenue")
-                    rev_prev = _f(ic_prev, "revenue")
-                    eps_now  = _f(ic_now,  "epsDiluted", "eps")
-                    eps_prev = _f(ic_prev, "epsDiluted", "eps")
-
-                    rows.append({
-                        "symbol":                   sym,
-                        "date":                     ic_now.get("date", "")[:10],
-                        "revenue_growth_yoy":       _div(rev_now - rev_prev, abs(rev_prev)) if rev_now and rev_prev else None,
-                        "eps_growth_yoy":           _div(eps_now - eps_prev, abs(eps_prev)) if eps_now and eps_prev else None,
-                        "revenue_growth_qoq":       None,
-                        "eps_growth_qoq":           None,
-                    })
-
-            # Quarterly QoQ
-            if len(q_list) >= 2:
-                for i in range(len(q_list) - 1):
-                    q0 = q_list[i]
-                    q1 = q_list[i + 1]
-
-                    rev_now  = _f(q0, "revenue")
-                    rev_prev = _f(q1, "revenue")
-                    eps_now  = _f(q0, "epsDiluted", "eps")
-                    eps_prev = _f(q1, "epsDiluted", "eps")
-
-                    rows.append({
-                        "symbol":                   sym,
-                        "date":                     q0.get("date", "")[:10],
-                        "revenue_growth_yoy":       None,
-                        "eps_growth_yoy":           None,
-                        "revenue_growth_qoq":       _div(rev_now - rev_prev, abs(rev_prev)) if rev_now and rev_prev else None,
-                        "eps_growth_qoq":           _div(eps_now - eps_prev, abs(eps_prev)) if eps_now and eps_prev else None,
-                    })
+            for g in qtr_list:
+                rows.append({
+                    "symbol":              sym,
+                    "date":               g.get("date", "")[:10],
+                    "revenue_growth_yoy": None,
+                    "eps_growth_yoy":     None,
+                    "revenue_growth_qoq": _f(g, "revenueGrowth"),
+                    "eps_growth_qoq":     _f(g, "epsdilutedGrowth"),
+                })
 
         df = pd.DataFrame(rows)
         if not df.empty:

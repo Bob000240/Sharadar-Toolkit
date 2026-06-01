@@ -1,6 +1,6 @@
 from database.db_connection import get_connection
 import pandas as pd
-from sqlalchemy import text, bindparam
+from sqlalchemy import text
 
 
 def create_indicators_table():
@@ -141,27 +141,25 @@ def get_indicators(
     engine = get_connection()
     symbols = [symbol] if isinstance(symbol, str) else symbol
 
-    sql = f"""
+    query = f"""
         SELECT {_COL_LIST}
         FROM indicators_data
-        WHERE symbol IN :symbols
+        WHERE symbol = ANY(:symbols)
     """
 
     params = {"symbols": symbols}
 
     if start_date is not None:
-        sql += " AND date >= :start_date"
+        query += " AND date >= :start_date"
         params["start_date"] = start_date
 
     if end_date is not None:
-        sql += " AND date <= :end_date"
+        query += " AND date <= :end_date"
         params["end_date"] = end_date
 
-    sql += " ORDER BY symbol ASC, date ASC"
+    query += " ORDER BY symbol ASC, date ASC"
 
-    stmt = text(sql).bindparams(bindparam("symbols", expanding=True))
-
-    df = pd.read_sql_query(stmt, engine, params=params)
+    df = pd.read_sql_query(text(query), engine, params=params)
 
     if not df.empty:
         df["date"] = pd.to_datetime(df["date"])
@@ -172,17 +170,17 @@ def get_latest_indicators(symbols: str | list[str], signal_day: pd.Timestamp):
     engine = get_connection()
     symbols = [symbols] if isinstance(symbols, str) else symbols
 
-    query = text(f"""
+    query = f"""
         SELECT DISTINCT ON (symbol) {_COL_LIST}
         FROM indicators_data
         WHERE symbol = ANY(:symbols)
             AND date <= :signal_day
         ORDER BY symbol, date DESC
-    """)
+    """
 
     params = {
         "symbols": symbols,
         "signal_day": signal_day.date() if hasattr(signal_day, "date") else signal_day,
     }
 
-    return pd.read_sql_query(query, engine, params=params)
+    return pd.read_sql_query(text(query), engine, params=params)

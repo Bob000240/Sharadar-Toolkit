@@ -5,6 +5,24 @@ import pandas as pd
 from dataclasses import dataclass
 
 
+def _pct(v: float | None) -> str:
+    if v is None or (isinstance(v, float) and v != v):
+        return "N/A"
+    return f"{v:+.1%}"
+
+
+def _x(v: float | None, fmt: str = ".1f") -> str:
+    if v is None or (isinstance(v, float) and v != v):
+        return "N/A"
+    return f"{v:{fmt}}x"
+
+
+def _rank(v: float | None) -> str:
+    if v is None or (isinstance(v, float) and v != v):
+        return "N/A"
+    return f"{v:.0f}th percentile"
+
+
 @dataclass
 class QualitySnapshot:
     # Identity
@@ -13,19 +31,26 @@ class QualitySnapshot:
     sector: str
 
     # Profitability
-    roe: float
-    roic: float
-    gross_margin: float
-    operating_margin: float
-    fcf_margin: float
+    roe: float | None
+    roa: float | None
+    roic: float | None
+    gross_margin: float | None
+    operating_margin: float | None
+    net_margin: float | None
+    fcf_margin: float | None
 
     # Cash quality
-    cash_conversion: float
-    accruals_ratio: float
+    cash_conversion: float | None
+    accruals_ratio: float | None
 
     # Balance sheet
-    debt_to_equity: float
-    interest_coverage: float
+    debt_to_equity: float | None
+    net_debt_to_ebitda: float | None
+    interest_coverage: float | None   # None when company has net interest income
+    current_ratio: float | None
+
+    # Capital efficiency
+    asset_turnover: float | None
 
     # Market risk (price-based)
     volatility_20: float
@@ -41,47 +66,67 @@ class QualitySnapshot:
     # Composite
     quality_composite_percentile: float
 
-    @staticmethod
-    def _pct(v: float) -> str:
-        return f"{v:+.1%}"
-
-    @staticmethod
-    def _rank(v: float) -> str:
-        return f"{v:.0f}th percentile"
-
     def _fmt_header(self) -> str:
         return "\n".join([
             f"QUALITY ANALYSIS - {self.symbol} | Signal date: {self.signal_day}",
             f"Sector: {self.sector}",
-            f"Quality composite rank: {self._rank(self.quality_composite_percentile)}  (avg of ROE, ROIC, operating margin, FCF margin percentiles)",
+            f"Quality composite rank: {_rank(self.quality_composite_percentile)}"
+            f"  (avg of ROE, ROIC, operating margin, FCF margin percentiles)",
         ])
 
     def _fmt_profitability(self) -> str:
         return "\n".join([
             "--- PROFITABILITY ---",
-            f"  Return on equity (ROE):              {self._pct(self.roe)}   (universe rank: {self._rank(self.roe_percentile)})",
-            f"  Return on invested capital (ROIC):   {self._pct(self.roic)}   (universe rank: {self._rank(self.roic_percentile)})",
-            f"  Gross margin:                        {self._pct(self.gross_margin)}",
-            f"  Operating margin:                    {self._pct(self.operating_margin)}   (universe rank: {self._rank(self.operating_margin_percentile)})",
-            f"  Free cash flow margin:               {self._pct(self.fcf_margin)}   (universe rank: {self._rank(self.fcf_margin_percentile)})",
+            f"  Return on equity (ROE):              {_pct(self.roe)}"
+            f"   (universe rank: {_rank(self.roe_percentile)})",
+            f"  Return on assets (ROA):              {_pct(self.roa)}",
+            f"  Return on invested capital (ROIC):   {_pct(self.roic)}"
+            f"   (universe rank: {_rank(self.roic_percentile)})",
+            f"  Gross margin:                        {_pct(self.gross_margin)}",
+            f"  Operating margin:                    {_pct(self.operating_margin)}"
+            f"   (universe rank: {_rank(self.operating_margin_percentile)})",
+            f"  Net margin:                          {_pct(self.net_margin)}",
+            f"  Free cash flow margin:               {_pct(self.fcf_margin)}"
+            f"   (universe rank: {_rank(self.fcf_margin_percentile)})",
         ])
 
     def _fmt_cash_quality(self) -> str:
         return "\n".join([
             "--- CASH QUALITY ---",
-            f"  Cash conversion (FCF / net income):  {self.cash_conversion:.2f}  (>1.0 = earnings fully backed by cash)",
-            f"  Accruals ratio:                      {self.accruals_ratio:.3f}  (lower = higher earnings quality; >0.1 = elevated concern)",
+            f"  Cash conversion (FCF / net income):  {_x(self.cash_conversion, '.2f')}"
+            f"  (>1.0 = earnings fully backed by cash)",
+            f"  Accruals ratio:                      "
+            f"{self.accruals_ratio:.3f}  (lower = higher quality; >0.1 = elevated concern)"
+            if self.accruals_ratio is not None and self.accruals_ratio == self.accruals_ratio
+            else "  Accruals ratio:                      N/A",
         ])
 
     def _fmt_balance_sheet(self) -> str:
+        ic_str = (
+            f"{self.interest_coverage:.1f}x  (>3x = debt burden manageable)"
+            if self.interest_coverage is not None and self.interest_coverage == self.interest_coverage
+            else "N/A  (net interest income — company earns more than it pays)"
+        )
+        nd_str = (
+            f"{self.net_debt_to_ebitda:.2f}x  (<3x = conservative)"
+            if self.net_debt_to_ebitda is not None and self.net_debt_to_ebitda == self.net_debt_to_ebitda
+            else "N/A"
+        )
         return "\n".join([
             "--- BALANCE SHEET STRENGTH ---",
-            f"  Debt-to-equity:                {self.debt_to_equity:.2f}x  (<1.0 = conservative leverage)",
-            f"  Interest coverage (EBIT/Int):  {self.interest_coverage:.1f}x  (>3x = debt burden manageable)",
+            f"  Debt-to-equity:                {_x(self.debt_to_equity, '.2f')}  (<1.0 = conservative leverage)",
+            f"  Net debt / EBITDA:             {nd_str}",
+            f"  Interest coverage (EBIT/Int):  {ic_str}",
+            f"  Current ratio:                 {_x(self.current_ratio, '.2f')}  (>1.0 = liquid)",
+            f"  Asset turnover:                {_x(self.asset_turnover, '.2f')}  (higher = more efficient)",
         ])
 
     def _fmt_market_risk(self) -> str:
-        drawdown_note = "at recent peak" if self.drawdown_from_recent_high == 0 else f"{self.drawdown_from_recent_high:.1%} off 20-day high"
+        drawdown_note = (
+            "at recent peak"
+            if self.drawdown_from_recent_high == 0
+            else f"{self.drawdown_from_recent_high:.1%} off 20-day high"
+        )
         return "\n".join([
             "--- MARKET RISK ---",
             f"  20-day realised volatility (ann.):  {self.volatility_20:.1%}",
@@ -115,20 +160,18 @@ class QualityFactorsModel:
             self.stock_symbols, self.signal_day
         )
         sector_mapping = sector_repo.get_sector_mapping(self.stock_symbols)
-        indicators = indicator_repo.get_latest_indicators(self.stock_symbols, self.signal_day)
+        indicators     = indicator_repo.get_latest_indicators(self.stock_symbols, self.signal_day)
 
-        fundamentals = fundamentals.set_index("symbol")
+        fundamentals   = fundamentals.set_index("symbol")
         sector_mapping = sector_mapping.set_index("symbol")
-        indicators = indicators.set_index("symbol")
+        indicators     = indicators.set_index("symbol")
 
         fundamentals["sector"] = sector_mapping["sector"]
         for col in ("volatility_20", "atr_pct", "drawdown_from_recent_high"):
             fundamentals[col] = indicators[col]
 
         for col in ["roe", "roic", "operating_margin", "fcf_margin"]:
-            fundamentals[f"{col}_percentile"] = (
-                fundamentals[col].rank(pct=True) * 100
-            )
+            fundamentals[f"{col}_percentile"] = fundamentals[col].rank(pct=True) * 100
 
         fundamentals["quality_composite_percentile"] = (
             fundamentals["roe_percentile"]
@@ -139,35 +182,39 @@ class QualityFactorsModel:
 
         self.stock_data = fundamentals
 
-    def get(self, symbol: str, col: str):
-        if symbol not in self.stock_data.index:
-            raise ValueError(f"Symbol {symbol} not in data")
-        if col not in self.stock_data.columns:
-            raise ValueError(f"Column {col} not in data")
-        return self.stock_data.loc[symbol, col]
+    def _get(self, symbol: str, col: str):
+        v = self.stock_data.loc[symbol, col]
+        return None if pd.isna(v) else v
 
     def build_snapshot(self, symbol: str) -> QualitySnapshot:
+        if symbol not in self.stock_data.index:
+            raise ValueError(f"Symbol {symbol} not in data")
         return QualitySnapshot(
             symbol=symbol,
             signal_day=self.signal_day,
-            sector=self.get(symbol, "sector"),
-            roe=self.get(symbol, "roe"),
-            roic=self.get(symbol, "roic"),
-            gross_margin=self.get(symbol, "gross_margin"),
-            operating_margin=self.get(symbol, "operating_margin"),
-            fcf_margin=self.get(symbol, "fcf_margin"),
-            cash_conversion=self.get(symbol, "cash_conversion"),
-            accruals_ratio=self.get(symbol, "accruals_ratio"),
-            debt_to_equity=self.get(symbol, "debt_to_equity"),
-            interest_coverage=self.get(symbol, "interest_coverage"),
-            volatility_20=self.get(symbol, "volatility_20"),
-            atr_pct=self.get(symbol, "atr_pct"),
-            drawdown_from_recent_high=self.get(symbol, "drawdown_from_recent_high"),
-            roe_percentile=self.get(symbol, "roe_percentile"),
-            roic_percentile=self.get(symbol, "roic_percentile"),
-            operating_margin_percentile=self.get(symbol, "operating_margin_percentile"),
-            fcf_margin_percentile=self.get(symbol, "fcf_margin_percentile"),
-            quality_composite_percentile=self.get(symbol, "quality_composite_percentile"),
+            sector=self._get(symbol, "sector"),
+            roe=self._get(symbol, "roe"),
+            roa=self._get(symbol, "roa"),
+            roic=self._get(symbol, "roic"),
+            gross_margin=self._get(symbol, "gross_margin"),
+            operating_margin=self._get(symbol, "operating_margin"),
+            net_margin=self._get(symbol, "net_margin"),
+            fcf_margin=self._get(symbol, "fcf_margin"),
+            cash_conversion=self._get(symbol, "cash_conversion"),
+            accruals_ratio=self._get(symbol, "accruals_ratio"),
+            debt_to_equity=self._get(symbol, "debt_to_equity"),
+            net_debt_to_ebitda=self._get(symbol, "net_debt_to_ebitda"),
+            interest_coverage=self._get(symbol, "interest_coverage"),
+            current_ratio=self._get(symbol, "current_ratio"),
+            asset_turnover=self._get(symbol, "asset_turnover"),
+            volatility_20=self._get(symbol, "volatility_20"),
+            atr_pct=self._get(symbol, "atr_pct"),
+            drawdown_from_recent_high=self._get(symbol, "drawdown_from_recent_high"),
+            roe_percentile=self._get(symbol, "roe_percentile"),
+            roic_percentile=self._get(symbol, "roic_percentile"),
+            operating_margin_percentile=self._get(symbol, "operating_margin_percentile"),
+            fcf_margin_percentile=self._get(symbol, "fcf_margin_percentile"),
+            quality_composite_percentile=self._get(symbol, "quality_composite_percentile"),
         )
 
 

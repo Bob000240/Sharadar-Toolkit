@@ -4,6 +4,24 @@ import pandas as pd
 from dataclasses import dataclass
 
 
+def _pct(v: float | None) -> str:
+    if v is None or (isinstance(v, float) and v != v):
+        return "N/A"
+    return f"{v:+.1%}"
+
+
+def _x(v: float | None, fmt: str = ".1f") -> str:
+    if v is None or (isinstance(v, float) and v != v):
+        return "N/A"
+    return f"{v:{fmt}}x"
+
+
+def _rank(v: float | None) -> str:
+    if v is None or (isinstance(v, float) and v != v):
+        return "N/A"
+    return f"{v:.0f}th percentile"
+
+
 @dataclass
 class ValueSnapshot:
     # Identity
@@ -12,80 +30,92 @@ class ValueSnapshot:
     sector: str
 
     # Earnings-based
-    pe_ratio: float
-    forward_pe: float
-    peg_ratio: float
-    earnings_yield: float
+    pe_ratio: float | None
+    forward_pe: float | None
+    peg_ratio: float | None
+    earnings_yield: float | None
 
     # Cash flow-based
-    price_to_fcf: float
-    fcf_yield: float
-    ev_ebitda: float
+    price_to_fcf: float | None
+    fcf_yield: float | None
+    ev_ebitda: float | None
+    ev_sales: float | None
+    ev_fcf: float | None
 
-    # Asset & income
-    pb_ratio: float
-    dividend_yield: float
-    buyback_yield: float
+    # Asset-based
+    pb_ratio: float | None
+    p_tangible_book: float | None
 
-    # Universe-relative ranks (higher = cheaper vs universe peers)
-    earnings_yield_percentile: float        # normal rank; high yield = cheap
-    fcf_yield_percentile: float             # normal rank
-    pe_inverted_percentile: float           # inverted; low P/E = high percentile
-    ev_ebitda_inverted_percentile: float    # inverted
+    # Yield-based
+    dividend_yield: float | None
+    buyback_yield: float | None
+    shareholder_yield: float | None
 
-    # Sector-relative ranks (higher = cheaper vs sector peers)
+    # Universe-relative ranks (higher = cheaper)
+    earnings_yield_percentile: float
+    fcf_yield_percentile: float
+    pe_inverted_percentile: float       # low P/E = high percentile
+    ev_ebitda_inverted_percentile: float
+    ev_sales_inverted_percentile: float
+
+    # Sector-relative ranks
     pe_sector_percentile: float
     ev_ebitda_sector_percentile: float
 
     # Composite
     value_composite_percentile: float
 
-    @staticmethod
-    def _pct(v: float) -> str:
-        return f"{v:+.1%}"
-
-    @staticmethod
-    def _rank(v: float) -> str:
-        return f"{v:.0f}th percentile"
-
     def _fmt_header(self) -> str:
         return "\n".join([
             f"VALUE ANALYSIS - {self.symbol} | Signal date: {self.signal_day}",
             f"Sector: {self.sector}",
-            f"Value composite rank: {self._rank(self.value_composite_percentile)}  (higher = cheaper vs universe peers)",
+            f"Value composite rank: {_rank(self.value_composite_percentile)}"
+            f"  (higher = cheaper vs universe peers)",
         ])
 
     def _fmt_earnings_valuation(self) -> str:
+        peg_note = "(<1.0 = growing faster than valuation implies)" if self.peg_ratio is not None else "(not available)"
         return "\n".join([
             "--- EARNINGS-BASED VALUATION ---",
-            f"  P/E ratio:       {self.pe_ratio:.1f}x   (universe rank: {self._rank(self.pe_inverted_percentile)}; lower P/E = higher rank)",
-            f"  Forward P/E:     {self.forward_pe:.1f}x",
-            f"  PEG ratio:       {self.peg_ratio:.2f}   (<1.0 = growing faster than valuation implies)",
-            f"  Earnings yield:  {self._pct(self.earnings_yield)}   (universe rank: {self._rank(self.earnings_yield_percentile)})",
+            f"  Trailing P/E:    {_x(self.pe_ratio)}"
+            f"   (universe rank: {_rank(self.pe_inverted_percentile)}; lower P/E = higher rank)",
+            f"  Forward P/E:     {_x(self.forward_pe)}",
+            f"  PEG ratio:       {f'{self.peg_ratio:.2f}' if self.peg_ratio is not None else 'N/A'}"
+            f"   {peg_note}",
+            f"  Earnings yield:  {_pct(self.earnings_yield)}"
+            f"   (universe rank: {_rank(self.earnings_yield_percentile)})",
         ])
 
     def _fmt_cashflow_valuation(self) -> str:
         return "\n".join([
             "--- CASH FLOW VALUATION ---",
-            f"  Price-to-FCF:    {self.price_to_fcf:.1f}x   (universe rank: {self._rank(self.ev_ebitda_inverted_percentile)})",
-            f"  FCF yield:       {self._pct(self.fcf_yield)}   (universe rank: {self._rank(self.fcf_yield_percentile)})",
-            f"  EV/EBITDA:       {self.ev_ebitda:.1f}x",
+            f"  Price-to-FCF:    {_x(self.price_to_fcf)}"
+            f"   (universe rank: {_rank(self.pe_inverted_percentile)})",
+            f"  FCF yield:       {_pct(self.fcf_yield)}"
+            f"   (universe rank: {_rank(self.fcf_yield_percentile)})",
+            f"  EV/EBITDA:       {_x(self.ev_ebitda)}"
+            f"   (universe rank: {_rank(self.ev_ebitda_inverted_percentile)})",
+            f"  EV/Sales:        {_x(self.ev_sales)}"
+            f"   (universe rank: {_rank(self.ev_sales_inverted_percentile)})",
+            f"  EV/FCF:          {_x(self.ev_fcf)}",
         ])
 
     def _fmt_asset_income_valuation(self) -> str:
         return "\n".join([
             "--- ASSET & INCOME VALUATION ---",
-            f"  Price-to-book (P/B):       {self.pb_ratio:.2f}x",
-            f"  Dividend yield:            {self._pct(self.dividend_yield)}",
-            f"  Buyback yield:             {self._pct(self.buyback_yield)}",
-            f"  Total shareholder yield:   {self._pct(self.dividend_yield + self.buyback_yield)}",
+            f"  Price-to-book (P/B):       {_x(self.pb_ratio, '.2f')}",
+            f"  Price-to-tangible-book:    {_x(self.p_tangible_book, '.2f')}",
+            f"  Dividend yield:            {_pct(self.dividend_yield)}",
+            f"  Buyback yield:             {_pct(self.buyback_yield)}",
+            f"  Total shareholder yield:   {_pct(self.shareholder_yield)}",
         ])
 
     def _fmt_sector_relative(self) -> str:
         return "\n".join([
             "--- SECTOR-RELATIVE VALUATION ---",
-            f"  P/E vs sector peers:       {self._rank(self.pe_sector_percentile)}  (higher = cheaper than sector peers)",
-            f"  EV/EBITDA vs sector peers: {self._rank(self.ev_ebitda_sector_percentile)}",
+            f"  P/E vs sector peers:       {_rank(self.pe_sector_percentile)}"
+            f"  (higher = cheaper than sector peers)",
+            f"  EV/EBITDA vs sector peers: {_rank(self.ev_ebitda_sector_percentile)}",
         ])
 
     def to_agent_prompt(self) -> str:
@@ -115,24 +145,26 @@ class ValueFactorsModel:
         )
         sector_mapping = sector_repo.get_sector_mapping(self.stock_symbols)
 
-        fundamentals = fundamentals.set_index("symbol")
+        fundamentals   = fundamentals.set_index("symbol")
         sector_mapping = sector_mapping.set_index("symbol")
         fundamentals["sector"] = sector_mapping["sector"]
 
+        # Compute peg_ratio where DB has None: pe / (eps_growth_yoy * 100)
+        # eps_growth_yoy is a decimal (e.g. 0.23 = 23%), PEG convention uses percentage points
+        mask = fundamentals["peg_ratio"].isna() & fundamentals["pe_ratio"].notna()
+        eps_g = fundamentals["eps_growth_yoy"].clip(lower=0.01)  # avoid div/0 and negatives
+        fundamentals.loc[mask, "peg_ratio"] = (
+            fundamentals.loc[mask, "pe_ratio"] / (eps_g.loc[mask] * 100)
+        )
+
         # Universe-wide percentiles (higher = cheaper)
-        fundamentals["earnings_yield_percentile"] = (
-            fundamentals["earnings_yield"].rank(pct=True) * 100
-        )
-        fundamentals["fcf_yield_percentile"] = (
-            fundamentals["fcf_yield"].rank(pct=True) * 100
-        )
+        fundamentals["earnings_yield_percentile"] = fundamentals["earnings_yield"].rank(pct=True) * 100
+        fundamentals["fcf_yield_percentile"]      = fundamentals["fcf_yield"].rank(pct=True) * 100
+
         # Inverted: lower ratio = cheaper = higher percentile
-        fundamentals["pe_inverted_percentile"] = (
-            100 - fundamentals["pe_ratio"].rank(pct=True) * 100
-        )
-        fundamentals["ev_ebitda_inverted_percentile"] = (
-            100 - fundamentals["ev_ebitda"].rank(pct=True) * 100
-        )
+        fundamentals["pe_inverted_percentile"]       = 100 - fundamentals["pe_ratio"].rank(pct=True) * 100
+        fundamentals["ev_ebitda_inverted_percentile"] = 100 - fundamentals["ev_ebitda"].rank(pct=True) * 100
+        fundamentals["ev_sales_inverted_percentile"]  = 100 - fundamentals["ev_sales"].rank(pct=True) * 100
 
         fundamentals["value_composite_percentile"] = (
             fundamentals["earnings_yield_percentile"]
@@ -141,7 +173,7 @@ class ValueFactorsModel:
             + fundamentals["ev_ebitda_inverted_percentile"]
         ) / 4
 
-        # Sector-relative percentiles
+        # Sector-relative percentiles (ascending=False → low ratio = high rank)
         fundamentals["pe_sector_percentile"] = (
             fundamentals.groupby("sector")["pe_ratio"]
             .rank(pct=True, ascending=False) * 100
@@ -153,35 +185,39 @@ class ValueFactorsModel:
 
         self.stock_data = fundamentals
 
-    def get(self, symbol: str, col: str):
-        if symbol not in self.stock_data.index:
-            raise ValueError(f"Symbol {symbol} not in data")
-        if col not in self.stock_data.columns:
-            raise ValueError(f"Column {col} not in data")
-        return self.stock_data.loc[symbol, col]
+    def _get(self, symbol: str, col: str):
+        v = self.stock_data.loc[symbol, col]
+        return None if pd.isna(v) else v
 
     def build_snapshot(self, symbol: str) -> ValueSnapshot:
+        if symbol not in self.stock_data.index:
+            raise ValueError(f"Symbol {symbol} not in data")
         return ValueSnapshot(
             symbol=symbol,
             signal_day=self.signal_day,
-            sector=self.get(symbol, "sector"),
-            pe_ratio=self.get(symbol, "pe_ratio"),
-            forward_pe=self.get(symbol, "forward_pe"),
-            peg_ratio=self.get(symbol, "peg_ratio"),
-            earnings_yield=self.get(symbol, "earnings_yield"),
-            price_to_fcf=self.get(symbol, "price_to_fcf"),
-            fcf_yield=self.get(symbol, "fcf_yield"),
-            ev_ebitda=self.get(symbol, "ev_ebitda"),
-            pb_ratio=self.get(symbol, "pb_ratio"),
-            dividend_yield=self.get(symbol, "dividend_yield"),
-            buyback_yield=self.get(symbol, "buyback_yield"),
-            earnings_yield_percentile=self.get(symbol, "earnings_yield_percentile"),
-            fcf_yield_percentile=self.get(symbol, "fcf_yield_percentile"),
-            pe_inverted_percentile=self.get(symbol, "pe_inverted_percentile"),
-            ev_ebitda_inverted_percentile=self.get(symbol, "ev_ebitda_inverted_percentile"),
-            pe_sector_percentile=self.get(symbol, "pe_sector_percentile"),
-            ev_ebitda_sector_percentile=self.get(symbol, "ev_ebitda_sector_percentile"),
-            value_composite_percentile=self.get(symbol, "value_composite_percentile"),
+            sector=self._get(symbol, "sector"),
+            pe_ratio=self._get(symbol, "pe_ratio"),
+            forward_pe=self._get(symbol, "forward_pe"),
+            peg_ratio=self._get(symbol, "peg_ratio"),
+            earnings_yield=self._get(symbol, "earnings_yield"),
+            price_to_fcf=self._get(symbol, "price_to_fcf"),
+            fcf_yield=self._get(symbol, "fcf_yield"),
+            ev_ebitda=self._get(symbol, "ev_ebitda"),
+            ev_sales=self._get(symbol, "ev_sales"),
+            ev_fcf=self._get(symbol, "ev_fcf"),
+            pb_ratio=self._get(symbol, "pb_ratio"),
+            p_tangible_book=self._get(symbol, "p_tangible_book"),
+            dividend_yield=self._get(symbol, "dividend_yield"),
+            buyback_yield=self._get(symbol, "buyback_yield"),
+            shareholder_yield=self._get(symbol, "shareholder_yield"),
+            earnings_yield_percentile=self._get(symbol, "earnings_yield_percentile"),
+            fcf_yield_percentile=self._get(symbol, "fcf_yield_percentile"),
+            pe_inverted_percentile=self._get(symbol, "pe_inverted_percentile"),
+            ev_ebitda_inverted_percentile=self._get(symbol, "ev_ebitda_inverted_percentile"),
+            ev_sales_inverted_percentile=self._get(symbol, "ev_sales_inverted_percentile"),
+            pe_sector_percentile=self._get(symbol, "pe_sector_percentile"),
+            ev_ebitda_sector_percentile=self._get(symbol, "ev_ebitda_sector_percentile"),
+            value_composite_percentile=self._get(symbol, "value_composite_percentile"),
         )
 
 

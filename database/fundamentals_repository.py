@@ -35,7 +35,6 @@ _GROWTH_COLS = [
 # (excludes duplicate symbol/date/period columns)
 _ALL_QUALITY = [c for c in _QUALITY_COLS if c not in ("symbol", "date")]
 _ALL_VALUE   = [c for c in _VALUE_COLS   if c not in ("symbol", "date")]
-_ALL_GROWTH  = [c for c in _GROWTH_COLS  if c not in ("symbol", "date", "period")]
 
 
 # ---------------------------------------------------------------------------
@@ -160,24 +159,29 @@ def insert_growth(df: pd.DataFrame):
 
 def get_latest_fundamentals(symbols: str | list[str], signal_day: pd.Timestamp) -> pd.DataFrame:
     """
-    Return one row per symbol with the most recent quality, value, and growth
-    columns joined together. Quality/growth use the latest fiscal period on or
-    before signal_day; value uses the latest collection date.
+    Return one row per symbol joining the most recent quality, value, and growth data.
+    Annual growth (yoy) and quarterly growth (qoq) are fetched from separate rows
+    since they live on different dates in growth_fundamentals.
     """
     engine  = get_connection()
     symbols = [symbols] if isinstance(symbols, str) else symbols
     day     = signal_day.date() if hasattr(signal_day, "date") else signal_day
 
-    q_cols = ", ".join(f"q.{c}" for c in _ALL_QUALITY)
-    v_cols = ", ".join(f"v.{c}" for c in _ALL_VALUE)
-    g_cols = ", ".join(f"g.{c}" for c in _ALL_GROWTH)
+    _ANN_GROWTH = ["revenue_growth_yoy", "eps_growth_yoy", "revenue_vs_sector_growth", "eps_revision_3m"]
+    _QTR_GROWTH = ["revenue_growth_qoq", "eps_growth_qoq"]
+
+    q_cols  = ", ".join(f"q.{c}"  for c in _ALL_QUALITY)
+    v_cols  = ", ".join(f"v.{c}"  for c in _ALL_VALUE)
+    ga_cols = ", ".join(f"ga.{c}" for c in _ANN_GROWTH)
+    gq_cols = ", ".join(f"gq.{c}" for c in _QTR_GROWTH)
 
     query = text(f"""
         SELECT
             COALESCE(q.symbol, v.symbol) AS symbol,
             {q_cols},
             {v_cols},
-            {g_cols}
+            {ga_cols},
+            {gq_cols}
         FROM (
             SELECT DISTINCT ON (symbol) *
             FROM quality_fundamentals
@@ -191,11 +195,18 @@ def get_latest_fundamentals(symbols: str | list[str], signal_day: pd.Timestamp) 
             ORDER BY symbol, date DESC
         ) v ON q.symbol = v.symbol
         LEFT JOIN (
-            SELECT DISTINCT ON (symbol) *
+            SELECT DISTINCT ON (symbol) symbol, revenue_growth_yoy, eps_growth_yoy,
+                   revenue_vs_sector_growth, eps_revision_3m
             FROM growth_fundamentals
             WHERE symbol = ANY(:symbols) AND date <= :day AND period = 'annual'
             ORDER BY symbol, date DESC
-        ) g ON COALESCE(q.symbol, v.symbol) = g.symbol
+        ) ga ON COALESCE(q.symbol, v.symbol) = ga.symbol
+        LEFT JOIN (
+            SELECT DISTINCT ON (symbol) symbol, revenue_growth_qoq, eps_growth_qoq
+            FROM growth_fundamentals
+            WHERE symbol = ANY(:symbols) AND date <= :day AND period = 'quarter'
+            ORDER BY symbol, date DESC
+        ) gq ON COALESCE(q.symbol, v.symbol) = gq.symbol
     """)
 
     return pd.read_sql_query(query, engine, params={"symbols": symbols, "day": day})
