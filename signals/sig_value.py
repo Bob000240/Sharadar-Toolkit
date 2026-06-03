@@ -65,6 +65,8 @@ class ValueSnapshot:
     # Composite
     value_composite_percentile: float
 
+    report_sections: list[str]
+
     def _fmt_header(self) -> str:
         return "\n".join([
             f"VALUE ANALYSIS - {self.symbol} | Signal date: {self.signal_day}",
@@ -119,13 +121,28 @@ class ValueSnapshot:
         ])
 
     def to_agent_prompt(self) -> str:
-        return "\n\n".join([
-            self._fmt_header(),
-            self._fmt_earnings_valuation(),
-            self._fmt_cashflow_valuation(),
-            self._fmt_asset_income_valuation(),
-            self._fmt_sector_relative(),
-        ])
+        prompt_sections = {
+            "earnings_valuation": self._fmt_earnings_valuation(),
+            "cashflow_valuation": self._fmt_cashflow_valuation(),
+            "asset_income_valuation": self._fmt_asset_income_valuation(),
+            "sector_relative": self._fmt_sector_relative(),
+        }
+
+        try:
+            return "\n\n".join([
+                self._fmt_header(),
+                *(prompt_sections[section] for section in self.report_sections if section in prompt_sections)
+            ])
+        except Exception as e:
+            print(f"Error building prompt: {e}")
+            print("Falling back to full report.")
+            return "\n\n".join([
+                self._fmt_header(),
+                self._fmt_earnings_valuation(),
+                self._fmt_cashflow_valuation(),
+                self._fmt_asset_income_valuation(),
+                self._fmt_sector_relative(),
+            ])
 
 
 class ValueFactorsModel:
@@ -189,7 +206,7 @@ class ValueFactorsModel:
         v = self.stock_data.loc[symbol, col]
         return None if pd.isna(v) else v
 
-    def build_snapshot(self, symbol: str) -> ValueSnapshot:
+    def build_snapshot(self, symbol: str, report_sections: list[str] | str) -> ValueSnapshot:
         if symbol not in self.stock_data.index:
             raise ValueError(f"Symbol {symbol} not in data")
         return ValueSnapshot(
@@ -218,6 +235,7 @@ class ValueFactorsModel:
             pe_sector_percentile=self._get(symbol, "pe_sector_percentile"),
             ev_ebitda_sector_percentile=self._get(symbol, "ev_ebitda_sector_percentile"),
             value_composite_percentile=self._get(symbol, "value_composite_percentile"),
+            report_sections=report_sections if isinstance(report_sections, list) else [report_sections],
         )
 
 
@@ -225,6 +243,12 @@ if __name__ == "__main__":
     symbols = ["NVDA", "AAPL", "MSFT", "AMZN", "GOOGL"]
     signal_day = pd.Timestamp.today()
     model = ValueFactorsModel(signal_day, symbols)
+    report_sections = [
+        "earnings_valuation",
+        "cashflow_valuation",
+        "asset_income_valuation",
+        "sector_relative",
+    ]
     for sym in symbols:
-        print(model.build_snapshot(sym).to_agent_prompt())
+        print(model.build_snapshot(sym, report_sections).to_agent_prompt())
         print()

@@ -45,6 +45,8 @@ class GrowthSnapshot:
     # Composite
     growth_composite_percentile: float
 
+    report_sections: list[str]
+
     def _fmt_header(self) -> str:
         return "\n".join([
             f"GROWTH ANALYSIS - {self.symbol} | Signal date: {self.signal_day}",
@@ -99,13 +101,28 @@ class GrowthSnapshot:
         ])
 
     def to_agent_prompt(self) -> str:
-        return "\n\n".join([
-            self._fmt_header(),
-            self._fmt_revenue_growth(),
-            self._fmt_eps_growth(),
-            self._fmt_estimate_revisions(),
-            self._fmt_growth_quality(),
-        ])
+        prompt_sections = {
+            "revenue_growth": self._fmt_revenue_growth(),
+            "eps_growth": self._fmt_eps_growth(),
+            "estimate_revisions": self._fmt_estimate_revisions(),
+            "growth_quality": self._fmt_growth_quality(),
+        }
+
+        try:
+            return "\n\n".join([
+                self._fmt_header(),
+                *(prompt_sections[section] for section in self.report_sections if section in prompt_sections)
+            ])
+        except Exception as e:
+            print(f"Error building prompt: {e}")
+            print("Falling back to full report.")
+            return "\n\n".join([
+                self._fmt_header(),
+                self._fmt_revenue_growth(),
+                self._fmt_eps_growth(),
+                self._fmt_estimate_revisions(),
+                self._fmt_growth_quality(),
+            ])
 
 
 class GrowthFactorsModel:
@@ -171,7 +188,7 @@ class GrowthFactorsModel:
         v = self.stock_data.loc[symbol, col]
         return None if pd.isna(v) else v
 
-    def build_snapshot(self, symbol: str) -> GrowthSnapshot:
+    def build_snapshot(self, symbol: str, report_sections: list[str] | str) -> GrowthSnapshot:
         if symbol not in self.stock_data.index:
             raise ValueError(f"Symbol {symbol} not in data")
         return GrowthSnapshot(
@@ -188,6 +205,7 @@ class GrowthFactorsModel:
             revenue_growth_percentile=self._get(symbol, "revenue_growth_percentile"),
             eps_growth_percentile=self._get(symbol, "eps_growth_percentile"),
             growth_composite_percentile=self._get(symbol, "growth_composite_percentile"),
+            report_sections=report_sections if isinstance(report_sections, list) else [report_sections],
         )
 
 
@@ -195,6 +213,12 @@ if __name__ == "__main__":
     symbols = ["NVDA", "AAPL", "MSFT", "AMZN", "GOOGL"]
     signal_day = pd.Timestamp.today()
     model = GrowthFactorsModel(signal_day, symbols)
+    report_sections = [
+        "revenue_growth",
+        "eps_growth",
+        "estimate_revisions",
+        "growth_quality",
+    ]
     for sym in symbols:
-        print(model.build_snapshot(sym).to_agent_prompt())
+        print(model.build_snapshot(sym, report_sections).to_agent_prompt())
         print()

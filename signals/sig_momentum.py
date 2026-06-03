@@ -70,6 +70,8 @@ class MomentumSnapshot:
     return_20d_percentile: float
     return_60d_percentile: float
     return_252d_percentile: float
+    
+    report_sections : list[str]
 
     @staticmethod
     def _pct(v: float) -> str:
@@ -143,16 +145,34 @@ class MomentumSnapshot:
         ])
 
     def to_agent_prompt(self) -> str:
-        return "\n\n".join([
-            self._fmt_header(),
-            self._fmt_absolute_momentum(),
-            self._fmt_benchmark_relative(),
-            self._fmt_sector_relative(),
-            self._fmt_trend_structure(),
-            self._fmt_momentum_acceleration(),
-            self._fmt_volume_liquidity(),
-            self._fmt_risk_volatility(),
-        ])
+        prompt_sections = {
+            "absolute_momentum": self._fmt_absolute_momentum(),
+            "benchmark_relative": self._fmt_benchmark_relative(),
+            "sector_relative": self._fmt_sector_relative(),
+            "trend_structure": self._fmt_trend_structure(),
+            "momentum_acceleration": self._fmt_momentum_acceleration(),
+            "volume_liquidity": self._fmt_volume_liquidity(),
+            "risk_volatility": self._fmt_risk_volatility(),
+        }
+
+        try:
+            return "\n\n".join([
+                self._fmt_header(),
+                *(prompt_sections[section] for section in self.report_sections if section in prompt_sections)
+            ])
+        except Exception as e:
+            print(f"Error building prompt: {e}")
+            print("Falling back to full report.")
+            return "\n\n".join([
+                self._fmt_header(),
+                self._fmt_absolute_momentum(),
+                self._fmt_benchmark_relative(),
+                self._fmt_sector_relative(),
+                self._fmt_trend_structure(),
+                self._fmt_momentum_acceleration(),
+                self._fmt_volume_liquidity(),
+                self._fmt_risk_volatility(),
+            ])
 
 
 class MomentumFactorsModel:
@@ -221,18 +241,6 @@ class MomentumFactorsModel:
             + self.stock_data["return_252d_percentile"]
         ) / 4
 
-        print("Data loaded successfully.")
-        print(f"Stock data shape: {self.stock_data.shape}")
-        print(f"Benchmark data shape: {self.benchmark_data.shape}")
-        print("Sample stock data:")
-        print(self.stock_data.head())
-        print("Sample benchmark return_5d:")
-        print(self.benchmark_data.loc[self.benchmark_symbol, "return_5d"])
-        print("sample etf data:")
-        print(self.etf_data.head())
-        print("Sample stock columns:")
-        print(self.stock_data.columns.to_list())
-
     def get(self, symbol: str, col: str):
         if symbol not in self.stock_data.index:
             raise ValueError()
@@ -240,7 +248,7 @@ class MomentumFactorsModel:
             raise ValueError()
         return self.stock_data.loc[symbol, col]
 
-    def build_snapshot(self, symbol: str):
+    def build_snapshot(self, symbol: str, report_sections: list[str] | str) -> MomentumSnapshot:
         return MomentumSnapshot(
             symbol=symbol,
             signal_day=self.signal_day,
@@ -281,6 +289,8 @@ class MomentumFactorsModel:
             return_20d_percentile=self.get(symbol, "return_20d_percentile"),
             return_60d_percentile=self.get(symbol, "return_60d_percentile"),
             return_252d_percentile=self.get(symbol, "return_252d_percentile"),
+            report_sections=report_sections if isinstance(report_sections, list) else [report_sections],
+
         )
 
 
@@ -304,7 +314,12 @@ if __name__ == "__main__":
     print(signal_day)
 
     agent = MomentumFactorsModel(signal_day, symbols, benchmark, etf_symbol)
+    report_sections = [
+        "absolute_momentum",
+        "benchmark_relative",
+        "risk_volatility",
+    ]
     for i in range(len(symbols)):
-        Snapshot= agent.build_snapshot(symbols[i])
+        Snapshot= agent.build_snapshot(symbols[i], report_sections)
         print(Snapshot.to_agent_prompt()+"\n\n")
     print(agent.get("NVDA", "return_5d"))

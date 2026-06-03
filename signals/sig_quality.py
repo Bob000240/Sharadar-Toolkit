@@ -66,6 +66,8 @@ class QualitySnapshot:
     # Composite
     quality_composite_percentile: float
 
+    report_sections: list[str]
+
     def _fmt_header(self) -> str:
         return "\n".join([
             f"QUALITY ANALYSIS - {self.symbol} | Signal date: {self.signal_day}",
@@ -135,13 +137,28 @@ class QualitySnapshot:
         ])
 
     def to_agent_prompt(self) -> str:
-        return "\n\n".join([
-            self._fmt_header(),
-            self._fmt_profitability(),
-            self._fmt_cash_quality(),
-            self._fmt_balance_sheet(),
-            self._fmt_market_risk(),
-        ])
+        prompt_sections = {
+            "profitability": self._fmt_profitability(),
+            "cash_quality": self._fmt_cash_quality(),
+            "balance_sheet": self._fmt_balance_sheet(),
+            "market_risk": self._fmt_market_risk(),
+        }
+
+        try:
+            return "\n\n".join([
+                self._fmt_header(),
+                *(prompt_sections[section] for section in self.report_sections if section in prompt_sections)
+            ])
+        except Exception as e:
+            print(f"Error building prompt: {e}")
+            print("Falling back to full report.")
+            return "\n\n".join([
+                self._fmt_header(),
+                self._fmt_profitability(),
+                self._fmt_cash_quality(),
+                self._fmt_balance_sheet(),
+                self._fmt_market_risk(),
+            ])
 
 
 class QualityFactorsModel:
@@ -186,7 +203,7 @@ class QualityFactorsModel:
         v = self.stock_data.loc[symbol, col]
         return None if pd.isna(v) else v
 
-    def build_snapshot(self, symbol: str) -> QualitySnapshot:
+    def build_snapshot(self, symbol: str, report_sections: list[str] | str) -> QualitySnapshot:
         if symbol not in self.stock_data.index:
             raise ValueError(f"Symbol {symbol} not in data")
         return QualitySnapshot(
@@ -215,6 +232,7 @@ class QualityFactorsModel:
             operating_margin_percentile=self._get(symbol, "operating_margin_percentile"),
             fcf_margin_percentile=self._get(symbol, "fcf_margin_percentile"),
             quality_composite_percentile=self._get(symbol, "quality_composite_percentile"),
+            report_sections=report_sections if isinstance(report_sections, list) else [report_sections],
         )
 
 
@@ -222,6 +240,12 @@ if __name__ == "__main__":
     symbols = ["NVDA", "AAPL", "MSFT", "AMZN", "GOOGL"]
     signal_day = pd.Timestamp.today()
     model = QualityFactorsModel(signal_day, symbols)
+    report_sections = [
+        "profitability",
+        "cash_quality",
+        "balance_sheet",
+        "market_risk",
+    ]
     for sym in symbols:
-        print(model.build_snapshot(sym).to_agent_prompt())
+        print(model.build_snapshot(sym, report_sections).to_agent_prompt())
         print()
