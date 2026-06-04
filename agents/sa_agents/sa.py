@@ -10,7 +10,6 @@ class AgentVerdict:
     direction: Literal["bullish", "neutral", "bearish"]
     confidence: float  # 0.0 – 1.0
     reasoning: str     # full thesis from analyze()
-    precentage_allocation: float
 
     def __str__(self) -> str:
         return (
@@ -20,8 +19,6 @@ class AgentVerdict:
             f"  direction={self.direction!r},\n"
             f"  confidence={self.confidence:.2f} ({self.confidence:.0%}),\n"
             f"  reasoning={self.reasoning!r},\n"
-            f"  precentage_allocation={self.precentage_allocation:.2f} "
-            f"({self.precentage_allocation:.0%})\n"
             f")"
         )
 
@@ -63,13 +60,10 @@ class SignalAgent(ABC):
         except (TypeError, ValueError):
             confidence = 0.5
 
-        allocation = confidence if direction == "bullish" else 0.0
-
         return AgentVerdict(
             symbol=snapshot.symbol,
             signal_type=self.signal_type,
             direction=direction,
             confidence=confidence,
             reasoning=thesis,
-            precentage_allocation=allocation,
         )

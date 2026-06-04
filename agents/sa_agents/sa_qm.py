@@ -102,7 +102,6 @@ class QualityMomentumAgent(SignalAgent):
             direction=direction,
             confidence=confidence,
             reasoning=thesis,
-            precentage_allocation=allocation,
         )
 
 
@@ -113,7 +112,7 @@ if __name__ == "__main__":
     from signals.sig_growth   import GrowthFactorsModel
     from signals.sig_value    import ValueFactorsModel
 
-    symbols   = ["NVDA", "AAPL", "MSFT", "AMZN", "GOOGL"]
+    symbols   = ["GOOGL"]
     etf_symbols = [
         "XLK", "XLY", "XLC", "XLF", "XLV",
         "XLI", "XLE", "XLB", "XLRE", "XLU", "XLP",

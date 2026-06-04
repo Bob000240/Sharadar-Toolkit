@@ -17,8 +17,8 @@ _QUALITY_COLS = [
 
 _VALUE_COLS = [
     "symbol", "date",
-    "pe_ratio", "forward_pe", "peg_ratio", "earnings_yield",
-    "pb_ratio", "p_tangible_book",
+    "pe_ratio", "forward_pe", "earnings_yield",
+    "pb_ratio", "p_tangible_book", "price_to_sales",
     "ev_ebitda", "ev_sales", "ev_fcf",
     "price_to_fcf", "fcf_yield",
     "dividend_yield", "buyback_yield", "shareholder_yield",
@@ -34,7 +34,7 @@ _GROWTH_COLS = [
 # Combined column list for get_latest_fundamentals JOIN result
 # (excludes duplicate symbol/date/period columns)
 _ALL_QUALITY = [c for c in _QUALITY_COLS if c not in ("symbol", "date")]
-_ALL_VALUE   = [c for c in _VALUE_COLS   if c not in ("symbol", "date")]
+_ALL_VALUE = [c for c in _VALUE_COLS if c not in ("symbol", "date")]
 
 
 # ---------------------------------------------------------------------------
@@ -71,10 +71,10 @@ def create_fundamentals_tables():
                 date                DATE NOT NULL,
                 pe_ratio            DOUBLE PRECISION,
                 forward_pe          DOUBLE PRECISION,
-                peg_ratio           DOUBLE PRECISION,
                 earnings_yield      DOUBLE PRECISION,
                 pb_ratio            DOUBLE PRECISION,
                 p_tangible_book     DOUBLE PRECISION,
+                price_to_sales      DOUBLE PRECISION,
                 ev_ebitda           DOUBLE PRECISION,
                 ev_sales            DOUBLE PRECISION,
                 ev_fcf              DOUBLE PRECISION,
