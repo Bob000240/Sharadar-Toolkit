@@ -28,7 +28,7 @@ _GROWTH_COLS = [
     "symbol", "date", "period",
     "revenue_growth_yoy", "eps_growth_yoy",
     "revenue_growth_qoq", "eps_growth_qoq",
-    "revenue_vs_sector_growth", "eps_revision_3m",
+    "revenue_vs_sector_growth",
 ]
 
 # Combined column list for get_latest_fundamentals JOIN result
@@ -96,7 +96,6 @@ def create_fundamentals_tables():
                 revenue_growth_qoq      DOUBLE PRECISION,
                 eps_growth_qoq          DOUBLE PRECISION,
                 revenue_vs_sector_growth DOUBLE PRECISION,
-                eps_revision_3m         DOUBLE PRECISION,
                 PRIMARY KEY (symbol, date, period)
             );
         """))
@@ -145,12 +144,7 @@ def insert_value(df: pd.DataFrame):
 
 
 def insert_growth(df: pd.DataFrame):
-    df = df.copy()
-    # Detect period from which growth columns are populated
-    is_annual = df["revenue_growth_yoy"].notna() | df["eps_growth_yoy"].notna()
-    df["period"] = "quarter"
-    df.loc[is_annual, "period"] = "annual"
-    _insert("growth_fundamentals", _GROWTH_COLS, df)
+    _insert("growth_fundamentals", _GROWTH_COLS, df.copy())
 
 
 # ---------------------------------------------------------------------------
@@ -167,7 +161,7 @@ def get_latest_fundamentals(symbols: str | list[str], signal_day: pd.Timestamp) 
     symbols = [symbols] if isinstance(symbols, str) else symbols
     day     = signal_day.date() if hasattr(signal_day, "date") else signal_day
 
-    _ANN_GROWTH = ["revenue_growth_yoy", "eps_growth_yoy", "revenue_vs_sector_growth", "eps_revision_3m"]
+    _ANN_GROWTH = ["revenue_growth_yoy", "eps_growth_yoy", "revenue_vs_sector_growth"]
     _QTR_GROWTH = ["revenue_growth_qoq", "eps_growth_qoq"]
 
     q_cols  = ", ".join(f"q.{c}"  for c in _ALL_QUALITY)
@@ -196,7 +190,7 @@ def get_latest_fundamentals(symbols: str | list[str], signal_day: pd.Timestamp) 
         ) v ON q.symbol = v.symbol
         LEFT JOIN (
             SELECT DISTINCT ON (symbol) symbol, revenue_growth_yoy, eps_growth_yoy,
-                   revenue_vs_sector_growth, eps_revision_3m
+                   revenue_vs_sector_growth
             FROM growth_fundamentals
             WHERE symbol = ANY(:symbols) AND date <= :day AND period = 'annual'
             ORDER BY symbol, date DESC

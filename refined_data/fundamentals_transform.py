@@ -49,7 +49,6 @@ GROWTH_COLS = [
     "symbol", "date", "period",
     "revenue_growth_yoy", "eps_growth_yoy",
     "revenue_growth_qoq", "eps_growth_qoq",
-    "eps_revision_3m",
 ]
 
 
@@ -183,4 +182,30 @@ def build_value(fd: FundamentalsData) -> pd.DataFrame:
 
 
 def build_growth(fd: FundamentalsData) -> pd.DataFrame:
-    raise NotImplementedError
+    rows = []
+    for sym in fd.symbols:
+        for g in fd.financial_growth(sym, period="annual").to_dict("records"):
+            rows.append({
+                "symbol":             sym,
+                "date":               str(g.get("date", ""))[:10],
+                "period":             "annual",
+                "revenue_growth_yoy": _f(g, "revenueGrowth"),
+                "eps_growth_yoy":     _f(g, "epsdilutedGrowth"),
+                "revenue_growth_qoq": None,
+                "eps_growth_qoq":     None,
+            })
+        for g in fd.financial_growth(sym, period="quarter").to_dict("records"):
+            rows.append({
+                "symbol":             sym,
+                "date":               str(g.get("date", ""))[:10],
+                "period":             "quarter",
+                "revenue_growth_yoy": None,
+                "eps_growth_yoy":     None,
+                "revenue_growth_qoq": _f(g, "revenueGrowth"),
+                "eps_growth_qoq":     _f(g, "epsdilutedGrowth"),
+            })
+
+    df = pd.DataFrame(rows)
+    if not df.empty:
+        df["date"] = pd.to_datetime(df["date"]).dt.date
+    return df

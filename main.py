@@ -1,6 +1,7 @@
 from data_collection.market_data import MarketData
 from data_collection.sector_data import get_sector
 from data_collection.fundamentals_data import FundamentalsData
+from refined_data.fundamentals_transform import build_quality, build_value, build_growth
 from refined_data.indicators import compute_indicators
 import database.market_repository as market_repo
 import database.indicator_repository as indicator_repo
@@ -594,9 +595,9 @@ if __name__ == "__main__":
 
     stock_symbols = [s for s in all_symbols if s not in benchmark_symbol]
     fd = FundamentalsData(stock_symbols)
-    fund_repo.insert_quality(fd.get_quality())
-    fund_repo.insert_value(fd.get_value())
-    fund_repo.insert_growth(fd.get_growth())
+    fund_repo.insert_quality(build_quality(fd))
+    fund_repo.insert_value(build_value(fd))
+    fund_repo.insert_growth(build_growth(fd))
 
     df = market_repo.get_OHLCV(["SPY", "AAPL"], start_date, end_date)
     print(df.sort_values("date", ascending=False).head())
@@ -610,5 +611,3 @@ if __name__ == "__main__":
     print(df.sort_values("date", ascending=False).head())
     df = fund_repo.get_value(["SPY", "AAPL"], start_date, end_date)
     print(df.sort_values("date", ascending=False).head())
-
-    print(initial_filter(symbols, pd.Timestamp.today()))

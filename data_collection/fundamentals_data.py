@@ -83,10 +83,19 @@ class FundamentalsData:
         sym = [sym] if isinstance(sym, str) else sym
         return pd.DataFrame(self._fetch_multi("analyst-estimates", sym, period="annual", limit=limit))
 
-
+"""
 if __name__ == "__main__":
     symbols = ["AAPL", "MSFT", "NVDA","QQQ"]
     fd = FundamentalsData(symbols)
-
+    print(fd.income(symbols))
+    print(fd.balance(symbols))
+    print(fd.cashflow(symbols))
+    print(fd.key_metrics(symbols))
+    print(fd.key_metrics_ttm(symbols))
+    print(fd.ratios(symbols))
     print(fd.profile(symbols))
+    print(fd.financial_growth(symbols, period="quarter"))
+    print(fd.financial_growth(symbols, period="annual"))
+    print(fd.analyst_estimates(symbols))
 
+"""

@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Literal
+from agents.llm_client import call_llm_analyze, call_llm_verdict, ANALYSIS_MODEL, VERDICT_MODEL
 
 
 @dataclass
@@ -9,7 +10,7 @@ class AgentVerdict:
     signal_type: str
     direction: Literal["bullish", "neutral", "bearish"]
     confidence: float  # 0.0 – 1.0
-    reasoning: str     # full thesis from analyze()
+    reasoning: str
 
     def __str__(self) -> str:
         return (
@@ -24,8 +25,9 @@ class AgentVerdict:
 
 
 class SignalAgent(ABC):
-    def __init__(self, model: str):
+    def __init__(self, model: str = ANALYSIS_MODEL, verdict_model: str = VERDICT_MODEL):
         self.model = model
+        self.verdict_model = verdict_model
 
     @property
     @abstractmethod
@@ -35,31 +37,26 @@ class SignalAgent(ABC):
     @abstractmethod
     def system_prompt(self) -> str: ...
 
-    def analyze(self, snapshot) -> str:
-        """gpt-4o reads snapshot data and writes a free-text investment thesis."""
-        from agents.llm_client import call_llm_analyze
-        return call_llm_analyze(self.system_prompt, snapshot.to_agent_prompt(), self.model)
-
-    def verdict(self, thesis: str) -> dict:
-        """gpt-4o-mini reads the thesis and returns a structured JSON verdict."""
-        from agents.llm_client import call_llm_verdict
-        return call_llm_verdict(thesis)
-
-    def run(self, snapshot) -> AgentVerdict:
-        """Full pipeline: analyze → verdict → AgentVerdict."""
-        thesis = self.analyze(snapshot)
-        raw    = self.verdict(thesis)
-
+    def _parse_verdict(self, raw: dict) -> tuple[str, float]:
         direction = str(raw.get("direction", "neutral")).lower()
         if direction not in ("bullish", "neutral", "bearish"):
             direction = "neutral"
-
         try:
             confidence = float(raw.get("confidence", 0.5))
             confidence = max(0.0, min(1.0, confidence))
         except (TypeError, ValueError):
             confidence = 0.5
+        return direction, confidence
 
+    def analyze(self, snapshot) -> str:
+        return call_llm_analyze(self.system_prompt, snapshot.to_agent_prompt(), self.model)
+
+    def verdict(self, thesis: str) -> dict:
+        return call_llm_verdict(thesis, self.verdict_model)
+
+    def run(self, snapshot) -> AgentVerdict:
+        thesis = self.analyze(snapshot)
+        direction, confidence = self._parse_verdict(self.verdict(thesis))
         return AgentVerdict(
             symbol=snapshot.symbol,
             signal_type=self.signal_type,

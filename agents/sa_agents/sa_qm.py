@@ -1,7 +1,6 @@
 from agents.sa_agents.sa import SignalAgent, AgentVerdict
 from agents.llm_client import call_llm_analyze, ANALYSIS_MODEL, VERDICT_MODEL
 
-# Sections fed to each snapshot — tuned for QM signal relevance
 QUALITY_SECTIONS  = ["profitability", "cash_quality"]
 MOMENTUM_SECTIONS = ["absolute_momentum", "benchmark_relative", "trend_structure"]
 GROWTH_SECTIONS   = ["eps_growth", "estimate_revisions"]
@@ -55,8 +54,7 @@ class QualityMomentumAgent(SignalAgent):
         analysis_model: str = ANALYSIS_MODEL,
         verdict_model: str = VERDICT_MODEL,
     ):
-        super().__init__(model=analysis_model)
-        self.verdict_model = verdict_model
+        super().__init__(model=analysis_model, verdict_model=verdict_model)
 
     @property
     def signal_type(self) -> str:
@@ -67,7 +65,6 @@ class QualityMomentumAgent(SignalAgent):
         return _SYSTEM_PROMPT
 
     def analyze(self, quality_snap, momentum_snap, growth_snap, value_snap) -> str:
-        """gpt-4o reads all four snapshots and writes a free-text investment thesis."""
         combined = "\n\n".join([
             quality_snap.to_agent_prompt(),
             momentum_snap.to_agent_prompt(),
@@ -76,26 +73,9 @@ class QualityMomentumAgent(SignalAgent):
         ])
         return call_llm_analyze(self.system_prompt, combined, self.model)
 
-    # verdict(thesis: str) -> dict is inherited from SignalAgent unchanged —
-    # it always takes a thesis string regardless of how many snapshots were used.
-
     def run(self, quality_snap, momentum_snap, growth_snap, value_snap) -> AgentVerdict:
-        """Full pipeline: analyze → verdict → AgentVerdict."""
         thesis = self.analyze(quality_snap, momentum_snap, growth_snap, value_snap)
-        raw    = self.verdict(thesis)
-
-        direction = str(raw.get("direction", "neutral")).lower()
-        if direction not in ("bullish", "neutral", "bearish"):
-            direction = "neutral"
-
-        try:
-            confidence = float(raw.get("confidence", 0.5))
-            confidence = max(0.0, min(1.0, confidence))
-        except (TypeError, ValueError):
-            confidence = 0.5
-
-        allocation = confidence if direction == "bullish" else 0.0
-
+        direction, confidence = self._parse_verdict(self.verdict(thesis))
         return AgentVerdict(
             symbol=quality_snap.symbol,
             signal_type=self.signal_type,
@@ -112,13 +92,10 @@ if __name__ == "__main__":
     from signals.sig_growth   import GrowthFactorsModel
     from signals.sig_value    import ValueFactorsModel
 
-    symbols   = ["GOOGL"]
-    etf_symbols = [
-        "XLK", "XLY", "XLC", "XLF", "XLV",
-        "XLI", "XLE", "XLB", "XLRE", "XLU", "XLP",
-    ]
-    benchmark  = "SPY"
-    signal_day = pd.Timestamp.today()
+    symbols     = ["GOOGL"]
+    etf_symbols = ["XLK", "XLY", "XLC", "XLF", "XLV", "XLI", "XLE", "XLB", "XLRE", "XLU", "XLP"]
+    benchmark   = "SPY"
+    signal_day  = pd.Timestamp.today()
 
     quality_model  = QualityFactorsModel(signal_day, symbols)
     momentum_model = MomentumFactorsModel(signal_day, symbols, benchmark, etf_symbols)
@@ -128,11 +105,11 @@ if __name__ == "__main__":
     agent = QualityMomentumAgent()
 
     for sym in symbols:
-        quality_snap  = quality_model.build_snapshot(sym, QUALITY_SECTIONS)
-        momentum_snap = momentum_model.build_snapshot(sym, MOMENTUM_SECTIONS)
-        growth_snap   = growth_model.build_snapshot(sym, GROWTH_SECTIONS)
-        value_snap    = value_model.build_snapshot(sym, VALUE_SECTIONS)
-
-        result = agent.run(quality_snap, momentum_snap, growth_snap, value_snap)
+        result = agent.run(
+            quality_model.build_snapshot(sym, QUALITY_SECTIONS),
+            momentum_model.build_snapshot(sym, MOMENTUM_SECTIONS),
+            growth_model.build_snapshot(sym, GROWTH_SECTIONS),
+            value_model.build_snapshot(sym, VALUE_SECTIONS),
+        )
         print(result)
         print()
