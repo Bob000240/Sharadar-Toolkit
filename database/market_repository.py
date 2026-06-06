@@ -79,6 +79,19 @@ def get_OHLCV(
     return pd.read_sql_query(text(query), engine, params=params)
 
 
+def get_latest_date(symbols: str | list[str]) -> pd.DataFrame:
+    """Returns DataFrame(symbol, latest_date) — the most recent date in the DB per symbol."""
+    engine = get_connection()
+    symbols = [symbols] if isinstance(symbols, str) else symbols
+    query = text("""
+        SELECT symbol, MAX(date) AS latest_date
+        FROM OHLCV_data
+        WHERE symbol = ANY(:symbols)
+        GROUP BY symbol
+    """)
+    return pd.read_sql_query(query, engine, params={"symbols": symbols})
+
+
 def get_latest_OHLCV(symbols: str | list[str], signal_day: pd.Timestamp):
     engine = get_connection()
     symbols = [symbols] if isinstance(symbols, str) else symbols

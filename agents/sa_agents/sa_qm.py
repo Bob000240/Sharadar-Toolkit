@@ -1,9 +1,13 @@
+import pandas as pd
 from agents.sa_agents.sa import SignalAgent, AgentVerdict
 from agents.llm_client import call_llm_analyze, ANALYSIS_MODEL, VERDICT_MODEL
+import database.indicator_repository as indicator_repo
+import database.fundamentals_repository as fund_repo
+from config import STOCK_SYMBOLS
 
 QUALITY_SECTIONS  = ["profitability", "cash_quality"]
 MOMENTUM_SECTIONS = ["absolute_momentum", "benchmark_relative", "trend_structure"]
-GROWTH_SECTIONS   = ["eps_growth", "estimate_revisions"]
+GROWTH_SECTIONS   = ["eps_growth", "growth_quality"]
 VALUE_SECTIONS    = ["earnings_valuation"]
 
 _SYSTEM_PROMPT = """You are a quantitative equity analyst specialising in Quality-Momentum investing.
@@ -56,6 +60,28 @@ class QualityMomentumAgent(SignalAgent):
     ):
         super().__init__(model=analysis_model, verdict_model=verdict_model)
 
+    def prefilter(self, symbols: list[str], as_of: pd.Timestamp) -> list[str]:
+        # Tier 1: technical gates
+        ind = indicator_repo.get_latest_indicators(symbols, as_of)
+        if not ind.empty:
+            ind = ind.set_index("symbol")
+            passed = ind[
+                ind["above_sma_200"].eq(True) &
+                ind["volume_ratio"].gt(0.8)
+            ].index.tolist()
+        else:
+            passed = symbols
+
+        # Tier 2: fundamental gates
+        fund = fund_repo.get_latest_fundamentals(passed, as_of)
+        if not fund.empty:
+            fund = fund.set_index("symbol")
+            profitable   = fund["earnings_yield"].gt(0)
+            cash_healthy = fund["fcf_margin"].gt(0) | fund["operating_margin"].gt(0)
+            passed = fund[profitable & cash_healthy].index.tolist()
+
+        return passed
+
     @property
     def signal_type(self) -> str:
         return "quality_momentum"
@@ -91,11 +117,11 @@ if __name__ == "__main__":
     from signals.sig_momentum import MomentumFactorsModel
     from signals.sig_growth   import GrowthFactorsModel
     from signals.sig_value    import ValueFactorsModel
-
-    symbols     = ["GOOGL"]
+    
     etf_symbols = ["XLK", "XLY", "XLC", "XLF", "XLV", "XLI", "XLE", "XLB", "XLRE", "XLU", "XLP"]
     benchmark   = "SPY"
     signal_day  = pd.Timestamp.today()
+    symbols   = QualityMomentumAgent().prefilter(STOCK_SYMBOLS, signal_day)
 
     quality_model  = QualityFactorsModel(signal_day, symbols)
     momentum_model = MomentumFactorsModel(signal_day, symbols, benchmark, etf_symbols)

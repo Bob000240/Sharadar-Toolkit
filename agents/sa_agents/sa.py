@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Literal
+import pandas as pd
 from agents.llm_client import call_llm_analyze, call_llm_verdict, ANALYSIS_MODEL, VERDICT_MODEL
 
 
@@ -47,6 +48,9 @@ class SignalAgent(ABC):
         except (TypeError, ValueError):
             confidence = 0.5
         return direction, confidence
+
+    def prefilter(self, symbols: list[str], as_of: pd.Timestamp) -> list[str]:
+        return symbols
 
     def analyze(self, snapshot) -> str:
         return call_llm_analyze(self.system_prompt, snapshot.to_agent_prompt(), self.model)

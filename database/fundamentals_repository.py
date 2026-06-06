@@ -28,7 +28,6 @@ _GROWTH_COLS = [
     "symbol", "date", "period",
     "revenue_growth_yoy", "eps_growth_yoy",
     "revenue_growth_qoq", "eps_growth_qoq",
-    "revenue_vs_sector_growth",
 ]
 
 # Combined column list for get_latest_fundamentals JOIN result
@@ -95,7 +94,6 @@ def create_fundamentals_tables():
                 eps_growth_yoy          DOUBLE PRECISION,
                 revenue_growth_qoq      DOUBLE PRECISION,
                 eps_growth_qoq          DOUBLE PRECISION,
-                revenue_vs_sector_growth DOUBLE PRECISION,
                 PRIMARY KEY (symbol, date, period)
             );
         """))
@@ -135,6 +133,16 @@ def _insert(table: str, cols: list[str], df: pd.DataFrame):
         """), records)
 
 
+def delete_value_today(symbols: list[str], date) -> None:
+    """Delete today's value rows so they can be refreshed with current prices."""
+    engine = get_connection()
+    with engine.begin() as conn:
+        conn.execute(text("""
+            DELETE FROM value_fundamentals
+            WHERE symbol = ANY(:symbols) AND date = :date
+        """), {"symbols": symbols, "date": date})
+
+
 def insert_quality(df: pd.DataFrame):
     _insert("quality_fundamentals", _QUALITY_COLS, df.copy())
 
@@ -161,7 +169,7 @@ def get_latest_fundamentals(symbols: str | list[str], signal_day: pd.Timestamp) 
     symbols = [symbols] if isinstance(symbols, str) else symbols
     day     = signal_day.date() if hasattr(signal_day, "date") else signal_day
 
-    _ANN_GROWTH = ["revenue_growth_yoy", "eps_growth_yoy", "revenue_vs_sector_growth"]
+    _ANN_GROWTH = ["revenue_growth_yoy", "eps_growth_yoy"]
     _QTR_GROWTH = ["revenue_growth_qoq", "eps_growth_qoq"]
 
     q_cols  = ", ".join(f"q.{c}"  for c in _ALL_QUALITY)
@@ -189,8 +197,7 @@ def get_latest_fundamentals(symbols: str | list[str], signal_day: pd.Timestamp) 
             ORDER BY symbol, date DESC
         ) v ON q.symbol = v.symbol
         LEFT JOIN (
-            SELECT DISTINCT ON (symbol) symbol, revenue_growth_yoy, eps_growth_yoy,
-                   revenue_vs_sector_growth
+            SELECT DISTINCT ON (symbol) symbol, revenue_growth_yoy, eps_growth_yoy
             FROM growth_fundamentals
             WHERE symbol = ANY(:symbols) AND date <= :day AND period = 'annual'
             ORDER BY symbol, date DESC

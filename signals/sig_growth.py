@@ -32,9 +32,6 @@ class GrowthSnapshot:
     eps_growth_yoy: float | None
     eps_growth_qoq: float | None
 
-    # Estimate revisions (None until snapshot job is running)
-    eps_revision_3m: float | None
-
     # Growth quality
     growth_consistency_score: float | None   # fraction of years with positive revenue growth
 
@@ -77,17 +74,6 @@ class GrowthSnapshot:
             f"  Quarter-over-quarter: {_pct(self.eps_growth_qoq)}   (sequential momentum)",
         ])
 
-    def _fmt_estimate_revisions(self) -> str:
-        if self.eps_revision_3m is not None and self.eps_revision_3m == self.eps_revision_3m:
-            direction = "rising" if self.eps_revision_3m > 0 else "falling"
-            rev_str = f"{_pct(self.eps_revision_3m)}  ({direction}; positive = analysts upgrading)"
-        else:
-            rev_str = "N/A  (requires scheduled estimate snapshot job)"
-        return "\n".join([
-            "--- ESTIMATE REVISIONS ---",
-            f"  Consensus EPS revision (3m): {rev_str}",
-        ])
-
     def _fmt_growth_quality(self) -> str:
         if self.growth_consistency_score is not None and self.growth_consistency_score == self.growth_consistency_score:
             pct_positive = self.growth_consistency_score
@@ -104,7 +90,6 @@ class GrowthSnapshot:
         prompt_sections = {
             "revenue_growth": self._fmt_revenue_growth(),
             "eps_growth": self._fmt_eps_growth(),
-            "estimate_revisions": self._fmt_estimate_revisions(),
             "growth_quality": self._fmt_growth_quality(),
         }
 
@@ -120,7 +105,6 @@ class GrowthSnapshot:
                 self._fmt_header(),
                 self._fmt_revenue_growth(),
                 self._fmt_eps_growth(),
-                self._fmt_estimate_revisions(),
                 self._fmt_growth_quality(),
             ])
 
@@ -137,7 +121,6 @@ class GrowthFactorsModel:
         self._load_data()
 
     def _load_data(self):
-        # Latest row per symbol: most recent annual yoy + most recent quarterly qoq
         fundamentals = fundamentals_repo.get_latest_fundamentals(
             self.stock_symbols, self.signal_day
         )
@@ -147,13 +130,11 @@ class GrowthFactorsModel:
         sector_mapping = sector_mapping.set_index("symbol")
         fundamentals["sector"] = sector_mapping["sector"]
 
-        # Compute revenue_vs_sector_growth cross-sectionally within this universe
         sector_avg = fundamentals.groupby("sector")["revenue_growth_yoy"].transform("mean")
         fundamentals["revenue_vs_sector_growth"] = (
             fundamentals["revenue_growth_yoy"] - sector_avg
         )
 
-        # Compute growth_consistency_score from multi-year annual history
         all_annual = fundamentals_repo.get_growth(self.stock_symbols)
         all_annual = all_annual[all_annual["period"] == "annual"]
 
@@ -170,7 +151,6 @@ class GrowthFactorsModel:
         )
         fundamentals = fundamentals.join(consistency)
 
-        # Universe percentiles
         fundamentals["revenue_growth_percentile"] = (
             fundamentals["revenue_growth_yoy"].rank(pct=True) * 100
         )
@@ -200,7 +180,6 @@ class GrowthFactorsModel:
             revenue_vs_sector_growth=self._get(symbol, "revenue_vs_sector_growth"),
             eps_growth_yoy=self._get(symbol, "eps_growth_yoy"),
             eps_growth_qoq=self._get(symbol, "eps_growth_qoq"),
-            eps_revision_3m=self._get(symbol, "eps_revision_3m"),
             growth_consistency_score=self._get(symbol, "growth_consistency_score"),
             revenue_growth_percentile=self._get(symbol, "revenue_growth_percentile"),
             eps_growth_percentile=self._get(symbol, "eps_growth_percentile"),
@@ -216,7 +195,6 @@ if __name__ == "__main__":
     report_sections = [
         "revenue_growth",
         "eps_growth",
-        "estimate_revisions",
         "growth_quality",
     ]
     for sym in symbols:

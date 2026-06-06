@@ -1,4 +1,5 @@
 import os
+import time
 import requests
 import pandas as pd
 from datetime import date as date_cls
@@ -7,6 +8,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 BASE_URL = "https://financialmodelingprep.com/stable"
+
+_REQUEST_DELAY = 0.25  # seconds between requests to stay under rate limits
 
 class FundamentalsData:
     def __init__(self, symbols: str | list[str]):
@@ -22,12 +25,23 @@ class FundamentalsData:
         cache_key = f"{endpoint},{sorted(params.items())}"
         if cache_key in self._cache:
             return self._cache[cache_key]
-        r = self._session.get(
-            f"{BASE_URL}/{endpoint}",
-            params={**params, "apikey": self._key},
-            timeout=30,
-        )
-        r.raise_for_status()
+
+        url = f"{BASE_URL}/{endpoint}"
+        req_params = {**params, "apikey": self._key}
+        backoff = 1.0
+        for attempt in range(5):
+            time.sleep(_REQUEST_DELAY)
+            r = self._session.get(url, params=req_params, timeout=30)
+            if r.status_code == 429:
+                print(f"Rate limited on {endpoint} (attempt {attempt + 1}), retrying in {backoff:.0f}s…")
+                time.sleep(backoff)
+                backoff = min(backoff * 2, 60)
+                continue
+            r.raise_for_status()
+            break
+        else:
+            r.raise_for_status()
+
         data = r.json()
         if isinstance(data, dict):
             if msg := data.get("Error Message"):
