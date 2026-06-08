@@ -17,11 +17,11 @@ _QUALITY_COLS = [
 
 _VALUE_COLS = [
     "symbol", "date",
-    "pe_ratio", "forward_pe", "earnings_yield",
-    "pb_ratio", "p_tangible_book", "price_to_sales",
+    "pe_ratio", "earnings_yield",
+    "pb_ratio", "price_to_sales",
     "ev_ebitda", "ev_sales", "ev_fcf",
     "price_to_fcf", "fcf_yield",
-    "dividend_yield", "buyback_yield", "shareholder_yield",
+    "dividend_yield",
 ]
 
 _GROWTH_COLS = [
@@ -69,10 +69,8 @@ def create_fundamentals_tables():
                 symbol              TEXT NOT NULL,
                 date                DATE NOT NULL,
                 pe_ratio            DOUBLE PRECISION,
-                forward_pe          DOUBLE PRECISION,
                 earnings_yield      DOUBLE PRECISION,
                 pb_ratio            DOUBLE PRECISION,
-                p_tangible_book     DOUBLE PRECISION,
                 price_to_sales      DOUBLE PRECISION,
                 ev_ebitda           DOUBLE PRECISION,
                 ev_sales            DOUBLE PRECISION,
@@ -80,8 +78,6 @@ def create_fundamentals_tables():
                 price_to_fcf        DOUBLE PRECISION,
                 fcf_yield           DOUBLE PRECISION,
                 dividend_yield      DOUBLE PRECISION,
-                buyback_yield       DOUBLE PRECISION,
-                shareholder_yield   DOUBLE PRECISION,
                 PRIMARY KEY (symbol, date)
             );
         """))

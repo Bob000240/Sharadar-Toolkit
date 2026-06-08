@@ -2,7 +2,6 @@ import os
 import time
 import requests
 import pandas as pd
-from datetime import date as date_cls
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -56,6 +55,19 @@ class FundamentalsData:
             rows.extend(self._fetch(endpoint, symbol=s, **params))
         return rows
 
+    def _ttm(self, endpoint: str, syms: list[str]) -> pd.DataFrame:
+        """Fetch a TTM endpoint that returns a single row per symbol."""
+        rows = []
+        for s in syms:
+            data = self._fetch(endpoint, symbol=s)
+            if data:
+                rows.append({**data[0], "symbol": s})
+        return pd.DataFrame(rows)
+
+    # -------------------------------------------------------------------------
+    # Financial Statements
+    # -------------------------------------------------------------------------
+
     def income(self, sym: str | list[str], period: str = "annual", limit: int = 10) -> pd.DataFrame:
         sym = [sym] if isinstance(sym, str) else sym
         return pd.DataFrame(self._fetch_multi("income-statement", sym, period=period, limit=limit))
@@ -68,48 +80,147 @@ class FundamentalsData:
         sym = [sym] if isinstance(sym, str) else sym
         return pd.DataFrame(self._fetch_multi("cash-flow-statement", sym, period=period, limit=limit))
 
+    # -------------------------------------------------------------------------
+    # Financial Statements TTM
+    # -------------------------------------------------------------------------
+
+    def income_ttm(self, sym: str | list[str]) -> pd.DataFrame:
+        sym = [sym] if isinstance(sym, str) else sym
+        return self._ttm("income-statement-ttm", sym)
+
+    def balance_ttm(self, sym: str | list[str]) -> pd.DataFrame:
+        sym = [sym] if isinstance(sym, str) else sym
+        return self._ttm("balance-sheet-statement-ttm", sym)
+
+    def cashflow_ttm(self, sym: str | list[str]) -> pd.DataFrame:
+        sym = [sym] if isinstance(sym, str) else sym
+        return self._ttm("cash-flow-statement-ttm", sym)
+
+    # -------------------------------------------------------------------------
+    # Ratios
+    # -------------------------------------------------------------------------
+
     def key_metrics(self, sym: str | list[str], limit: int = 10) -> pd.DataFrame:
         sym = [sym] if isinstance(sym, str) else sym
         return pd.DataFrame(self._fetch_multi("key-metrics", sym, period="annual", limit=limit))
 
     def key_metrics_ttm(self, sym: str | list[str]) -> pd.DataFrame:
         sym = [sym] if isinstance(sym, str) else sym
-        rows = []
-        for s in sym:
-            data = self._fetch("key-metrics-ttm", symbol=s)
-            if data:
-                rows.append(data[0])
-        return pd.DataFrame(rows)
+        return self._ttm("key-metrics-ttm", sym)
 
     def ratios(self, sym: str | list[str], limit: int = 10) -> pd.DataFrame:
         sym = [sym] if isinstance(sym, str) else sym
         return pd.DataFrame(self._fetch_multi("ratios", sym, period="annual", limit=limit))
 
-    def profile(self, sym: str | list[str]) -> pd.DataFrame:
+    def ratios_ttm(self, sym: str | list[str]) -> pd.DataFrame:
         sym = [sym] if isinstance(sym, str) else sym
-        return pd.DataFrame(self._fetch_multi("profile", sym))
+        return self._ttm("ratios-ttm", sym)
+
+    # -------------------------------------------------------------------------
+    # Analysis
+    # -------------------------------------------------------------------------
+
+    def owner_earnings(self, sym: str | list[str], limit: int = 10) -> pd.DataFrame:
+        sym = [sym] if isinstance(sym, str) else sym
+        return pd.DataFrame(self._fetch_multi("owner-earnings", sym, limit=limit))
+
+    def enterprise_values(self, sym: str | list[str], period: str = "annual", limit: int = 10) -> pd.DataFrame:
+        sym = [sym] if isinstance(sym, str) else sym
+        return pd.DataFrame(self._fetch_multi("enterprise-values", sym, period=period, limit=limit))
+
+    # -------------------------------------------------------------------------
+    # Growth
+    # -------------------------------------------------------------------------
+
+    def income_growth(self, sym: str | list[str], period: str = "annual", limit: int = 10) -> pd.DataFrame:
+        sym = [sym] if isinstance(sym, str) else sym
+        return pd.DataFrame(self._fetch_multi("income-statement-growth", sym, period=period, limit=limit))
+
+    def balance_growth(self, sym: str | list[str], period: str = "annual", limit: int = 10) -> pd.DataFrame:
+        sym = [sym] if isinstance(sym, str) else sym
+        return pd.DataFrame(self._fetch_multi("balance-sheet-statement-growth", sym, period=period, limit=limit))
+
+    def cashflow_growth(self, sym: str | list[str], period: str = "annual", limit: int = 10) -> pd.DataFrame:
+        sym = [sym] if isinstance(sym, str) else sym
+        return pd.DataFrame(self._fetch_multi("cash-flow-statement-growth", sym, period=period, limit=limit))
 
     def financial_growth(self, sym: str | list[str], period: str = "annual", limit: int = 10) -> pd.DataFrame:
         sym = [sym] if isinstance(sym, str) else sym
         return pd.DataFrame(self._fetch_multi("financial-growth", sym, period=period, limit=limit))
 
+    # -------------------------------------------------------------------------
+    # Formats / SEC Filings
+    # -------------------------------------------------------------------------
+
+    def financial_report_dates(self, sym: str | list[str]) -> pd.DataFrame:
+        sym = [sym] if isinstance(sym, str) else sym
+        return pd.DataFrame(self._fetch_multi("financial-reports-dates", sym))
+
+    def financial_report_json(self, sym: str, year: int, period: str = "FY") -> dict:
+        """period: FY | Q1 | Q2 | Q3 | Q4"""
+        data = self._fetch("financial-reports-json", symbol=sym, year=year, period=period)
+        return data[0] if data else {}
+
+    # -------------------------------------------------------------------------
+    # Segmentation
+    # -------------------------------------------------------------------------
+
+    def revenue_product_segmentation(self, sym: str | list[str], period: str = "annual") -> pd.DataFrame:
+        sym = [sym] if isinstance(sym, str) else sym
+        return pd.DataFrame(self._fetch_multi("revenue-product-segmentation", sym, period=period))
+
+    def revenue_geographic_segmentation(self, sym: str | list[str], period: str = "annual") -> pd.DataFrame:
+        sym = [sym] if isinstance(sym, str) else sym
+        return pd.DataFrame(self._fetch_multi("revenue-geographic-segmentation", sym, period=period))
+
+    # -------------------------------------------------------------------------
+    # Other (kept from original)
+    # -------------------------------------------------------------------------
+
+    def profile(self, sym: str | list[str]) -> pd.DataFrame:
+        sym = [sym] if isinstance(sym, str) else sym
+        return pd.DataFrame(self._fetch_multi("profile", sym))
+
     def analyst_estimates(self, sym: str | list[str], limit: int = 2) -> pd.DataFrame:
         sym = [sym] if isinstance(sym, str) else sym
         return pd.DataFrame(self._fetch_multi("analyst-estimates", sym, period="annual", limit=limit))
 
-"""
-if __name__ == "__main__":
-    symbols = ["AAPL", "MSFT", "NVDA","QQQ"]
-    fd = FundamentalsData(symbols)
-    print(fd.income(symbols))
-    print(fd.balance(symbols))
-    print(fd.cashflow(symbols))
-    print(fd.key_metrics(symbols))
-    print(fd.key_metrics_ttm(symbols))
-    print(fd.ratios(symbols))
-    print(fd.profile(symbols))
-    print(fd.financial_growth(symbols, period="quarter"))
-    print(fd.financial_growth(symbols, period="annual"))
-    print(fd.analyst_estimates(symbols))
 
-"""
+
+if __name__ == "__main__":
+    fd = FundamentalsData(["AAPL"])
+    sym = "AAPL"
+
+    checks = [
+        ("income (annual)",                  lambda: fd.income(sym)),
+        ("balance (annual)",                 lambda: fd.balance(sym)),
+        ("cashflow (annual)",                lambda: fd.cashflow(sym)),
+        ("latest_statements",                lambda: fd.latest_statements(sym)),
+        ("income_ttm",                       lambda: fd.income_ttm(sym)),
+        ("balance_ttm",                      lambda: fd.balance_ttm(sym)),
+        ("cashflow_ttm",                     lambda: fd.cashflow_ttm(sym)),
+        ("key_metrics (annual)",             lambda: fd.key_metrics(sym)),
+        ("key_metrics_ttm",                  lambda: fd.key_metrics_ttm(sym)),
+        ("ratios (annual)",                  lambda: fd.ratios(sym)),
+        ("ratios_ttm",                       lambda: fd.ratios_ttm(sym)),
+        ("owner_earnings",                   lambda: fd.owner_earnings(sym)),
+        ("enterprise_values",                lambda: fd.enterprise_values(sym)),
+        ("income_growth (annual)",           lambda: fd.income_growth(sym)),
+        ("balance_growth (annual)",          lambda: fd.balance_growth(sym)),
+        ("cashflow_growth (annual)",         lambda: fd.cashflow_growth(sym)),
+        ("financial_growth (annual)",        lambda: fd.financial_growth(sym)),
+        ("financial_report_dates",           lambda: fd.financial_report_dates(sym)),
+        ("revenue_product_segmentation",     lambda: fd.revenue_product_segmentation(sym)),
+        ("revenue_geographic_segmentation",  lambda: fd.revenue_geographic_segmentation(sym)),
+        ("profile",                          lambda: fd.profile(sym)),
+        ("analyst_estimates",                lambda: fd.analyst_estimates(sym)),
+    ]
+
+    for name, fn in checks:
+        try:
+            df = fn()
+            print(f"\n=== {name} ===")
+            print(list(df.columns) if not df.empty else "  (empty)")
+        except Exception as e:
+            print(f"\n=== {name} ===")
+            print(f"  ERROR: {e}")

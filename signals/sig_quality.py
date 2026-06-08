@@ -69,72 +69,68 @@ class QualitySnapshot:
     report_sections: list[str]
 
     def _fmt_header(self) -> str:
-        return "\n".join([
-            f"QUALITY ANALYSIS - {self.symbol} | Signal date: {self.signal_day}",
-            f"Sector: {self.sector}",
-            f"Quality composite rank: {_rank(self.quality_composite_percentile)}"
-            f"  (avg of ROE, ROIC, operating margin, FCF margin percentiles)",
-        ])
+        return (
+            f"[QUALITY] {self.symbol} | {str(self.signal_day)[:10]} | Sector: {self.sector}\n"
+            f"Composite rank: {_rank(self.quality_composite_percentile)} "
+            f"(avg of ROE, ROIC, op. margin, FCF margin percentiles)"
+        )
 
     def _fmt_profitability(self) -> str:
-        return "\n".join([
-            "--- PROFITABILITY ---",
-            f"  Return on equity (ROE):              {_pct(self.roe)}"
-            f"   (universe rank: {_rank(self.roe_percentile)})",
-            f"  Return on assets (ROA):              {_pct(self.roa)}",
-            f"  Return on invested capital (ROIC):   {_pct(self.roic)}"
-            f"   (universe rank: {_rank(self.roic_percentile)})",
-            f"  Gross margin:                        {_pct(self.gross_margin)}",
-            f"  Operating margin:                    {_pct(self.operating_margin)}"
-            f"   (universe rank: {_rank(self.operating_margin_percentile)})",
-            f"  Net margin:                          {_pct(self.net_margin)}",
-            f"  Free cash flow margin:               {_pct(self.fcf_margin)}"
-            f"   (universe rank: {_rank(self.fcf_margin_percentile)})",
-        ])
+        return (
+            "Profitability:\n"
+            f"  ROE: {_pct(self.roe)} (rank {self.roe_percentile:.0f}th) | "
+            f"ROA: {_pct(self.roa)} | "
+            f"ROIC: {_pct(self.roic)} (rank {self.roic_percentile:.0f}th; quality threshold: >15%)\n"
+            f"  Gross margin: {_pct(self.gross_margin)} | "
+            f"Op. margin: {_pct(self.operating_margin)} (rank {self.operating_margin_percentile:.0f}th) | "
+            f"Net margin: {_pct(self.net_margin)}\n"
+            f"  FCF margin: {_pct(self.fcf_margin)} (rank {self.fcf_margin_percentile:.0f}th)"
+        )
 
     def _fmt_cash_quality(self) -> str:
-        return "\n".join([
-            "--- CASH QUALITY ---",
-            f"  Cash conversion (FCF / net income):  {_x(self.cash_conversion, '.2f')}"
-            f"  (>1.0 = earnings fully backed by cash)",
-            f"  Accruals ratio:                      "
-            f"{self.accruals_ratio:.3f}  (lower = higher quality; >0.1 = elevated concern)"
+        accruals_str = (
+            f"{self.accruals_ratio:.3f} (concern: >0.10)"
             if self.accruals_ratio is not None and self.accruals_ratio == self.accruals_ratio
-            else "  Accruals ratio:                      N/A",
-        ])
+            else "N/A"
+        )
+        return (
+            "Cash quality:\n"
+            f"  Cash conversion (FCF/net income): {_x(self.cash_conversion, '.2f')} (>1.0 = earnings backed by cash) | "
+            f"Accruals ratio: {accruals_str}"
+        )
 
     def _fmt_balance_sheet(self) -> str:
         ic_str = (
-            f"{self.interest_coverage:.1f}x  (>3x = debt burden manageable)"
+            f"{self.interest_coverage:.1f}x (>3x safe)"
             if self.interest_coverage is not None and self.interest_coverage == self.interest_coverage
-            else "N/A  (net interest income — company earns more than it pays)"
+            else "N/A (net interest income)"
         )
         nd_str = (
-            f"{self.net_debt_to_ebitda:.2f}x  (<3x = conservative)"
+            f"{self.net_debt_to_ebitda:.2f}x (<3x conservative)"
             if self.net_debt_to_ebitda is not None and self.net_debt_to_ebitda == self.net_debt_to_ebitda
             else "N/A"
         )
-        return "\n".join([
-            "--- BALANCE SHEET STRENGTH ---",
-            f"  Debt-to-equity:                {_x(self.debt_to_equity, '.2f')}  (<1.0 = conservative leverage)",
-            f"  Net debt / EBITDA:             {nd_str}",
-            f"  Interest coverage (EBIT/Int):  {ic_str}",
-            f"  Current ratio:                 {_x(self.current_ratio, '.2f')}  (>1.0 = liquid)",
-            f"  Asset turnover:                {_x(self.asset_turnover, '.2f')}  (higher = more efficient)",
-        ])
+        return (
+            "Balance sheet:\n"
+            f"  D/E: {_x(self.debt_to_equity, '.2f')} (<1.0 conservative) | "
+            f"Net debt/EBITDA: {nd_str} | "
+            f"Interest coverage: {ic_str}\n"
+            f"  Current ratio: {_x(self.current_ratio, '.2f')} (>1.0 liquid) | "
+            f"Asset turnover: {_x(self.asset_turnover, '.2f')}"
+        )
 
     def _fmt_market_risk(self) -> str:
         drawdown_note = (
             "at recent peak"
             if self.drawdown_from_recent_high == 0
-            else f"{self.drawdown_from_recent_high:.1%} off 20-day high"
+            else f"{self.drawdown_from_recent_high:.1%} off 20d high"
         )
-        return "\n".join([
-            "--- MARKET RISK ---",
-            f"  20-day realised volatility (ann.):  {self.volatility_20:.1%}",
-            f"  ATR as % of price:                  {self.atr_pct:.2%}",
-            f"  Drawdown from 20-day high:          {drawdown_note}",
-        ])
+        return (
+            "Market risk:\n"
+            f"  20d vol (ann.): {self.volatility_20:.1%} | "
+            f"ATR: {self.atr_pct:.2%} of price | "
+            f"Drawdown: {drawdown_note}"
+        )
 
     def to_agent_prompt(self) -> str:
         prompt_sections = {
@@ -237,7 +233,8 @@ class QualityFactorsModel:
 
 
 if __name__ == "__main__":
-    symbols = ["NVDA", "AAPL", "MSFT", "AMZN", "GOOGL"]
+    symbols = ["AAPL", "MSFT", "NVDA", "AVGO", "AMD",
+    "ADBE", "CSCO", "ORCL", "CRM", "INTC"]
     signal_day = pd.Timestamp.today()
     model = QualityFactorsModel(signal_day, symbols)
     report_sections = [

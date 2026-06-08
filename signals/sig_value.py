@@ -31,7 +31,6 @@ class ValueSnapshot:
 
     # Earnings-based
     pe_ratio: float | None
-    forward_pe: float | None
     earnings_yield: float | None
 
     # Cash flow-based
@@ -43,13 +42,10 @@ class ValueSnapshot:
 
     # Asset / revenue-based
     pb_ratio: float | None
-    p_tangible_book: float | None
     price_to_sales: float | None
 
     # Yield-based
     dividend_yield: float | None
-    buyback_yield: float | None
-    shareholder_yield: float | None
 
     # Universe-relative ranks (higher = cheaper)
     earnings_yield_percentile: float
@@ -69,56 +65,41 @@ class ValueSnapshot:
     report_sections: list[str]
 
     def _fmt_header(self) -> str:
-        return "\n".join([
-            f"VALUE ANALYSIS - {self.symbol} | Signal date: {self.signal_day}",
-            f"Sector: {self.sector}",
-            f"Value composite rank: {_rank(self.value_composite_percentile)}"
-            f"  (higher = cheaper vs universe peers)",
-        ])
+        return (
+            f"[VALUE] {self.symbol} | {str(self.signal_day)[:10]} | Sector: {self.sector}\n"
+            f"Composite rank: {_rank(self.value_composite_percentile)} (higher = cheaper vs peers)"
+        )
 
     def _fmt_earnings_valuation(self) -> str:
-        return "\n".join([
-            "--- EARNINGS-BASED VALUATION ---",
-            f"  Trailing P/E:    {_x(self.pe_ratio)}"
-            f"   (universe rank: {_rank(self.pe_inverted_percentile)}; lower P/E = higher rank)",
-            f"  Forward P/E:     {_x(self.forward_pe)}",
-            f"  Earnings yield:  {_pct(self.earnings_yield)}"
-            f"   (universe rank: {_rank(self.earnings_yield_percentile)})",
-        ])
+        return (
+            "Earnings-based:\n"
+            f"  P/E: {_x(self.pe_ratio)} (rank {self.pe_inverted_percentile:.0f}th inverted; lower P/E = higher rank) | "
+            f"Earnings yield: {_pct(self.earnings_yield)} (rank {self.earnings_yield_percentile:.0f}th)"
+        )
 
     def _fmt_cashflow_valuation(self) -> str:
-        return "\n".join([
-            "--- CASH FLOW & REVENUE VALUATION ---",
-            f"  Price-to-FCF:    {_x(self.price_to_fcf)}"
-            f"   (universe rank: {_rank(self.pe_inverted_percentile)})",
-            f"  FCF yield:       {_pct(self.fcf_yield)}"
-            f"   (universe rank: {_rank(self.fcf_yield_percentile)})",
-            f"  EV/EBITDA:       {_x(self.ev_ebitda)}"
-            f"   (universe rank: {_rank(self.ev_ebitda_inverted_percentile)})",
-            f"  EV/Sales:        {_x(self.ev_sales)}"
-            f"   (universe rank: {_rank(self.ev_sales_inverted_percentile)})",
-            f"  EV/FCF:          {_x(self.ev_fcf)}",
-            f"  Price-to-Sales:  {_x(self.price_to_sales)}"
-            f"   (universe rank: {_rank(self.ps_inverted_percentile)})",
-        ])
+        return (
+            "Cash flow & revenue:\n"
+            f"  P/FCF: {_x(self.price_to_fcf)} | "
+            f"FCF yield: {_pct(self.fcf_yield)} (rank {self.fcf_yield_percentile:.0f}th) | "
+            f"EV/EBITDA: {_x(self.ev_ebitda)} (rank {self.ev_ebitda_inverted_percentile:.0f}th inverted)\n"
+            f"  EV/Sales: {_x(self.ev_sales)} (rank {self.ev_sales_inverted_percentile:.0f}th inverted) | "
+            f"EV/FCF: {_x(self.ev_fcf)} | "
+            f"P/S: {_x(self.price_to_sales)} (rank {self.ps_inverted_percentile:.0f}th inverted)"
+        )
 
     def _fmt_asset_income_valuation(self) -> str:
-        return "\n".join([
-            "--- ASSET & INCOME VALUATION ---",
-            f"  Price-to-book (P/B):       {_x(self.pb_ratio, '.2f')}",
-            f"  Price-to-tangible-book:    {_x(self.p_tangible_book, '.2f')}",
-            f"  Dividend yield:            {_pct(self.dividend_yield)}",
-            f"  Buyback yield:             {_pct(self.buyback_yield)}",
-            f"  Total shareholder yield:   {_pct(self.shareholder_yield)}",
-        ])
+        return (
+            "Asset & income:\n"
+            f"  P/B: {_x(self.pb_ratio, '.2f')} | Dividend yield: {_pct(self.dividend_yield)}"
+        )
 
     def _fmt_sector_relative(self) -> str:
-        return "\n".join([
-            "--- SECTOR-RELATIVE VALUATION ---",
-            f"  P/E vs sector peers:       {_rank(self.pe_sector_percentile)}"
-            f"  (higher = cheaper than sector peers)",
-            f"  EV/EBITDA vs sector peers: {_rank(self.ev_ebitda_sector_percentile)}",
-        ])
+        return (
+            "Sector-relative (higher = cheaper than sector peers):\n"
+            f"  P/E vs sector: {_rank(self.pe_sector_percentile)} | "
+            f"EV/EBITDA vs sector: {_rank(self.ev_ebitda_sector_percentile)}"
+        )
 
     def to_agent_prompt(self) -> str:
         prompt_sections = {
@@ -207,7 +188,6 @@ class ValueFactorsModel:
             signal_day=self.signal_day,
             sector=self._get(symbol, "sector"),
             pe_ratio=self._get(symbol, "pe_ratio"),
-            forward_pe=self._get(symbol, "forward_pe"),
             earnings_yield=self._get(symbol, "earnings_yield"),
             price_to_fcf=self._get(symbol, "price_to_fcf"),
             fcf_yield=self._get(symbol, "fcf_yield"),
@@ -215,11 +195,8 @@ class ValueFactorsModel:
             ev_sales=self._get(symbol, "ev_sales"),
             ev_fcf=self._get(symbol, "ev_fcf"),
             pb_ratio=self._get(symbol, "pb_ratio"),
-            p_tangible_book=self._get(symbol, "p_tangible_book"),
             price_to_sales=self._get(symbol, "price_to_sales"),
             dividend_yield=self._get(symbol, "dividend_yield"),
-            buyback_yield=self._get(symbol, "buyback_yield"),
-            shareholder_yield=self._get(symbol, "shareholder_yield"),
             earnings_yield_percentile=self._get(symbol, "earnings_yield_percentile"),
             fcf_yield_percentile=self._get(symbol, "fcf_yield_percentile"),
             pe_inverted_percentile=self._get(symbol, "pe_inverted_percentile"),
@@ -234,7 +211,8 @@ class ValueFactorsModel:
 
 
 if __name__ == "__main__":
-    symbols = ["NVDA", "AAPL", "MSFT", "AMZN", "GOOGL"]
+    symbols = ["AAPL", "MSFT", "NVDA", "AVGO", "AMD",
+    "ADBE", "CSCO", "ORCL", "CRM", "INTC"]
     signal_day = pd.Timestamp.today()
     model = ValueFactorsModel(signal_day, symbols)
     report_sections = [

@@ -82,67 +82,64 @@ class MomentumSnapshot:
         return f"{v:.0f}th percentile"
 
     def _fmt_header(self) -> str:
-        return "\n".join([
-            f"MOMENTUM ANALYSIS - {self.symbol} | Signal date: {self.signal_day}",
-            f"Sector: {self.sector} | Current price: ${self.price:.2f}",
-            f"Composite rank: {self._rank(self.momentum_composite_percentile)} - average across all four windows",
-            f"Consistency:    {self.momentum_consistency}/4 periods positive (5d / 20d / 60d / 252d)",
-        ])
+        return (
+            f"[MOMENTUM] {self.symbol} | {str(self.signal_day)[:10]} | Sector: {self.sector} | Price: ${self.price:.2f}\n"
+            f"Composite rank: {self._rank(self.momentum_composite_percentile)} | "
+            f"Consistency: {self.momentum_consistency}/4 periods positive (5d/20d/60d/252d)"
+        )
 
     def _fmt_absolute_momentum(self) -> str:
-        return "\n".join([
-            "--- ABSOLUTE MOMENTUM (raw price performance) ---",
-            f"  5-day return:   {self._pct(self.return_5d)}   (universe rank: {self._rank(self.return_5d_percentile)})",
-            f" 20-day return:   {self._pct(self.return_20d)}   (universe rank: {self._rank(self.return_20d_percentile)})",
-            f" 60-day return:   {self._pct(self.return_60d)}   (universe rank: {self._rank(self.return_60d_percentile)})",
-            f"252-day return:   {self._pct(self.return_252d)}   (universe rank: {self._rank(self.return_252d_percentile)})",
-        ])
+        return (
+            "Absolute returns (universe rank):\n"
+            f"  5d: {self._pct(self.return_5d)} (rank {self.return_5d_percentile:.0f}th) | "
+            f"20d: {self._pct(self.return_20d)} (rank {self.return_20d_percentile:.0f}th) | "
+            f"60d: {self._pct(self.return_60d)} (rank {self.return_60d_percentile:.0f}th) | "
+            f"252d: {self._pct(self.return_252d)} (rank {self.return_252d_percentile:.0f}th)"
+        )
 
     def _fmt_benchmark_relative(self) -> str:
-        return "\n".join([
-            "--- BENCHMARK-RELATIVE MOMENTUM (vs S&P 500) ---",
-            f"  5-day excess return:  {self._pct(self.excess_return_5d)}  (positive = outperforming the market)",
-            f" 20-day excess return:  {self._pct(self.excess_return_20d)}",
-        ])
+        return (
+            "vs S&P 500 (positive = outperforming):\n"
+            f"  5d excess: {self._pct(self.excess_return_5d)} | "
+            f"20d excess: {self._pct(self.excess_return_20d)}"
+        )
 
     def _fmt_sector_relative(self) -> str:
-        return "\n".join([
-            "--- SECTOR-RELATIVE MOMENTUM (vs sector ETF) ---",
-            f"  5-day vs sector:  {self._pct(self.sector_relative_5d)}  (positive = outperforming sector peers)",
-            f" 20-day vs sector:  {self._pct(self.sector_relative_20d)}",
-        ])
+        return (
+            f"vs Sector ETF (positive = outperforming sector peers):\n"
+            f"  5d vs sector: {self._pct(self.sector_relative_5d)} | "
+            f"20d vs sector: {self._pct(self.sector_relative_20d)}"
+        )
 
     def _fmt_trend_structure(self) -> str:
-        return "\n".join([
-            "--- TREND STRUCTURE ---",
-            f"  Above 200-day moving average: {self.above_sma_200}  (True = long-term uptrend intact)",
-            f"  Above 50-day moving average:  {self.above_sma_50}  (True = medium-term uptrend intact)",
-            f"  Distance from 52-week high:   {self._pct(self.pct_from_52w_high)}  (0% = at new high)",
-            f"  New 52-week high today:        {self.new_52w_high}",
-            f"  60-day trend R^2:               {self.r_squared_60d:.2f}  (0 = chaotic, 1 = perfectly linear climb)",
-            f"  60-day annualized trend slope: {self._pct(self.trend_slope_60d)} per year",
-            f"  Trend quality score (slope*R^2):{self.slope_x_r2:.3f}  (higher = stronger, smoother uptrend)",
-        ])
+        high_note = "at new 52w high" if self.new_52w_high else f"{self._pct(self.pct_from_52w_high)} from 52w high"
+        return (
+            "Trend structure:\n"
+            f"  Above SMA-200: {self.above_sma_200} | Above SMA-50: {self.above_sma_50} | {high_note}\n"
+            f"  60d R²: {self.r_squared_60d:.2f} (0=chaotic, 1=linear) | "
+            f"Trend slope: {self._pct(self.trend_slope_60d)}/yr | "
+            f"Trend quality (slope×R²): {self.slope_x_r2:.3f}"
+        )
 
     def _fmt_momentum_acceleration(self) -> str:
-        return "\n".join([
-            "--- MOMENTUM ACCELERATION ---",
-            f"  Short-term  (5d vs 20d):  {self._pct(self.momentum_accel_5_20)}  (positive = recent acceleration)",
-            f"  Medium-term (20d vs 60d): {self._pct(self.momentum_accel_20_60)}  (positive = broadening momentum)",
-        ])
+        return (
+            "Momentum acceleration (positive = accelerating):\n"
+            f"  Short-term (5d vs 20d): {self._pct(self.momentum_accel_5_20)} | "
+            f"Medium-term (20d vs 60d): {self._pct(self.momentum_accel_20_60)}"
+        )
 
     def _fmt_volume_liquidity(self) -> str:
-        return "\n".join([
-            "--- VOLUME & LIQUIDITY ---",
-            f"  Volume ratio (vs 50-day avg):  {self.volume_ratio:.2f}x  (>1 = above-average participation)",
-            f"  Avg daily dollar volume (20d):  ${self.dollar_volume_20d_avg:,.0f}",
-        ])
+        return (
+            "Volume & liquidity:\n"
+            f"  Volume ratio: {self.volume_ratio:.2f}x vs 50d avg (>1 = above-average participation) | "
+            f"Avg daily dollar vol: ${self.dollar_volume_20d_avg:,.0f}"
+        )
 
     def _fmt_risk_volatility(self) -> str:
-        return "\n".join([
-            "--- RISK-ADJUSTED MOMENTUM ---",
-            f"  Vol-adjusted momentum (60d return / 20d vol):  {self.vol_adjusted_momentum:.2f}",
-        ])
+        return (
+            "Risk-adjusted momentum:\n"
+            f"  Vol-adjusted (60d return / 20d vol): {self.vol_adjusted_momentum:.2f}"
+        )
 
     def to_agent_prompt(self) -> str:
         prompt_sections = {
@@ -210,7 +207,8 @@ class MomentumFactorsModel:
 
         all_indicators["close"] = all_OHLCV["close"]
         all_indicators["sector"] = sector_mapping["sector"]
-        all_indicators["above_sma_50"] = all_indicators["close"] > all_indicators["sma_50"]
+        all_indicators["above_sma_50"]  = all_indicators["close"] > all_indicators["sma_50"]
+        all_indicators["above_sma_200"] = all_indicators["close"] > all_indicators["sma_200"]
 
         self.stock_data = all_indicators.loc[self.stock_symbols].copy()
         self.benchmark_data = all_indicators.loc[[self.benchmark_symbol]].copy()
@@ -295,7 +293,8 @@ class MomentumFactorsModel:
 
 
 if __name__ == "__main__":
-    symbols = ["NVDA", "AAPL", "MSFT", "AMZN", "GOOGL"]
+    symbols = ["AAPL", "MSFT", "NVDA", "AVGO", "AMD",
+    "ADBE", "CSCO", "ORCL", "CRM", "INTC"]
     etf_symbol = [
         "XLK",
         "XLY",
@@ -322,4 +321,3 @@ if __name__ == "__main__":
     for i in range(len(symbols)):
         Snapshot= agent.build_snapshot(symbols[i], report_sections)
         print(Snapshot.to_agent_prompt()+"\n\n")
-    print(agent.get("NVDA", "return_5d"))

@@ -133,7 +133,8 @@ class MacroFactorsModel:
         if not spy_df.empty:
             spy_row = spy_df[spy_df["symbol"] == "SPY"]
             if not spy_row.empty:
-                self._spy_above_sma_200 = bool(spy_row["above_sma_200"].iloc[0])
+                r = spy_row.iloc[0]
+                self._spy_above_sma_200 = bool(r["close"] > r["sma_200"]) if r["sma_200"] else False
 
     def build_snapshot(self) -> MacroSnapshot:
         m = self._macro

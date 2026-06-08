@@ -66,7 +66,7 @@ class QualityMomentumAgent(SignalAgent):
         if not ind.empty:
             ind = ind.set_index("symbol")
             passed = ind[
-                ind["above_sma_200"].eq(True) &
+                (ind["close"] > ind["sma_200"]) &
                 ind["volume_ratio"].gt(0.8)
             ].index.tolist()
         else:

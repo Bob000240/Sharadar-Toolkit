@@ -59,21 +59,11 @@ def update_indicators():
     print("Indicators updated")
 
 
-def update_fundamentals():
-    today = pd.Timestamp.today()
-    fd    = FundamentalsData(STOCK_SYMBOLS)
-
-    # Value data is price-based — delete today's stale rows then re-insert
-    fund_repo.delete_value_today(STOCK_SYMBOLS, today.date())
-    fund_repo.insert_value(build_value(fd))
-
-    print("Fundamentals updated")
-
-
 def update_fundamentals_full():
-    """Re-fetch quality and growth (quarterly reports). Run weekly or after earnings season."""
+    """Re-fetch quality, value, and growth (annual/quarterly filings). Run after earnings season."""
     fd = FundamentalsData(STOCK_SYMBOLS)
     fund_repo.insert_quality(build_quality(fd))
+    fund_repo.insert_value(build_value(fd))
     fund_repo.insert_growth(build_growth(fd))
     print("Full fundamentals updated")
 
@@ -82,5 +72,4 @@ if __name__ == "__main__":
     print("=== Daily update ===")
     update_market_data()
     update_indicators()
-    update_fundamentals()
     print("=== Done ===")

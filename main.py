@@ -46,12 +46,12 @@ if __name__ == "__main__":
     # sector_repo.insert_sector_mapping(get_sector(ALL_SYMBOLS))
 
     # fund_repo.drop_fundamentals_tables()
-    #fund_repo.create_fundamentals_tables()
+    fund_repo.create_fundamentals_tables()
 
-    #fd = FundamentalsData(STOCK_SYMBOLS)
-    #fund_repo.insert_quality(build_quality(fd))
-    #fund_repo.insert_value(build_value(fd))
-    #fund_repo.insert_growth(build_growth(fd))
+    fd = FundamentalsData(STOCK_SYMBOLS)
+    # fund_repo.insert_quality(build_quality(fd))
+    # fund_repo.insert_growth(build_growth(fd))
+    fund_repo.insert_value(build_value(fd))
 
     df = market_repo.get_OHLCV(["SPY", "AAPL"], start_date, end_date)
     print(df.sort_values("date", ascending=False).head())
@@ -63,5 +63,5 @@ if __name__ == "__main__":
     print(df.sort_values("date", ascending=False).head())
     df = fund_repo.get_growth(["SPY", "AAPL"], start_date, end_date)
     print(df.sort_values("date", ascending=False).head())
-    df = fund_repo.get_value(["SPY", "AAPL"], start_date)
+    df = fund_repo.get_value(["SPY", "AAPL"], start_date,end_date)
     print(df.sort_values("date", ascending=False).head())

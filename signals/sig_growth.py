@@ -45,46 +45,43 @@ class GrowthSnapshot:
     report_sections: list[str]
 
     def _fmt_header(self) -> str:
-        return "\n".join([
-            f"GROWTH ANALYSIS - {self.symbol} | Signal date: {self.signal_day}",
-            f"Sector: {self.sector}",
-            f"Growth composite rank: {_rank(self.growth_composite_percentile)}"
-            f"  (avg of revenue and EPS growth percentiles)",
-        ])
+        return (
+            f"[GROWTH] {self.symbol} | {str(self.signal_day)[:10]} | Sector: {self.sector}\n"
+            f"Composite rank: {_rank(self.growth_composite_percentile)} "
+            f"(avg of revenue and EPS growth percentiles)"
+        )
 
     def _fmt_revenue_growth(self) -> str:
         if self.revenue_vs_sector_growth is not None and self.revenue_vs_sector_growth == self.revenue_vs_sector_growth:
-            sector_note = "outpacing sector" if self.revenue_vs_sector_growth > 0 else "lagging sector"
-            vs_sector = f"{_pct(self.revenue_vs_sector_growth)}  ({sector_note})"
+            direction = "outpacing" if self.revenue_vs_sector_growth > 0 else "lagging"
+            vs_sector = f"{_pct(self.revenue_vs_sector_growth)} ({direction} sector)"
         else:
             vs_sector = "N/A"
-        return "\n".join([
-            "--- REVENUE GROWTH ---",
-            f"  Year-over-year:       {_pct(self.revenue_growth_yoy)}"
-            f"   (universe rank: {_rank(self.revenue_growth_percentile)})",
-            f"  Quarter-over-quarter: {_pct(self.revenue_growth_qoq)}   (sequential momentum)",
-            f"  Vs sector average:    {vs_sector}",
-        ])
+        return (
+            "Revenue growth:\n"
+            f"  YoY: {_pct(self.revenue_growth_yoy)} (rank {self.revenue_growth_percentile:.0f}th) | "
+            f"QoQ: {_pct(self.revenue_growth_qoq)} (sequential) | "
+            f"Vs sector avg: {vs_sector}"
+        )
 
     def _fmt_eps_growth(self) -> str:
-        return "\n".join([
-            "--- EPS GROWTH ---",
-            f"  Year-over-year:       {_pct(self.eps_growth_yoy)}"
-            f"   (universe rank: {_rank(self.eps_growth_percentile)})",
-            f"  Quarter-over-quarter: {_pct(self.eps_growth_qoq)}   (sequential momentum)",
-        ])
+        return (
+            "EPS growth:\n"
+            f"  YoY: {_pct(self.eps_growth_yoy)} (rank {self.eps_growth_percentile:.0f}th) | "
+            f"QoQ: {_pct(self.eps_growth_qoq)} (sequential)"
+        )
 
     def _fmt_growth_quality(self) -> str:
         if self.growth_consistency_score is not None and self.growth_consistency_score == self.growth_consistency_score:
             pct_positive = self.growth_consistency_score
             note = "strong" if pct_positive >= 0.75 else ("moderate" if pct_positive >= 0.5 else "weak")
-            score_str = f"{pct_positive:.0%} of years positive  ({note})"
+            score_str = f"{pct_positive:.0%} of years positive ({note})"
         else:
-            score_str = "N/A  (insufficient history)"
-        return "\n".join([
-            "--- GROWTH QUALITY ---",
-            f"  Revenue growth consistency: {score_str}",
-        ])
+            score_str = "N/A (insufficient history)"
+        return (
+            "Growth consistency:\n"
+            f"  Revenue: {score_str}"
+        )
 
     def to_agent_prompt(self) -> str:
         prompt_sections = {
@@ -189,7 +186,8 @@ class GrowthFactorsModel:
 
 
 if __name__ == "__main__":
-    symbols = ["NVDA", "AAPL", "MSFT", "AMZN", "GOOGL"]
+    symbols = ["AAPL", "MSFT", "NVDA", "AVGO", "AMD",
+    "ADBE", "CSCO", "ORCL", "CRM", "INTC"]
     signal_day = pd.Timestamp.today()
     model = GrowthFactorsModel(signal_day, symbols)
     report_sections = [

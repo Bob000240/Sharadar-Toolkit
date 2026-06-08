@@ -16,9 +16,6 @@ def compute_indicators(df: pd.DataFrame):
     df["sma_20"] = ta.sma(df["close"], length=20)
     df["sma_50"] = ta.sma(df["close"], length=50)
     df["sma_200"] = ta.sma(df["close"], length=200)
-    df["above_sma_200"] = (
-        df["close"].notna() & df["sma_200"].notna() & (df["close"] > df["sma_200"])
-    )
 
     # Relative volume
     df["volume_sma_10"] = ta.sma(df["volume"], length=10)

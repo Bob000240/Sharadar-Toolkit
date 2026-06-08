@@ -22,7 +22,6 @@ def create_indicators_table():
             sma_20 DOUBLE PRECISION,
             sma_50 DOUBLE PRECISION,
             sma_200 DOUBLE PRECISION,
-            above_sma_200 BOOLEAN,
 
             -- Volume
             volume_sma_10 DOUBLE PRECISION,
@@ -88,7 +87,6 @@ _COLUMNS = [
     "sma_20",
     "sma_50",
     "sma_200",
-    "above_sma_200",
     "volume_sma_10",
     "volume_sma_50",
     "volume_ratio",
