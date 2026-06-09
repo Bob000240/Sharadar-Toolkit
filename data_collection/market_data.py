@@ -30,6 +30,7 @@ class MarketData:
             end=pd.Timestamp(end_date),
             sort="desc",
             timeframe=TimeFrame.Day,
+            feed="iex",
         )
 
         raw = self.MarketDataClient.get_stock_bars(hData)

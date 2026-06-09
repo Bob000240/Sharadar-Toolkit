@@ -1,5 +1,5 @@
 import database.fundamentals_repository as fundamentals_repo
-import database.sector_repository as sector_repo
+import database.descriptors_repository as sector_repo
 import pandas as pd
 from dataclasses import dataclass
 
@@ -9,11 +9,6 @@ def _pct(v: float | None) -> str:
         return "N/A"
     return f"{v:+.1%}"
 
-
-def _rank(v: float | None) -> str:
-    if v is None or (isinstance(v, float) and v != v):
-        return "N/A"
-    return f"{v:.0f}th percentile"
 
 
 @dataclass
@@ -39,17 +34,10 @@ class GrowthSnapshot:
     revenue_growth_percentile: float
     eps_growth_percentile: float
 
-    # Composite
-    growth_composite_percentile: float
-
     report_sections: list[str]
 
     def _fmt_header(self) -> str:
-        return (
-            f"[GROWTH] {self.symbol} | {str(self.signal_day)[:10]} | Sector: {self.sector}\n"
-            f"Composite rank: {_rank(self.growth_composite_percentile)} "
-            f"(avg of revenue and EPS growth percentiles)"
-        )
+        return f"[GROWTH] {self.symbol} | {str(self.signal_day)[:10]} | Sector: {self.sector}"
 
     def _fmt_revenue_growth(self) -> str:
         if self.revenue_vs_sector_growth is not None and self.revenue_vs_sector_growth == self.revenue_vs_sector_growth:
@@ -154,11 +142,6 @@ class GrowthFactorsModel:
         fundamentals["eps_growth_percentile"] = (
             fundamentals["eps_growth_yoy"].rank(pct=True) * 100
         )
-        fundamentals["growth_composite_percentile"] = (
-            fundamentals["revenue_growth_percentile"]
-            + fundamentals["eps_growth_percentile"]
-        ) / 2
-
         self.stock_data = fundamentals
 
     def _get(self, symbol: str, col: str):
@@ -180,7 +163,6 @@ class GrowthFactorsModel:
             growth_consistency_score=self._get(symbol, "growth_consistency_score"),
             revenue_growth_percentile=self._get(symbol, "revenue_growth_percentile"),
             eps_growth_percentile=self._get(symbol, "eps_growth_percentile"),
-            growth_composite_percentile=self._get(symbol, "growth_composite_percentile"),
             report_sections=report_sections if isinstance(report_sections, list) else [report_sections],
         )
 

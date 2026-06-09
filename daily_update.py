@@ -1,71 +1,69 @@
 from data_collection.market_data import MarketData
-from data_collection.sector_data import get_sector
+from data_collection.descriptors_data import DescriptorsData
 from data_collection.fundamentals_data import FundamentalsData
 from refined_data.fundamentals_transform import build_quality, build_value, build_growth
 from refined_data.indicators import compute_indicators
 import database.market_repository as market_repo
 import database.indicator_repository as indicator_repo
-import database.sector_repository as sector_repo
+import database.descriptors_repository as descriptor_repo
 import database.fundamentals_repository as fund_repo
 import pandas as pd
-from config import ALL_SYMBOLS, STOCK_SYMBOLS, BENCHMARK_SYMBOLS
+from config import ALL_SYMBOLS, STOCK_SYMBOLS
 
 
 def update_market_data():
-    today      = pd.Timestamp.today()
-    latest_df  = market_repo.get_latest_date(ALL_SYMBOLS)
-    latest_map = dict(zip(latest_df["symbol"], pd.to_datetime(latest_df["latest_date"])))
-
-    if not latest_map:
-        print("No existing market data — run main.py for initial load")
+    latest = market_repo.get_latest_date(ALL_SYMBOLS)
+    if latest.empty:
+        print("No market data — run main.py for initial load")
         return
-
-    start = min(latest_map.values()) + pd.Timedelta(days=1)
+    start = pd.Timestamp(latest["latest_date"].min()) + pd.Timedelta(days=1)
+    today = pd.Timestamp.today()
     if start.date() > today.date():
         print("Market data already up to date")
         return
-
-    end = today + pd.Timedelta(days=1)
-    df = MarketData().get_OHLCV(ALL_SYMBOLS, start, end)
+    df = MarketData().get_OHLCV(ALL_SYMBOLS, start, today)
     if not df.empty:
         market_repo.insert_OHLCV_table(df)
-        print(f"Market data: inserted {len(df)} new rows")
+        print(f"Market data: {len(df)} new rows")
 
 
 def update_indicators():
-    today      = pd.Timestamp.today()
-    latest_df  = indicator_repo.get_latest_date(ALL_SYMBOLS)
-    latest_map = dict(zip(latest_df["symbol"], pd.to_datetime(latest_df["latest_date"])))
-
+    latest = indicator_repo.get_latest_date(ALL_SYMBOLS)
+    if latest.empty:
+        print("No indicator data — run main.py for initial load")
+        return
+    latest_date = latest["latest_date"].min()
+    today = pd.Timestamp.today().date()
+    if latest_date >= today:
+        print("Indicators already up to date")
+        return
+    lookback_start = pd.Timestamp(latest_date) - pd.Timedelta(days=400)
     for sym in ALL_SYMBOLS:
-        sym_latest = latest_map.get(sym)
-        if sym_latest is not None and sym_latest.date() >= today.date():
-            continue
-
-        # Fetch enough history for the longest lookback (252-day return)
-        lookback_start = today - pd.Timedelta(days=300)
         df = market_repo.get_OHLCV(sym, lookback_start, today)
         if df.empty:
             continue
-
         df = compute_indicators(df)
-
-        if sym_latest is not None:
-            df = df[df["date"] > sym_latest]
-
+        df = df[df["date"] > latest_date]
         if not df.empty:
             indicator_repo.insert_indicators(df)
-
     print("Indicators updated")
 
 
+
+def update_descriptors():
+    """Refresh sector, size bucket, and market cap. Run weekly or when symbols change."""
+    df = DescriptorsData(ALL_SYMBOLS).get_descriptors()
+    descriptor_repo.insert_descriptors(df)
+    print(f"Descriptors updated: {len(df)} symbols")
+
+
 def update_fundamentals_full():
-    """Re-fetch quality, value, and growth (annual/quarterly filings). Run after earnings season."""
+    """Re-fetch quality, value, and growth. Run quarterly after earnings season."""
     fd = FundamentalsData(STOCK_SYMBOLS)
     fund_repo.insert_quality(build_quality(fd))
     fund_repo.insert_value(build_value(fd))
     fund_repo.insert_growth(build_growth(fd))
-    print("Full fundamentals updated")
+    print("Fundamentals updated")
 
 
 if __name__ == "__main__":

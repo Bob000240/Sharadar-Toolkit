@@ -1,6 +1,6 @@
 import database.fundamentals_repository as fundamentals_repo
 import database.indicator_repository as indicator_repo
-import database.sector_repository as sector_repo
+import database.descriptors_repository as sector_repo
 import pandas as pd
 from dataclasses import dataclass
 
@@ -16,11 +16,6 @@ def _x(v: float | None, fmt: str = ".1f") -> str:
         return "N/A"
     return f"{v:{fmt}}x"
 
-
-def _rank(v: float | None) -> str:
-    if v is None or (isinstance(v, float) and v != v):
-        return "N/A"
-    return f"{v:.0f}th percentile"
 
 
 @dataclass
@@ -63,17 +58,10 @@ class QualitySnapshot:
     operating_margin_percentile: float
     fcf_margin_percentile: float
 
-    # Composite
-    quality_composite_percentile: float
-
     report_sections: list[str]
 
     def _fmt_header(self) -> str:
-        return (
-            f"[QUALITY] {self.symbol} | {str(self.signal_day)[:10]} | Sector: {self.sector}\n"
-            f"Composite rank: {_rank(self.quality_composite_percentile)} "
-            f"(avg of ROE, ROIC, op. margin, FCF margin percentiles)"
-        )
+        return f"[QUALITY] {self.symbol} | {str(self.signal_day)[:10]} | Sector: {self.sector}"
 
     def _fmt_profitability(self) -> str:
         return (
@@ -186,13 +174,6 @@ class QualityFactorsModel:
         for col in ["roe", "roic", "operating_margin", "fcf_margin"]:
             fundamentals[f"{col}_percentile"] = fundamentals[col].rank(pct=True) * 100
 
-        fundamentals["quality_composite_percentile"] = (
-            fundamentals["roe_percentile"]
-            + fundamentals["roic_percentile"]
-            + fundamentals["operating_margin_percentile"]
-            + fundamentals["fcf_margin_percentile"]
-        ) / 4
-
         self.stock_data = fundamentals
 
     def _get(self, symbol: str, col: str):
@@ -227,7 +208,6 @@ class QualityFactorsModel:
             roic_percentile=self._get(symbol, "roic_percentile"),
             operating_margin_percentile=self._get(symbol, "operating_margin_percentile"),
             fcf_margin_percentile=self._get(symbol, "fcf_margin_percentile"),
-            quality_composite_percentile=self._get(symbol, "quality_composite_percentile"),
             report_sections=report_sections if isinstance(report_sections, list) else [report_sections],
         )
 

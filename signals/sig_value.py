@@ -1,5 +1,5 @@
 import database.fundamentals_repository as fundamentals_repo
-import database.sector_repository as sector_repo
+import database.descriptors_repository as sector_repo
 import pandas as pd
 from dataclasses import dataclass
 
@@ -59,16 +59,10 @@ class ValueSnapshot:
     pe_sector_percentile: float
     ev_ebitda_sector_percentile: float
 
-    # Composite
-    value_composite_percentile: float
-
     report_sections: list[str]
 
     def _fmt_header(self) -> str:
-        return (
-            f"[VALUE] {self.symbol} | {str(self.signal_day)[:10]} | Sector: {self.sector}\n"
-            f"Composite rank: {_rank(self.value_composite_percentile)} (higher = cheaper vs peers)"
-        )
+        return f"[VALUE] {self.symbol} | {str(self.signal_day)[:10]} | Sector: {self.sector}"
 
     def _fmt_earnings_valuation(self) -> str:
         return (
@@ -157,13 +151,6 @@ class ValueFactorsModel:
         fundamentals["ev_sales_inverted_percentile"]  = 100 - fundamentals["ev_sales"].rank(pct=True) * 100
         fundamentals["ps_inverted_percentile"]        = 100 - fundamentals["price_to_sales"].rank(pct=True) * 100
 
-        fundamentals["value_composite_percentile"] = (
-            fundamentals["earnings_yield_percentile"]
-            + fundamentals["fcf_yield_percentile"]
-            + fundamentals["pe_inverted_percentile"]
-            + fundamentals["ev_ebitda_inverted_percentile"]
-        ) / 4
-
         # Sector-relative percentiles (ascending=False → low ratio = high rank)
         fundamentals["pe_sector_percentile"] = (
             fundamentals.groupby("sector")["pe_ratio"]
@@ -205,7 +192,6 @@ class ValueFactorsModel:
             ps_inverted_percentile=self._get(symbol, "ps_inverted_percentile"),
             pe_sector_percentile=self._get(symbol, "pe_sector_percentile"),
             ev_ebitda_sector_percentile=self._get(symbol, "ev_ebitda_sector_percentile"),
-            value_composite_percentile=self._get(symbol, "value_composite_percentile"),
             report_sections=report_sections if isinstance(report_sections, list) else [report_sections],
         )
 

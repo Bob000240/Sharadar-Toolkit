@@ -1,5 +1,5 @@
 import database.indicator_repository as indicator_repo
-import database.sector_repository as sector_repo
+import database.descriptors_repository as sector_repo
 import database.market_repository as market_repo
 
 import pandas as pd
@@ -17,8 +17,6 @@ class MomentumSnapshot:
     return_60d: float
     return_252d: float
 
-    # Composite momentum
-    momentum_composite_percentile: float
     momentum_consistency: int
     # Count of positive periods across 5d/20d/60d/252d (0–4)
 
@@ -77,14 +75,9 @@ class MomentumSnapshot:
     def _pct(v: float) -> str:
         return f"{v:+.1%}"
 
-    @staticmethod
-    def _rank(v: float) -> str:
-        return f"{v:.0f}th percentile"
-
     def _fmt_header(self) -> str:
         return (
             f"[MOMENTUM] {self.symbol} | {str(self.signal_day)[:10]} | Sector: {self.sector} | Price: ${self.price:.2f}\n"
-            f"Composite rank: {self._rank(self.momentum_composite_percentile)} | "
             f"Consistency: {self.momentum_consistency}/4 periods positive (5d/20d/60d/252d)"
         )
 
@@ -232,13 +225,6 @@ class MomentumFactorsModel:
                 self.stock_data[col].rank(pct=True) * 100
             )
 
-        self.stock_data["momentum_composite_percentile"] = (
-            self.stock_data["return_5d_percentile"]
-            + self.stock_data["return_20d_percentile"]
-            + self.stock_data["return_60d_percentile"]
-            + self.stock_data["return_252d_percentile"]
-        ) / 4
-
     def get(self, symbol: str, col: str):
         if symbol not in self.stock_data.index:
             raise ValueError()
@@ -254,9 +240,6 @@ class MomentumFactorsModel:
             return_20d=self.get(symbol, "return_20d"),
             return_60d=self.get(symbol, "return_60d"),
             return_252d=self.get(symbol, "return_252d"),
-            momentum_composite_percentile=self.get(
-                symbol, "momentum_composite_percentile"
-            ),
             momentum_consistency=sum(
                 [
                     self.get(symbol, "return_5d") > 0,
