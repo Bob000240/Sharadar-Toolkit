@@ -61,6 +61,20 @@ def create_indicators_table():
             momentum_accel_20_60 DOUBLE PRECISION,
             momentum_accel_5_20 DOUBLE PRECISION,
 
+            -- Breakout signals
+            price_vs_20d_high DOUBLE PRECISION,
+            consolidation_tightness DOUBLE PRECISION,
+
+            -- Pullback signals
+            pct_from_sma_20 DOUBLE PRECISION,
+            pct_from_sma_50 DOUBLE PRECISION,
+
+            -- EMA crossover signals
+            ema_9 DOUBLE PRECISION,
+            ema_21 DOUBLE PRECISION,
+            ema_9_above_21 BOOLEAN,
+            ema_crossover_days_ago DOUBLE PRECISION,
+
             PRIMARY KEY (symbol, date)
         );
     """)
@@ -111,6 +125,14 @@ _COLUMNS = [
     "drawdown_from_recent_high",
     "momentum_accel_20_60",
     "momentum_accel_5_20",
+    "price_vs_20d_high",
+    "consolidation_tightness",
+    "pct_from_sma_20",
+    "pct_from_sma_50",
+    "ema_9",
+    "ema_21",
+    "ema_9_above_21",
+    "ema_crossover_days_ago",
 ]
 
 _COL_LIST = ", ".join(_COLUMNS)
@@ -118,6 +140,8 @@ _BIND_LIST = ", ".join(f":{c}" for c in _COLUMNS)
 
 
 def insert_indicators(df: pd.DataFrame):
+    if df.empty:
+        return
     df = df.where(pd.notnull(df), None)
     engine = get_connection()
 

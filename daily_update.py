@@ -1,8 +1,8 @@
 from data_collection.market_data import MarketData
 from data_collection.descriptors_data import DescriptorsData
 from data_collection.fundamentals_data import FundamentalsData
-from refined_data.fundamentals_transform import build_quality, build_value, build_growth
-from refined_data.indicators import compute_indicators
+from processed_data.fundamentals_transform import build_quality, build_value, build_growth
+from processed_data.indicators import compute_indicators
 import database.market_repository as market_repo
 import database.indicator_repository as indicator_repo
 import database.descriptors_repository as descriptor_repo
@@ -38,14 +38,16 @@ def update_indicators():
         print("Indicators already up to date")
         return
     lookback_start = pd.Timestamp(latest_date) - pd.Timedelta(days=400)
-    for sym in ALL_SYMBOLS:
-        df = market_repo.get_OHLCV(sym, lookback_start, today)
-        if df.empty:
-            continue
+    all_ohlcv = market_repo.get_OHLCV(ALL_SYMBOLS, lookback_start, today)
+    rows = []
+    for _, df in all_ohlcv.groupby("symbol", sort=False):
+        df = df.sort_values("date").reset_index(drop=True)
         df = compute_indicators(df)
-        df = df[df["date"] > latest_date]
+        df = df[df["date"] > pd.Timestamp(latest_date)]
         if not df.empty:
-            indicator_repo.insert_indicators(df)
+            rows.append(df)
+    if rows:
+        indicator_repo.insert_indicators(pd.concat(rows, ignore_index=True))
     print("Indicators updated")
 
 

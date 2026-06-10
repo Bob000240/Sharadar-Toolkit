@@ -16,6 +16,16 @@ def compute_indicators(df: pd.DataFrame):
     df["sma_20"] = ta.sma(df["close"], length=20)
     df["sma_50"] = ta.sma(df["close"], length=50)
     df["sma_200"] = ta.sma(df["close"], length=200)
+    df["pct_from_sma_20"] = (df["close"] - df["sma_20"]) / df["sma_20"]
+    df["pct_from_sma_50"] = (df["close"] - df["sma_50"]) / df["sma_50"]
+
+    # EMAs and crossover
+    df["ema_9"] = ta.ema(df["close"], length=9)
+    df["ema_21"] = ta.ema(df["close"], length=21)
+    df["ema_9_above_21"] = df["ema_9"] > df["ema_21"]
+    seq = pd.Series(range(len(df)), index=df.index, dtype=float)
+    cross_flags = df["ema_9_above_21"].astype(float).diff().abs() > 0
+    df["ema_crossover_days_ago"] = (seq - seq.where(cross_flags).ffill())
 
     # Relative volume
     df["volume_sma_10"] = ta.sma(df["volume"], length=10)
@@ -38,6 +48,7 @@ def compute_indicators(df: pd.DataFrame):
     # ATR
     df["atr_14"] = ta.atr(df["high"], df["low"], df["close"], length=14)
     df["atr_pct"] = df["atr_14"] / df["close"]
+    df["consolidation_tightness"] = df["close"].rolling(10).std() / df["atr_14"]
 
     # Volatility
     df["volatility_20"] = df["return_1d"].rolling(20).std()
@@ -73,16 +84,13 @@ def compute_indicators(df: pd.DataFrame):
 
     df["slope_x_r2"] = df["trend_slope_60d"] * df["r_squared_60d"]
 
-    # Drawdown from recent high
+    # Drawdown / breakout from recent high
     df["rolling_20d_high"] = df["close"].rolling(20).max()
-    df["drawdown_from_recent_high"] = (df["close"] - df["rolling_20d_high"]) / df[
-        "rolling_20d_high"
-    ]
+    df["drawdown_from_recent_high"] = (df["close"] - df["rolling_20d_high"]) / df["rolling_20d_high"]
+    df["price_vs_20d_high"] = df["drawdown_from_recent_high"]  # 0 = at high = breakout zone
 
     # Acceleration
     df["momentum_accel_20_60"] = df["return_20d"] - df["return_60d"]
     df["momentum_accel_5_20"] = df["return_5d"] - df["return_20d"]
 
-    df = df.dropna().reset_index(drop=True)
-
-    return df
+    return df.reset_index(drop=True)

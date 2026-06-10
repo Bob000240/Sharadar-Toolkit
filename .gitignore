@@ -13,6 +13,12 @@ __pycache__/
 # VS Code
 .vscode/
 
-.ruff_cache
+# linting and formatting caches
+.ruff_cache/
 
+# Testing
+.pytest_cache/
 tests/
+
+# AI assistant generated files
+.claude/
