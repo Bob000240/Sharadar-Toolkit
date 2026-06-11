@@ -39,15 +39,14 @@ def update_indicators():
         return
     lookback_start = pd.Timestamp(latest_date) - pd.Timedelta(days=400)
     all_ohlcv = market_repo.get_OHLCV(ALL_SYMBOLS, lookback_start, today)
-    rows = []
-    for _, df in all_ohlcv.groupby("symbol", sort=False):
-        df = df.sort_values("date").reset_index(drop=True)
-        df = compute_indicators(df)
-        df = df[df["date"] > pd.Timestamp(latest_date)]
-        if not df.empty:
-            rows.append(df)
-    if rows:
-        indicator_repo.insert_indicators(pd.concat(rows, ignore_index=True))
+    all_ohlcv = all_ohlcv.sort_values(["symbol", "date"])
+    processed = pd.concat(
+        [compute_indicators(df.reset_index(drop=True)) for _, df in all_ohlcv.groupby("symbol", sort=False)],
+        ignore_index=True,
+    )
+    new_rows = processed[processed["date"] > latest_date]
+    if not new_rows.empty:
+        indicator_repo.insert_indicators(new_rows)
     print("Indicators updated")
 
 
