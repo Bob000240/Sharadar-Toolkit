@@ -1,6 +1,6 @@
-from data_collection.market_data import MarketData
-from data_collection.descriptors_data import DescriptorsData
-from data_collection.fundamentals_data import FundamentalsData
+from raw_data.market_data import MarketData
+from raw_data.descriptors_data import DescriptorsData
+from raw_data.fundamentals_data import FundamentalsData
 from processed_data.fundamentals_transform import build_quality, build_value, build_growth
 from processed_data.indicators import compute_indicators
 import database.market_repository as market_repo

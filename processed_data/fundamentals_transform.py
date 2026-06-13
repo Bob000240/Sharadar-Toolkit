@@ -1,5 +1,5 @@
 import pandas as pd
-from data_collection.fundamentals_data import FundamentalsData
+from raw_data.fundamentals_data import FundamentalsData
 
 
 def _div(num, den) -> float | None:
