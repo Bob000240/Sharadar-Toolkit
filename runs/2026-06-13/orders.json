@@ -1,0 +1,27 @@
+{
+  "date": "2026-06-13",
+  "timestamp": "2026-06-13T20:13:33.003483",
+  "buys": [
+    {
+      "symbol": "LLY",
+      "sector": "Healthcare",
+      "shares": 6,
+      "position_size": 6797.99,
+      "position_pct": 0.068,
+      "stop_price": 1061.56,
+      "stop_pct": -6.31,
+      "target_price": 1347.31,
+      "target_pct": 18.92,
+      "confidence": 0.78
+    }
+  ],
+  "sells": [
+    {
+      "symbol": "CARR",
+      "shares": 100.0,
+      "market_value": 6991.0,
+      "unrealized_plpc": -0.01466,
+      "reason": "pm_exit"
+    }
+  ]
+}

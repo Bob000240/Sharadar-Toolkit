@@ -1,0 +1,35 @@
+{
+  "date": "2026-06-13",
+  "timestamp": "2026-06-13T20:12:59.999069",
+  "buys": [
+    {
+      "symbol": "LLY",
+      "confidence": 0.78,
+      "pm_reasoning": "Strong breakout signal with above-average volume and a tight consolidation base, despite being slightly extended from the SMA-20.",
+      "verdicts": [
+        {
+          "symbol": "LLY",
+          "signal_type": "Relative Strength Momentum",
+          "direction": "bullish",
+          "confidence": 0.78,
+          "reasoning": "The active signal for LLY is a breakout, supported by the price being within 3% of the 20-day high and a volume ratio of 1.50, indicating above-average participation. The RSI is at 62.6, which is within the healthy range for a breakout, suggesting that the stock is not overbought. The MACD histogram is positive, reinforcing the bullish momentum. However, the price is 4.3% above the SMA-20, which is slightly extended for a breakout setup, but not excessively so. The consolidation tightness is at 0.92, indicating a relatively tight base, which is favorable for a breakout scenario.\n\nDIRECTION: BUY\nCONFIDENCE: 0.78\nSIGNAL_QUALITY: VALID\nPRIMARY_CONCERN: The price is slightly extended from the SMA-20, which could limit the immediate upside potential."
+        }
+      ]
+    }
+  ],
+  "holds": [],
+  "exits": [
+    {
+      "symbol": "CARR",
+      "qty": 100.0,
+      "market_value": 6991.0,
+      "avg_entry_price": 70.95,
+      "current_price": 69.91,
+      "unrealized_pl": -104.0,
+      "unrealized_plpc": -0.01466,
+      "exit_reason": "pm_exit"
+    }
+  ],
+  "investable_capital": 7916.79,
+  "pm_reasoning": "EXIT: CARR | The lack of analyst coverage suggests the momentum signal has faded.\n\nBUY: LLY | Strong breakout signal with above-average volume and a tight consolidation base, despite being slightly extended from the SMA-20.\n\nPASS: FFIV | Conflicting signals with a negative MACD histogram and low volume ratio do not support a strong momentum entry."
+}

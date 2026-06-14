@@ -1,6 +1,6 @@
 import re
 import pandas as pd
-from agents.analyst.sa import SignalAgent, AgentVerdict
+from agents.analysts.sa import SignalAgent, AgentVerdict
 from agents.llm_client import call_llm_analyze, ANALYSIS_MODEL
 import signals.sig_momentum as sig_mom
 from config import STOCK_SYMBOLS, BENCHMARK_SYMBOLS
@@ -33,14 +33,14 @@ The stock has passed all four prefilter gates:
     * Pullback: tight consolidation, price within -5% to +3% of SMA-20
     * Crossover: MACD histogram positive AND 5d momentum > 20d momentum (short-term acceleration)
 
-DO NOT re-evaluate Gates 0–2. They are established facts. Your job is to assess entry quality for the active signal(s). If multiple signals are active, treat the confluence as a positive factor and reflect it in your confidence score.
+DO NOT re-evaluate Gates 0-2. They are established facts. Your job is to assess entry quality for the active signal(s). If multiple signals are active, treat the confluence as a positive factor and reflect it in your confidence score.
 
 YOUR RESPONSIBILITIES:
 1. Entry signal quality — does the overall picture support the declared signal(s)?
 2. Signal conflicts — are any indicators contradicting the entry?
-3. Confidence — your self-assessed conviction in this specific entry, 0.0–1.0.
+3. Confidence — your self-assessed conviction in this specific entry, 0.0-1.0.
    - >0.75: clean setup, no conflicts, volume confirming
-   - 0.50–0.75: valid setup with at least one moderate concern
+   - 0.50-0.75: valid setup with at least one moderate concern
    - <0.50: conflicting signals or setup quality too low
 
 ENTRY MODE EVALUATION CRITERIA:
@@ -112,17 +112,17 @@ class RSMomentumAgent(SignalAgent):
     ) -> list[str]:
         df = self.stock_data.copy()
 
-        # --- Gate 0: Cross-sectional momentum rank (quant layer) ---
+        # - Gate 0: Cross-sectional momentum rank (quant layer) -
         cs_pass = df["_cs_rank"] >= (1.0 - top_cs_pct)
 
-        # --- Gate 1: Short-term RS ---
+        # - Gate 1: Short-term RS -
         rs_pass = (
             (df["return_20d_percentile"] > min_rs_percentile) &
             (df["excess_return_20d"] > 0) &
             (df["sector_relative_20d"] > 0)
         )
 
-        # --- Gate 2: Trend health ---
+        # - Gate 2: Trend health -
         trend_pass = (
             (df["above_sma_200"] == True) &
             (df["above_sma_50"] == True) &
@@ -130,7 +130,7 @@ class RSMomentumAgent(SignalAgent):
             (df["slope_x_r2"] > 0)
         )
 
-        # --- Gate 3: Entry signal (OR logic — at least one must fire) ---
+        # - Gate 3: Entry signal (OR logic — at least one must fire) -
         breakout_pass = (
             (df["price_vs_20d_high"] > -0.03) &
             (df["volume_ratio"] > 1.5)
@@ -171,29 +171,23 @@ class RSMomentumAgent(SignalAgent):
     def system_prompt(self) -> str:
         return _SYSTEM_PROMPT
 
-    def _compute_risk(self, symbol: str) -> dict:
+    def _exit_conditions(self, symbol: str) -> dict:
         row = self.stock_data.loc[symbol]
         price = float(row["close"])
         atr = float(row["atr_14"])
         stop_dist = 2 * atr
-        return {
-            "stop_price":   round(price - stop_dist, 2),
-            "stop_pct":     round(-stop_dist / price * 100, 2),
-            "target_price": round(price + 3 * stop_dist, 2),
-            "target_pct":   round(3 * stop_dist / price * 100, 2),
-            "atr":          round(atr, 4),
-        }
 
-    def _compute_flags(self, symbol: str) -> dict:
-        row = self.stock_data.loc[symbol]
-        rsi = float(row["rsi_14"])
+        modes = self._detect_entry_modes(symbol)
+        primary_mode = modes[0] if modes else "breakout"
+        max_hold_days = {"breakout": 20, "pullback": 10, "crossover": 15}.get(primary_mode, 20)
+
         return {
-            "rsi":                   round(rsi, 1),
-            "rsi_zone":              ("overbought" if rsi > 75 else "healthy" if rsi >= 55 else "pullback_zone" if rsi >= 40 else "oversold"),
-            "macd_confirming":       bool(row["macd_hist"] > 0),
-            "volume_confirming":     bool(row["volume_ratio"] > 1.5),
-            "momentum_accelerating": bool(row["momentum_accel_5_20"] > 0),
-            "base_tight":            bool(row["consolidation_tightness"] < 0.7),
+            "stop_price":    round(price - stop_dist, 2),
+            "stop_pct":      round(-stop_dist / price * 100, 2),
+            "target_price":  round(price + 3 * stop_dist, 2),
+            "target_pct":    round(3 * stop_dist / price * 100, 2),
+            "atr":           round(atr, 4),
+            "max_hold_days": max_hold_days,
         }
 
     def analyze(self, snapshot, active_modes: list[str]) -> str:

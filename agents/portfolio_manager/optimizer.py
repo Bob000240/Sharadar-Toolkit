@@ -1,5 +1,10 @@
+import dataclasses
 from dataclasses import dataclass
-from agents.portfolio_manager.reconciler_agent import ReconcilerOutput, CurrentPosition
+from datetime import date
+from agents.portfolio_manager.reconciler_agent import (
+    ReconcilerOutput, ReconcilerResult, CurrentPosition, ExitedPosition
+)
+from runs.io import load_json, save_json
 
 
 @dataclass
@@ -58,7 +63,8 @@ class OptimizerOutput:
 
 class Optimizer:
     """
-    Risk desk — enforces hard limits and sizes positions.
+    Risk desk — reads pm_decisions.json + risk_data.json, enforces hard
+    limits, sizes positions, and writes orders.json.
 
     The PM (ReconcilerAgent) has already decided WHAT to buy and sell.
     This class only decides HOW MUCH, subject to hard constraints:
@@ -66,9 +72,6 @@ class Optimizer:
       2. max_sector_pct  — NAV % in any one sector
       3. max_position_pct — NAV % in any one name
       4. cash_reserve    — minimum uninvested cash
-
-    Sizing: fixed-fractional risk (1% NAV risked per trade by default),
-    optionally scaled by analyst confidence.
     """
 
     def __init__(
@@ -78,7 +81,6 @@ class Optimizer:
         max_positions: int = 15,
         max_sector_pct: float = 0.25,
         max_position_pct: float = 0.10,
-        cash_reserve: float = 0.20,
         scale_by_confidence: bool = True,
         min_confidence: float = 0.60,
     ):
@@ -87,12 +89,10 @@ class Optimizer:
         self.max_positions = max_positions
         self.max_sector_pct = max_sector_pct
         self.max_position_pct = max_position_pct
-        self.cash_reserve = cash_reserve
         self.scale_by_confidence = scale_by_confidence
         self.min_confidence = min_confidence
 
     def _size_shares(self, confidence: float, stop_dist: float, price: float) -> int:
-        """Fixed-fractional sizing, optionally scaled by confidence."""
         risk_dollars = self.nav * self.risk_per_trade
 
         if self.scale_by_confidence and (1.0 - self.min_confidence) > 0:
@@ -104,57 +104,78 @@ class Optimizer:
         shares_by_pct = int((self.nav * self.max_position_pct) / price) if price > 0 else 0
         return min(shares_by_risk, shares_by_pct)
 
-    def run(
-        self,
-        output: ReconcilerOutput,
-        risk_lookup: dict[str, dict],   # symbol → {stop_price, stop_pct, target_price, target_pct, atr}
-        sector_lookup: dict[str, str],  # symbol → sector string
-    ) -> OptimizerOutput:
+    def _load_inputs(self, run_date: date | None) -> tuple[ReconcilerOutput, dict]:
+        pm = load_json("pm_decisions", run_date)
+        risk_data: dict[str, dict] = load_json("risk_data", run_date)["risk_data"]
 
-        # --- Sells: close every position the PM flagged for exit ---
+        buys = [
+            ReconcilerResult(
+                symbol=b["symbol"],
+                confidence=b["confidence"],
+                pm_reasoning=b["pm_reasoning"],
+            )
+            for b in pm["buys"]
+        ]
+        exits = [ExitedPosition(**e) for e in pm["exits"]]
+        holds = [CurrentPosition(**h) for h in pm["holds"]]
+
+        output = ReconcilerOutput(
+            buys=buys,
+            exits=exits,
+            holds=holds,
+            investable_capital=pm["investable_capital"],
+            pm_reasoning=pm["pm_reasoning"],
+        )
+        return output, risk_data
+
+    def run(self, run_date: date | None = None) -> OptimizerOutput:
+        output, risk_data = self._load_inputs(run_date)
+        sector_lookup = {sym: d.get("sector", "Unknown") for sym, d in risk_data.items()}
+
+        # --- Sells: all exits with their specific reason ---
         sells = [
             SellOrder(
                 symbol=p.symbol,
                 shares=p.qty,
                 market_value=p.market_value,
                 unrealized_plpc=p.unrealized_plpc,
-                reason="pm_exit",
+                reason=p.exit_reason,
             )
             for p in output.exits
         ]
 
-        # --- Track constraint state (holds count against limits) ---
+        # --- Track constraint state ---
+        # holds count against position slots and sector caps
+        # investable_capital is actual deployable cash (reconciler already deducted reserve)
         slots_used = len(output.holds)
-        invested = sum(p.market_value for p in output.holds)
+        deployed = 0.0   # new capital committed this cycle
 
         sector_allocated: dict[str, float] = {}
         for p in output.holds:
             sec = sector_lookup.get(p.symbol, "Unknown")
             sector_allocated[sec] = sector_allocated.get(sec, 0.0) + p.market_value
 
-        investable = self.nav * (1.0 - self.cash_reserve)
+        investable = output.investable_capital
 
         # --- Buys: size each PM-approved candidate, enforce hard limits ---
         buys: list[BuyOrder] = []
 
         for result in output.buys:
 
-            # Hard limit: position count
             if slots_used >= self.max_positions:
                 print(f"[risk] {result.symbol} skipped — max positions reached")
                 continue
 
-            # Hard limit: overall budget
-            if invested >= investable:
-                print(f"[risk] {result.symbol} skipped — cash reserve floor reached")
+            if deployed >= investable:
+                print(f"[risk] {result.symbol} skipped — investable capital exhausted")
                 break
 
             symbol = result.symbol
-            if symbol not in risk_lookup:
+            if symbol not in risk_data:
                 print(f"[risk] {symbol} skipped — no risk data")
                 continue
 
-            risk = risk_lookup[symbol]
+            risk = risk_data[symbol]
             sector = sector_lookup.get(symbol, "Unknown")
 
             stop_dist = 2.0 * risk["atr"]
@@ -185,7 +206,7 @@ class Optimizer:
                 print(f"[risk] {symbol} trimmed to {shares} shares — {sector} sector cap")
 
             # Hard limit: remaining cash budget
-            budget_left = investable - invested
+            budget_left = investable - deployed
             if position_value > budget_left:
                 shares = int(budget_left / price)
                 if shares <= 0:
@@ -206,41 +227,15 @@ class Optimizer:
             ))
 
             sector_allocated[sector] = current_sector_value + position_value
-            invested += position_value
+            deployed += position_value
             slots_used += 1
 
-        return OptimizerOutput(buys=buys, sells=sells)
+        result_output = OptimizerOutput(buys=buys, sells=sells)
+        save_json("orders", dataclasses.asdict(result_output))
+        return result_output
 
 
 if __name__ == "__main__":
-    import os
-    from alpaca.trading.client import TradingClient
-    from agents.analyst.sa_RS import RSMomentumAgent
-    from agents.portfolio_manager.reconciler_agent import ReconcilerAgent
-
-    NAV = 100_000
-
-    alpaca = TradingClient(
-        api_key=os.environ["ALPACA_PUBLIC_KEY"],
-        secret_key=os.environ["ALPACA_SECRET_KEY"],
-        paper=True,
-    )
-
-    rs_agent = RSMomentumAgent()
-    reconciler = ReconcilerAgent([rs_agent], alpaca=alpaca)
-    recon_output = reconciler.run()
-
-    all_symbols = (
-        [r.symbol for r in recon_output.buys]
-        + [p.symbol for p in recon_output.holds]
-    )
-    risk_lookup = {
-        s: rs_agent._compute_risk(s)
-        for s in all_symbols
-        if s in rs_agent.stock_data.index
-    }
-    sector_lookup = rs_agent.stock_data["sector"].to_dict()
-
-    optimizer = Optimizer(nav=NAV)
-    result = optimizer.run(recon_output, risk_lookup, sector_lookup)
+    optimizer = Optimizer(nav=100_000)
+    result = optimizer.run()
     print(result)
