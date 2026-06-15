@@ -207,12 +207,20 @@ class RSMomentumAgent(SignalAgent):
         snapshot = self._mom_model.build_snapshot(symbol, MOMENTUM_SECTIONS)
         thesis = self.analyze(snapshot, active_modes)
         direction, confidence = self._parse_output_block(thesis)
+        risk = self._exit_conditions(symbol)
         return AgentVerdict(
             symbol=symbol,
             signal_type=self.signal_type,
             direction=direction,
             confidence=confidence,
             reasoning=thesis,
+            sector=str(self.stock_data.loc[symbol, "sector"]),
+            stop_price=risk["stop_price"],
+            stop_pct=risk["stop_pct"],
+            target_price=risk["target_price"],
+            target_pct=risk["target_pct"],
+            atr=risk["atr"],
+            max_hold_days=risk["max_hold_days"],
         )
 
 

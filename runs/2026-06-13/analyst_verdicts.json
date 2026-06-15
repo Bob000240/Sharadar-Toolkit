@@ -1,6 +1,6 @@
 {
   "date": "2026-06-13",
-  "timestamp": "2026-06-13T20:12:59.042515",
+  "timestamp": "2026-06-13T23:14:32.875398",
   "verdicts": {
     "LLY": [
       {
@@ -8,7 +8,14 @@
         "signal_type": "Relative Strength Momentum",
         "direction": "bullish",
         "confidence": 0.78,
-        "reasoning": "The active signal for LLY is a breakout, supported by the price being within 3% of the 20-day high and a volume ratio of 1.50, indicating above-average participation. The RSI is at 62.6, which is within the healthy range for a breakout, suggesting that the stock is not overbought. The MACD histogram is positive, reinforcing the bullish momentum. However, the price is 4.3% above the SMA-20, which is slightly extended for a breakout setup, but not excessively so. The consolidation tightness is at 0.92, indicating a relatively tight base, which is favorable for a breakout scenario.\n\nDIRECTION: BUY\nCONFIDENCE: 0.78\nSIGNAL_QUALITY: VALID\nPRIMARY_CONCERN: The price is slightly extended from the SMA-20, which could limit the immediate upside potential."
+        "reasoning": "The active signal for LLY is a breakout, supported by the price being within 3% of the 20-day high and a volume ratio of 1.50, indicating above-average participation. The RSI is at 62.6, which is in a healthy zone for a breakout, suggesting that the stock is not overbought. The MACD histogram is positive, reinforcing the bullish momentum. However, the price is 4.3% above the SMA-20, which is slightly extended but not excessively so. The consolidation tightness is at 0.92, indicating a relatively tight base, which is favorable for a breakout scenario.\n\nThe primary concern is the price being somewhat extended from the SMA-20, which could suggest a potential pullback before a sustained breakout. However, given the overall positive momentum and volume support, this concern is moderate.\n\nDIRECTION: BUY\nCONFIDENCE: 0.78\nSIGNAL_QUALITY: VALID\nPRIMARY_CONCERN: Price is slightly extended from the SMA-20, which could lead to a short-term pullback.",
+        "sector": "Healthcare",
+        "stop_price": 1061.56,
+        "stop_pct": -6.31,
+        "target_price": 1347.31,
+        "target_pct": 18.92,
+        "atr": 35.719,
+        "max_hold_days": 20
       }
     ],
     "FFIV": [
@@ -17,7 +24,14 @@
         "signal_type": "Relative Strength Momentum",
         "direction": "neutral",
         "confidence": 0.6,
-        "reasoning": "The active entry signal for FFIV is a pullback, which is supported by the price being near the SMA-20 and the tight consolidation indicated by a consolidation tightness of 0.59. The RSI is at 62.4, which is in a neutral zone, suggesting that the stock is neither overbought nor oversold, and this is generally supportive of a pullback entry. However, the MACD histogram is negative at -3.0274, which indicates bearish momentum and is a conflicting signal for a pullback setup. Additionally, the volume ratio is low at 0.55x, suggesting a lack of strong participation, which is not ideal for confirming the pullback entry.\n\nDIRECTION: WAIT\nCONFIDENCE: 0.60\nSIGNAL_QUALITY: VALID\nPRIMARY_CONCERN: The negative MACD histogram and low volume ratio are conflicting signals for the pullback entry."
+        "reasoning": "The active signal for FFIV is a pullback, with the price currently near the SMA-20 and showing tight consolidation, which supports the pullback setup. The RSI is at 62.4, indicating a neutral zone that is neither overbought nor oversold, which is generally supportive for a pullback entry. However, the MACD histogram is negative, suggesting some bearish momentum, which could be a concern if it persists. The volume ratio is low at 0.55x, indicating below-average trading activity, which does not confirm the pullback strength and may suggest a lack of conviction among traders.\n\nThe primary concern here is the low volume, which limits confidence in the pullback's strength and sustainability. While the trend structure is strong, with a high R-squared value and positive trend slope, the lack of volume confirmation is a significant factor to consider.\n\nDIRECTION: WAIT\nCONFIDENCE: 0.60\nSIGNAL_QUALITY: VALID\nPRIMARY_CONCERN: Low volume ratio indicates lack of participation, which may undermine the pullback's strength.",
+        "sector": "Technology",
+        "stop_price": 372.94,
+        "stop_pct": -5.81,
+        "target_price": 465.03,
+        "target_pct": 17.44,
+        "atr": 11.5117,
+        "max_hold_days": 10
       }
     ]
   }

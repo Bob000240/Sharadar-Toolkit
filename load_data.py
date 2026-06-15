@@ -14,44 +14,47 @@ if __name__ == "__main__":
     start_date = "2025-01-01"
     end_date   = pd.Timestamp.today()
 
-    # market_repo.drop_OHLCV_table()
-    # market_repo.create_OHLCV_table()
-    # market_repo.insert_OHLCV_table(
-    #     MarketData().get_OHLCV(ALL_SYMBOLS, start_date, end_date)
-    # )
+    market_repo.drop_OHLCV_table()
+    market_repo.create_OHLCV_table()
+    market_repo.insert_OHLCV_table(
+        MarketData().get_OHLCV(ALL_SYMBOLS, start_date, end_date)
+    )
 
-    # indicator_repo.drop_indicators_table()
-    # indicator_repo.create_indicators_table()
+    indicator_repo.drop_indicators_table()
+    indicator_repo.create_indicators_table()
 
-    # descriptor_repo.drop_descriptors_table()
-    # descriptor_repo.create_descriptors_table()
+    descriptor_repo.drop_descriptors_table()
+    descriptor_repo.create_descriptors_table()
 
-    # for symbol in ALL_SYMBOLS:
-    #     print(f"Processing {symbol}")
+    for symbol in ALL_SYMBOLS:
+        print(f"Processing {symbol}")
 
-    #     df = market_repo.get_OHLCV(symbol, start_date, end_date)
-    #     df = compute_indicators(df)
+        df = market_repo.get_OHLCV(symbol, start_date, end_date)
+        df = compute_indicators(df)
 
-    #     if "symbol" not in df.columns:
-    #         print(f"ERROR: symbol column missing for {symbol}")
-    #         print(df.columns)
-    #         break
+        if "symbol" not in df.columns:
+            print(f"ERROR: symbol column missing for {symbol}")
+            print(df.columns)
+            break
 
-    #     if df["symbol"].isna().any():
-    #         print(f"ERROR: symbol contains NaN for {symbol}")
-    #         break
+        if df["symbol"].isna().any():
+            print(f"ERROR: symbol contains NaN for {symbol}")
+            break
 
-    #     indicator_repo.insert_indicators(df)
+        indicator_repo.insert_indicators(df)
 
-    # descriptor_repo.insert_descriptors(DescriptorsData(ALL_SYMBOLS).get_descriptors())
+    descriptor_repo.insert_descriptors(DescriptorsData(ALL_SYMBOLS).get_descriptors())
 
-    # fund_repo.drop_fundamentals_tables()
-    # fund_repo.create_fundamentals_tables()
+    fund_repo.drop_fundamentals_tables()
+    fund_repo.create_fundamentals_tables()
 
-    # fd = FundamentalsData(STOCK_SYMBOLS)
-    # fund_repo.insert_quality(build_quality(fd))
-    # fund_repo.insert_growth(build_growth(fd))
-    # fund_repo.insert_value(build_value(fd))
+    fd = FundamentalsData(STOCK_SYMBOLS)
+    fund_repo.insert_quality(build_quality(fd))
+    print("Inserted quality data")
+    fund_repo.insert_growth(build_growth(fd))
+    print("Inserted growth data")
+    fund_repo.insert_value(build_value(fd))
+    print("Inserted value data")
 
     pd.set_option("display.max_columns", None)
     df = market_repo.get_OHLCV(["SPY", "AAPL"], start_date, end_date)

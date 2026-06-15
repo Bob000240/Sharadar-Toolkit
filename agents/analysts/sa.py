@@ -11,6 +11,13 @@ class AgentVerdict:
     direction: Literal["bullish", "neutral", "bearish"]
     confidence: float  # 0.0 – 1.0
     reasoning: str
+    sector: str = "Unknown"
+    stop_price: float = 0.0
+    stop_pct: float = 0.0
+    target_price: float = 0.0
+    target_pct: float = 0.0
+    atr: float = 0.0
+    max_hold_days: int = 20
 
     def __str__(self) -> str:
         return (

@@ -58,6 +58,13 @@ class ReconcilerResult:
     symbol: str
     confidence: float       # avg analyst confidence — used by optimizer for sizing
     pm_reasoning: str       # PM's one-line reason
+    sector: str = "Unknown"
+    stop_price: float = 0.0
+    stop_pct: float = 0.0
+    target_price: float = 0.0
+    target_pct: float = 0.0
+    atr: float = 0.0
+    max_hold_days: int = 20
     verdicts: list[AgentVerdict] = field(default_factory=list)
 
 
@@ -233,17 +240,6 @@ class ReconcilerAgent:
 
         return verdicts
 
-    def _collect_risk_data(self, symbols: set[str]) -> dict[str, dict]:
-        risk_data: dict[str, dict] = {}
-        for agent in self.agents:
-            if hasattr(agent, "_exit_conditions") and hasattr(agent, "stock_data"):
-                for symbol in symbols:
-                    if symbol in agent.stock_data.index and symbol not in risk_data:
-                        entry = agent._exit_conditions(symbol)
-                        entry["sector"] = str(agent.stock_data.loc[symbol, "sector"])
-                        risk_data[symbol] = entry
-        return risk_data
-
     # ------------------------------------------------------------------
     # PM prompt + parsing
     # ------------------------------------------------------------------
@@ -313,10 +309,18 @@ class ReconcilerAgent:
                     sum(v.confidence for v in verdicts) / len(verdicts)
                     if verdicts else 0.65
                 )
+                first = verdicts[0] if verdicts else None
                 buys.append(ReconcilerResult(
                     symbol=symbol,
                     confidence=round(avg_conf, 4),
                     pm_reasoning=reason,
+                    sector=first.sector if first else "Unknown",
+                    stop_price=first.stop_price if first else 0.0,
+                    stop_pct=first.stop_pct if first else 0.0,
+                    target_price=first.target_price if first else 0.0,
+                    target_pct=first.target_pct if first else 0.0,
+                    atr=first.atr if first else 0.0,
+                    max_hold_days=first.max_hold_days if first else 20,
                     verdicts=verdicts,
                 ))
             elif action == "EXIT":
@@ -354,11 +358,7 @@ class ReconcilerAgent:
             }
         })
 
-        # 4. Save risk data for optimizer
-        all_relevant = set(verdicts_by_symbol.keys()) | set(remaining_map.keys())
-        save_json("risk_data", {"risk_data": self._collect_risk_data(all_relevant)})
-
-        # 5. PM decides buys and holds for remaining book
+        # 4. PM decides buys and holds for remaining book
         user_prompt = self._build_prompt(verdicts_by_symbol, remaining, forced_exits)
         print("[PM] Calling portfolio manager...")
         pm_output = call_llm_analyze(_PM_SYSTEM_PROMPT, user_prompt, self.model)

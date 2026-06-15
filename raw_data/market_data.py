@@ -11,6 +11,10 @@ API_KEY = os.getenv("ALPACA_PUBLIC_KEY")
 SECRET_KEY = os.getenv("ALPACA_SECRET_KEY")
 
 
+def _to_alpaca(sym: str) -> str:
+    return sym.replace("-", ".")
+
+
 class MarketData:
     def __init__(self):
         if not API_KEY or not SECRET_KEY:
@@ -23,9 +27,11 @@ class MarketData:
         self, symbols: list[str] | str, start_date: pd.Timestamp, end_date: pd.Timestamp
     ):
         symbols = [symbols] if isinstance(symbols, str) else symbols
+        alpaca_symbols = [_to_alpaca(s) for s in symbols]
+        symbol_map = {_to_alpaca(s): s for s in symbols}
 
         hData = DataRequest.StockBarsRequest(
-            symbol_or_symbols=symbols,
+            symbol_or_symbols=alpaca_symbols,
             start=pd.Timestamp(start_date),
             end=pd.Timestamp(end_date),
             sort="desc",
@@ -37,11 +43,11 @@ class MarketData:
 
         data_list = []
 
-        for symbol in symbols:
-            for item in raw.data[symbol]:
+        for alpaca_sym in alpaca_symbols:
+            for item in raw.data[alpaca_sym]:
                 data_list.append(
                     {
-                        "symbol": item.symbol,
+                        "symbol": symbol_map[item.symbol],
                         "date": item.timestamp.date(),
                         "open": item.open,
                         "high": item.high,

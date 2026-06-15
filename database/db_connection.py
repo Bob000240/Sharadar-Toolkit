@@ -14,7 +14,7 @@ def get_connection():
         password = os.getenv("DB_PASSWORD")
         host = os.getenv("DB_HOST", "localhost")
         port = os.getenv("DB_PORT", "5432")
-        dbname = os.getenv("DB_NAME", "abss")
+        dbname = os.getenv("DB_NAME", "quorum_nexus")
         _engine = create_engine(
             f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{dbname}",
             pool_size=5,

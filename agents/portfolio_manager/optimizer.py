@@ -104,33 +104,37 @@ class Optimizer:
         shares_by_pct = int((self.nav * self.max_position_pct) / price) if price > 0 else 0
         return min(shares_by_risk, shares_by_pct)
 
-    def _load_inputs(self, run_date: date | None) -> tuple[ReconcilerOutput, dict]:
+    def _load_pm_decisions(self, run_date: date | None) -> ReconcilerOutput:
         pm = load_json("pm_decisions", run_date)
-        risk_data: dict[str, dict] = load_json("risk_data", run_date)["risk_data"]
 
         buys = [
             ReconcilerResult(
                 symbol=b["symbol"],
                 confidence=b["confidence"],
                 pm_reasoning=b["pm_reasoning"],
+                sector=b.get("sector", "Unknown"),
+                stop_price=b.get("stop_price", 0.0),
+                stop_pct=b.get("stop_pct", 0.0),
+                target_price=b.get("target_price", 0.0),
+                target_pct=b.get("target_pct", 0.0),
+                atr=b.get("atr", 0.0),
+                max_hold_days=b.get("max_hold_days", 20),
             )
             for b in pm["buys"]
         ]
         exits = [ExitedPosition(**e) for e in pm["exits"]]
         holds = [CurrentPosition(**h) for h in pm["holds"]]
 
-        output = ReconcilerOutput(
+        return ReconcilerOutput(
             buys=buys,
             exits=exits,
             holds=holds,
             investable_capital=pm["investable_capital"],
             pm_reasoning=pm["pm_reasoning"],
         )
-        return output, risk_data
 
     def run(self, run_date: date | None = None) -> OptimizerOutput:
-        output, risk_data = self._load_inputs(run_date)
-        sector_lookup = {sym: d.get("sector", "Unknown") for sym, d in risk_data.items()}
+        output = self._load_pm_decisions(run_date)
 
         # --- Sells: all exits with their specific reason ---
         sells = [
@@ -145,15 +149,12 @@ class Optimizer:
         ]
 
         # --- Track constraint state ---
-        # holds count against position slots and sector caps
-        # investable_capital is actual deployable cash (reconciler already deducted reserve)
         slots_used = len(output.holds)
-        deployed = 0.0   # new capital committed this cycle
+        deployed = 0.0
 
         sector_allocated: dict[str, float] = {}
         for p in output.holds:
-            sec = sector_lookup.get(p.symbol, "Unknown")
-            sector_allocated[sec] = sector_allocated.get(sec, 0.0) + p.market_value
+            sector_allocated[p.symbol] = sector_allocated.get(p.symbol, 0.0) + p.market_value
 
         investable = output.investable_capital
 
@@ -171,15 +172,9 @@ class Optimizer:
                 break
 
             symbol = result.symbol
-            if symbol not in risk_data:
-                print(f"[risk] {symbol} skipped — no risk data")
-                continue
-
-            risk = risk_data[symbol]
-            sector = sector_lookup.get(symbol, "Unknown")
-
-            stop_dist = 2.0 * risk["atr"]
-            price = risk["stop_price"] + stop_dist
+            sector = result.sector
+            stop_dist = 2.0 * result.atr
+            price = result.stop_price + stop_dist
 
             if stop_dist <= 0 or price <= 0:
                 print(f"[risk] {symbol} skipped — bad risk data")
@@ -219,10 +214,10 @@ class Optimizer:
                 shares=shares,
                 position_size=round(position_value, 2),
                 position_pct=round(position_value / self.nav, 4),
-                stop_price=risk["stop_price"],
-                stop_pct=risk["stop_pct"],
-                target_price=risk["target_price"],
-                target_pct=risk["target_pct"],
+                stop_price=result.stop_price,
+                stop_pct=result.stop_pct,
+                target_price=result.target_price,
+                target_pct=result.target_pct,
                 confidence=result.confidence,
             ))
 
