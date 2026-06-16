@@ -13,7 +13,6 @@ _COLUMNS = [
 _COL_LIST = ", ".join(_COLUMNS)
 _BIND_LIST = ", ".join(f":{c}" for c in _COLUMNS)
 
-
 def create_macro_table():
     engine = get_connection()
     query = text("""
@@ -33,12 +32,10 @@ def create_macro_table():
     with engine.begin() as conn:
         conn.execute(query)
 
-
 def drop_macro_table():
     engine = get_connection()
     with engine.begin() as conn:
         conn.execute(text("DROP TABLE IF EXISTS macro_data;"))
-
 
 def insert_macro(df: pd.DataFrame):
     df = df.where(pd.notnull(df), None)
@@ -51,7 +48,6 @@ def insert_macro(df: pd.DataFrame):
     records = df[_COLUMNS].to_dict(orient="records")
     with engine.begin() as conn:
         conn.execute(query, records)
-
 
 def get_latest_macro(signal_day: pd.Timestamp):
     engine = get_connection()

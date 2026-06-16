@@ -6,7 +6,7 @@ from datetime import date
 from pathlib import Path
 from alpaca.trading.client import TradingClient
 from agents.analysts.sa import AgentVerdict, SignalAgent
-from agents.llm_client import call_llm_analyze, ANALYSIS_MODEL
+from agents.llm_client import call_llm_analyze, REMOTE_MODEL
 from runs.io import save_json
 
 _POSITIONS_BOOK_PATH = Path(__file__).parent.parent.parent / "runs" / "positions_book.json"
@@ -22,7 +22,7 @@ Your job:
    - If analyst shows NO COVERAGE today, the signal has likely faded — default EXIT
 2. For each NEW CANDIDATE: decide BUY or PASS
    - Avoid sub-sector concentration (e.g. two semiconductor equipment stocks)
-   - Concentrated book: 10–15 positions total
+   - Concentrated book: 10-15 positions total
    - List BUY decisions in order of conviction, highest first
 
 OUTPUT FORMAT — one decision per line, nothing else:
@@ -96,7 +96,7 @@ class ReconcilerAgent:
         self,
         agents: list[SignalAgent],
         alpaca: TradingClient | None = None,
-        model: str = ANALYSIS_MODEL,
+        model: str = REMOTE_MODEL,
         cash_reserve: float = 0.20,
     ):
         self.agents = agents

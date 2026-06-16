@@ -2,10 +2,6 @@ from database.db_connection import get_connection
 import pandas as pd
 from sqlalchemy import text
 
-# ---------------------------------------------------------------------------
-# Column definitions per table
-# ---------------------------------------------------------------------------
-
 _QUALITY_COLS = [
     "symbol", "date",
     "roe", "roa", "roic",
@@ -30,15 +26,8 @@ _GROWTH_COLS = [
     "revenue_growth_qoq", "eps_growth_qoq",
 ]
 
-# Combined column list for get_latest_fundamentals JOIN result
-# (excludes duplicate symbol/date/period columns)
 _ALL_QUALITY = [c for c in _QUALITY_COLS if c not in ("symbol", "date")]
 _ALL_VALUE = [c for c in _VALUE_COLS if c not in ("symbol", "date")]
-
-
-# ---------------------------------------------------------------------------
-# DDL
-# ---------------------------------------------------------------------------
 
 def create_fundamentals_tables():
     engine = get_connection()
@@ -102,11 +91,6 @@ def drop_fundamentals_tables():
         conn.execute(text("DROP TABLE IF EXISTS value_fundamentals;"))
         conn.execute(text("DROP TABLE IF EXISTS growth_fundamentals;"))
 
-
-# ---------------------------------------------------------------------------
-# Insert helpers
-# ---------------------------------------------------------------------------
-
 def _insert(table: str, cols: list[str], df: pd.DataFrame):
     missing = [c for c in cols if c not in df.columns]
     for c in missing:
@@ -128,7 +112,6 @@ def _insert(table: str, cols: list[str], df: pd.DataFrame):
             ON CONFLICT {pk} DO NOTHING;
         """), records)
 
-
 def delete_value_today(symbols: list[str], date) -> None:
     """Delete today's value rows so they can be refreshed with current prices."""
     engine = get_connection()
@@ -138,22 +121,14 @@ def delete_value_today(symbols: list[str], date) -> None:
             WHERE symbol = ANY(:symbols) AND date = :date
         """), {"symbols": symbols, "date": date})
 
-
 def insert_quality(df: pd.DataFrame):
     _insert("quality_fundamentals", _QUALITY_COLS, df.copy())
-
 
 def insert_value(df: pd.DataFrame):
     _insert("value_fundamentals", _VALUE_COLS, df.copy())
 
-
 def insert_growth(df: pd.DataFrame):
     _insert("growth_fundamentals", _GROWTH_COLS, df.copy())
-
-
-# ---------------------------------------------------------------------------
-# Read helpers
-# ---------------------------------------------------------------------------
 
 def get_latest_fundamentals(symbols: str | list[str], signal_day: pd.Timestamp) -> pd.DataFrame:
     """
@@ -208,14 +183,12 @@ def get_latest_fundamentals(symbols: str | list[str], signal_day: pd.Timestamp) 
 
     return pd.read_sql_query(query, engine, params={"symbols": symbols, "day": day})
 
-
 def get_quality(
     symbols: str | list[str],
     start_date: str | None = None,
     end_date:   str | None = None,
 ) -> pd.DataFrame:
     return _range_query("quality_fundamentals", _QUALITY_COLS, symbols, start_date, end_date)
-
 
 def get_value(
     symbols: str | list[str],
@@ -224,14 +197,12 @@ def get_value(
 ) -> pd.DataFrame:
     return _range_query("value_fundamentals", _VALUE_COLS, symbols, start_date, end_date)
 
-
 def get_growth(
     symbols: str | list[str],
     start_date: str | None = None,
     end_date:   str | None = None,
 ) -> pd.DataFrame:
     return _range_query("growth_fundamentals", _GROWTH_COLS, symbols, start_date, end_date)
-
 
 def _range_query(table, cols, symbols, start_date, end_date) -> pd.DataFrame:
     engine  = get_connection()

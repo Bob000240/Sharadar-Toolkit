@@ -2,7 +2,6 @@ from database.db_connection import get_connection
 import pandas as pd
 from sqlalchemy import text
 
-
 def create_descriptors_table():
     engine = get_connection()
     with engine.begin() as conn:
@@ -21,12 +20,10 @@ def create_descriptors_table():
             );
         """))
 
-
 def drop_descriptors_table():
     engine = get_connection()
     with engine.begin() as conn:
         conn.execute(text("DROP TABLE IF EXISTS stock_descriptors;"))
-
 
 def insert_descriptors(df: pd.DataFrame):
     df = df.where(pd.notnull(df), None)
@@ -53,7 +50,6 @@ def insert_descriptors(df: pd.DataFrame):
     """)
     with engine.begin() as conn:
         conn.execute(query, df.to_dict(orient="records"))
-
 
 def get_descriptors(symbols: list[str] | str | None = None) -> pd.DataFrame:
     if isinstance(symbols, str):

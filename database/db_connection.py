@@ -6,7 +6,6 @@ load_dotenv()
 
 _engine = None
 
-
 def get_connection():
     global _engine
     if _engine is None:

@@ -1,7 +1,7 @@
 import re
 import pandas as pd
 from agents.analysts.sa import SignalAgent, AgentVerdict
-from agents.llm_client import call_llm_analyze, ANALYSIS_MODEL
+from agents.llm_client import call_llm_analyze, REMOTE_MODEL
 import signals.sig_momentum as sig_mom
 from config import STOCK_SYMBOLS, BENCHMARK_SYMBOLS
 
@@ -90,14 +90,12 @@ Confidence calibration:
 
 
 class RSMomentumAgent(SignalAgent):
-    def __init__(self, analysis_model: str = ANALYSIS_MODEL):
+    def __init__(self, analysis_model : str=REMOTE_MODEL):
         super().__init__(analysis_model)
         self.signal_day = pd.Timestamp.today()
         self._mom_model = sig_mom.MomentumFactorsModel(self.signal_day, STOCK_SYMBOLS, _BENCHMARK, _ETFS)
         self.stock_data = self._mom_model.data.copy()
-
-        # Cross-sectional 12-1 month return rank — computed once at init
-        # Skip the last month (return_20d) to avoid short-term reversal
+        self.analysis_model = analysis_model
         self.stock_data["_cs_return_12_1"] = (
             (1 + self.stock_data["return_252d"]) / (1 + self.stock_data["return_20d"]) - 1
         )
@@ -193,7 +191,7 @@ class RSMomentumAgent(SignalAgent):
     def analyze(self, snapshot, active_modes: list[str]) -> str:
         modes_str = " + ".join(active_modes) if active_modes else "none"
         user_prompt = f"Active entry signals: {modes_str}\n\n{snapshot.to_agent_prompt()}"
-        return call_llm_analyze(self.system_prompt, user_prompt, self.model)
+        return call_llm_analyze(self.system_prompt, user_prompt, model=self.analysis_model)
 
     def _parse_output_block(self, thesis: str) -> tuple[str, float]:
         dir_match = re.search(r"DIRECTION:\s*(BUY|WAIT|AVOID)", thesis)
@@ -225,7 +223,7 @@ class RSMomentumAgent(SignalAgent):
 
 
 if __name__ == "__main__":
-    agent = RSMomentumAgent()
+    agent = RSMomentumAgent("qwen3:14b")
     candidates = agent.prefilter()
     print("Candidates:", candidates)
     for symbol in candidates:

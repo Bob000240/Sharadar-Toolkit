@@ -2,7 +2,6 @@ from database.db_connection import get_connection
 import pandas as pd
 from sqlalchemy import text
 
-
 def create_OHLCV_table():
     engine = get_connection()
 
@@ -22,13 +21,11 @@ def create_OHLCV_table():
     with engine.begin() as conn:
         conn.execute(query)
 
-
 def drop_OHLCV_table():
     engine = get_connection()
 
     with engine.begin() as conn:
         conn.execute(text("DROP TABLE IF EXISTS OHLCV_data;"))
-
 
 def insert_OHLCV_table(df: pd.DataFrame):
     df = df.where(pd.notnull(df), None)
@@ -48,7 +45,6 @@ def insert_OHLCV_table(df: pd.DataFrame):
 
     with engine.begin() as conn:
         conn.execute(query, records)
-
 
 def get_OHLCV(
     symbol: str | list[str],
@@ -78,7 +74,6 @@ def get_OHLCV(
 
     return pd.read_sql_query(text(query), engine, params=params)
 
-
 def get_latest_date(symbols: str | list[str]) -> pd.DataFrame:
     """Returns DataFrame(symbol, latest_date) — the most recent date in the DB per symbol."""
     engine = get_connection()
@@ -90,7 +85,6 @@ def get_latest_date(symbols: str | list[str]) -> pd.DataFrame:
         GROUP BY symbol
     """)
     return pd.read_sql_query(query, engine, params={"symbols": symbols})
-
 
 def get_latest_OHLCV(symbols: str | list[str], signal_day: pd.Timestamp):
     engine = get_connection()

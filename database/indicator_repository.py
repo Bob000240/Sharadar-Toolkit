@@ -82,13 +82,11 @@ def create_indicators_table():
     with engine.begin() as conn:
         conn.execute(query)
 
-
 def drop_indicators_table():
     engine = get_connection()
 
     with engine.begin() as conn:
         conn.execute(text("DROP TABLE IF EXISTS indicators_data;"))
-
 
 _COLUMNS = [
     "symbol",
@@ -137,7 +135,6 @@ _COLUMNS = [
 
 _COL_LIST = ", ".join(_COLUMNS)
 _BIND_LIST = ", ".join(f":{c}" for c in _COLUMNS)
-
 
 def insert_indicators(df: pd.DataFrame):
     if df.empty:
@@ -199,7 +196,6 @@ def get_latest_date(symbols: str | list[str]) -> pd.DataFrame:
         GROUP BY symbol
     """)
     return pd.read_sql_query(query, engine, params={"symbols": symbols})
-
 
 def get_latest_indicators(symbols: str | list[str], signal_day: pd.Timestamp):
     engine = get_connection()

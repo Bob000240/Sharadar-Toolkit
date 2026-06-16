@@ -1,15 +1,13 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Literal
-from agents.llm_client import ANALYSIS_MODEL
-
 
 @dataclass
 class AgentVerdict:
     symbol: str
     signal_type: str
     direction: Literal["bullish", "neutral", "bearish"]
-    confidence: float  # 0.0 – 1.0
+    confidence: float
     reasoning: str
     sector: str = "Unknown"
     stop_price: float = 0.0
@@ -32,7 +30,7 @@ class AgentVerdict:
 
 
 class SignalAgent(ABC):
-    def __init__(self, model: str = ANALYSIS_MODEL):
+    def __init__(self, model: str = None):
         self.model = model
 
     @property
