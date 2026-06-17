@@ -15,8 +15,9 @@ def main(debug: bool = False):
     pm = PMAgent(alpaca, debug=debug)
     pm.sell()
     pm.optimize()
+    pm.set_analysts_model("qwen3:14b")
     pm.buy()
 
 
 if __name__ == "__main__":
-    main(debug=True)
+    main()

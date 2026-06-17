@@ -88,7 +88,8 @@ def load_positions_book() -> dict:
     if not _POSITIONS_BOOK_PATH.exists():
         return {}
     with open(_POSITIONS_BOOK_PATH) as f:
-        return json.load(f)
+        content = f.read().strip()
+    return json.loads(content) if content else {}
 
 
 def save_positions_book(book: dict) -> None:
@@ -272,8 +273,63 @@ class PMAgent:
     def __init__(self, alpaca: TradingClient, debug: bool = False):
         self.alpaca = alpaca
         self.debug = debug
+        self.analysts_model = REMOTE_MODEL
+
+    def _reconcile_book(self) -> None:
+        book = load_positions_book()
+        if not book:
+            return
+        positions = {p.symbol: p for p in self.alpaca.get_all_positions()}
+        dirty = False
+        for symbol, entry in book.items():
+            if symbol not in positions:
+                continue
+            actual = round(float(positions[symbol].avg_entry_price), 2)
+            stored = entry.get("avg_entry_price", actual)
+            if abs(actual - stored) < 0.01:
+                continue
+            atr = entry.get("atr", 0.0)
+            stop_dist = 2 * atr
+            book[symbol]["avg_entry_price"] = actual
+            book[symbol]["stop_price"]      = round(actual - stop_dist, 2)
+            book[symbol]["target_price"]    = round(actual + 3 * stop_dist, 2)
+            book[symbol]["high_water_mark"] = actual
+            dirty = True
+            print(f"Reconciled {symbol}: fill=${actual} (was ${stored}) → stop=${book[symbol]['stop_price']} target=${book[symbol]['target_price']}")
+        if dirty:
+            save_positions_book(book)
+
+    def _execute_sell(self, e: Exit) -> dict:
+        if self.debug:
+            print(f"[DEBUG] SELL {e.qty} {e.symbol} ({e.reason})")
+            return {"symbol": e.symbol, "qty": e.qty, "reason": e.reason, "status": "debug"}
+        req = MarketOrderRequest(
+            symbol=e.symbol,
+            qty=int(e.qty),
+            side=OrderSide.SELL,
+            time_in_force=TimeInForce.DAY,
+        )
+        resp = self.alpaca.submit_order(req)
+        print(f"SELL {e.qty} {e.symbol} ({e.reason}) order_id={resp.id}")
+        return {"symbol": e.symbol, "qty": e.qty, "reason": e.reason, "order_id": str(resp.id), "status": "submitted"}
+
+    def _execute_buy(self, order: BuyOrder, time_in_force: TimeInForce = TimeInForce.DAY) -> dict:
+        if self.debug:
+            print(f"[DEBUG] BUY {order.shares} {order.symbol} @ ~${order.entry_price:.2f}")
+            return {"symbol": order.symbol, "shares": order.shares, "status": "debug"}
+        req = MarketOrderRequest(
+            symbol=order.symbol,
+            qty=order.shares,
+            side=OrderSide.BUY,
+            time_in_force=time_in_force,
+        )
+        resp = self.alpaca.submit_order(req)
+        print(f"BUY {order.shares} {order.symbol} order_id={resp.id}")
+        return {"symbol": order.symbol, "shares": order.shares, "order_id": str(resp.id), "status": "submitted"}
+
 
     def sell(self) -> None:
+        self._reconcile_book()
         sell_agent = SellAgent(self.alpaca)
         exits = sell_agent.run()
         print(f"SellAgent: {len(exits)} exits")
@@ -314,12 +370,18 @@ class PMAgent:
     def optimize(self) -> None:
         # Trailing stops are updated inside SellAgent.run().
         # Reserved for future: rebalancing, sector exposure limits, etc.
+        if self.debug:
+            print("Total portfolio value: ${:.2f}".format(float(self.alpaca.get_account().portfolio_value)))
+            print("Cash available: ${:.2f}".format(float(self.alpaca.get_account().cash)))
+
         pass
+    def set_analysts_model(self, model: str) -> None:
+        self.analysts_model = model
 
     def buy(self) -> None:
         from agents.analysts.sa_RS import RSMomentumAgent
 
-        analyst = RSMomentumAgent()
+        analyst = RSMomentumAgent(analysis_model=self.analysts_model)
         candidates = analyst.prefilter()
         print(f"RSMomentumAgent: {len(candidates)} candidates")
         if not candidates:
@@ -372,31 +434,3 @@ class PMAgent:
                     "strategy": order.strategy,
                 }
         save_positions_book(book)
-
-    def _execute_sell(self, e: Exit) -> dict:
-        if self.debug:
-            print(f"[DEBUG] SELL {e.qty} {e.symbol} ({e.reason})")
-            return {"symbol": e.symbol, "qty": e.qty, "reason": e.reason, "status": "debug"}
-        req = MarketOrderRequest(
-            symbol=e.symbol,
-            qty=int(e.qty),
-            side=OrderSide.SELL,
-            time_in_force=TimeInForce.DAY,
-        )
-        resp = self.alpaca.submit_order(req)
-        print(f"SELL {e.qty} {e.symbol} ({e.reason}) order_id={resp.id}")
-        return {"symbol": e.symbol, "qty": e.qty, "reason": e.reason, "order_id": str(resp.id), "status": "submitted"}
-
-    def _execute_buy(self, order: BuyOrder) -> dict:
-        if self.debug:
-            print(f"[DEBUG] BUY {order.shares} {order.symbol} @ ~${order.entry_price:.2f}")
-            return {"symbol": order.symbol, "shares": order.shares, "status": "debug"}
-        req = MarketOrderRequest(
-            symbol=order.symbol,
-            qty=order.shares,
-            side=OrderSide.BUY,
-            time_in_force=TimeInForce.DAY,
-        )
-        resp = self.alpaca.submit_order(req)
-        print(f"BUY {order.shares} {order.symbol} order_id={resp.id}")
-        return {"symbol": order.symbol, "shares": order.shares, "order_id": str(resp.id), "status": "submitted"}

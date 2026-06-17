@@ -1,34 +1,34 @@
 {
-  "WDC": {
-    "stop_price": 598.19,
-    "target_price": 929.32,
-    "entry_date": "2026-06-16",
-    "max_hold_days": 20,
-    "atr": 41.3924,
-    "avg_entry_price": 681.0,
-    "high_water_mark": 681.0,
+  "CAT": {
+    "stop_price": 907.02,
+    "target_price": 1157.78,
+    "entry_date": "2026-06-17",
+    "max_hold_days": 15,
+    "atr": 32.1398,
+    "avg_entry_price": 964.94,
+    "high_water_mark": 971.295,
     "partial_exit_done": false,
     "strategy": "Relative Strength Momentum"
   },
-  "MAR": {
-    "stop_price": 381.15,
-    "target_price": 452.54,
-    "entry_date": "2026-06-16",
+  "JBL": {
+    "stop_price": 348.96,
+    "target_price": 488.89,
+    "entry_date": "2026-06-17",
     "max_hold_days": 20,
-    "atr": 8.923,
-    "avg_entry_price": 398.98,
-    "high_water_mark": 398.98,
+    "atr": 18.2801,
+    "avg_entry_price": 379.21,
+    "high_water_mark": 385.52,
     "partial_exit_done": false,
     "strategy": "Relative Strength Momentum"
   },
-  "AMAT": {
-    "stop_price": 508.66,
-    "target_price": 746.33,
-    "entry_date": "2026-06-16",
-    "max_hold_days": 20,
-    "atr": 29.7093,
-    "avg_entry_price": 568.08,
-    "high_water_mark": 568.08,
+  "NUE": {
+    "stop_price": 243.32,
+    "target_price": 300.72,
+    "entry_date": "2026-06-17",
+    "max_hold_days": 10,
+    "atr": 7.1743,
+    "avg_entry_price": 257.67,
+    "high_water_mark": 257.67,
     "partial_exit_done": false,
     "strategy": "Relative Strength Momentum"
   }

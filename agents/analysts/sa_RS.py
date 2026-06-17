@@ -94,7 +94,7 @@ class RSMomentumAgent(SignalAgent):
         super().__init__(analysis_model)
         self.signal_day = pd.Timestamp.today()
         self._mom_model = sig_mom.MomentumFactorsModel(self.signal_day, STOCK_SYMBOLS, _BENCHMARK, _ETFS)
-        self.stock_data = self._mom_model.data.copy()
+        self.stock_data = self._mom_model.stock_data.copy()
         self.analysis_model = analysis_model
         self.stock_data["_cs_return_12_1"] = (
             (1 + self.stock_data["return_252d"]) / (1 + self.stock_data["return_20d"]) - 1
