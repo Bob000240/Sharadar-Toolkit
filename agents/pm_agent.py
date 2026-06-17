@@ -269,9 +269,9 @@ class PositionSizer:
 # --- PMAgent ---
 
 class PMAgent:
-    def __init__(self, alpaca: TradingClient, dry_run: bool = False):
+    def __init__(self, alpaca: TradingClient, debug: bool = False):
         self.alpaca = alpaca
-        self.dry_run = dry_run
+        self.debug = debug
 
     def sell(self) -> None:
         sell_agent = SellAgent(self.alpaca)
@@ -283,12 +283,12 @@ class PMAgent:
 
         for e in exits:
             result = self._execute_sell(e)
-            if result["status"] in ("submitted", "dry_run"):
+            if result["status"] in ("submitted", "debug"):
                 entry = book.get(e.symbol, {})
                 sell_price = float(
                     next((p.current_price for p in self.alpaca.get_all_positions()
                           if p.symbol == e.symbol), entry.get("avg_entry_price", 0))
-                ) if not self.dry_run else entry.get("avg_entry_price", 0)
+                ) if not self.debug else entry.get("avg_entry_price", 0)
                 purchase_price = entry.get("avg_entry_price", 0.0)
                 pnl = round((sell_price - purchase_price) * e.qty, 2)
                 pnl_pct = round((sell_price - purchase_price) / purchase_price * 100, 2) if purchase_price else 0.0
@@ -328,18 +328,38 @@ class PMAgent:
 
         held = {p.symbol for p in self.alpaca.get_all_positions()}
         verdicts = [analyst.run(s) for s in candidates]
+
+        if self.debug:
+            print("\n--- Verdicts ---")
+            for v in verdicts:
+                print(f"  {v.symbol} | {v.direction} | confidence={v.confidence:.0%} | stop=${v.stop_price} target=${v.target_price}")
+                print(f"    {v.reasoning[:300]}...")
+            print()
+
         decisions = StrategyReceiver().run(verdicts, held)
         print(f"StrategyReceiver: {len(decisions)} decisions")
+
+        if self.debug:
+            print("\n--- Decisions ---")
+            for d in decisions:
+                print(f"  BUY {d.verdict.symbol} — {d.rationale}")
+            print()
 
         acct = self.alpaca.get_account()
         orders = PositionSizer(float(acct.cash), float(acct.portfolio_value)).size(decisions)
         print(f"PositionSizer: {len(orders)} orders")
 
+        if self.debug:
+            print("\n--- Orders ---")
+            for o in orders:
+                print(f"  {o.symbol}: {o.shares} shares @ ~${o.entry_price} | stop=${o.stop_price} target=${o.target_price} | hold={o.max_hold_days}d")
+            print()
+
         book = load_positions_book()
         today = date.today().isoformat()
         for order in orders:
             result = self._execute_buy(order)
-            if result["status"] in ("submitted", "dry_run"):
+            if result["status"] in ("submitted", "debug"):
                 book[order.symbol] = {
                     "stop_price": order.stop_price,
                     "target_price": order.target_price,
@@ -354,9 +374,9 @@ class PMAgent:
         save_positions_book(book)
 
     def _execute_sell(self, e: Exit) -> dict:
-        if self.dry_run:
-            print(f"[DRY RUN] SELL {e.qty} {e.symbol} ({e.reason})")
-            return {"symbol": e.symbol, "qty": e.qty, "reason": e.reason, "status": "dry_run"}
+        if self.debug:
+            print(f"[DEBUG] SELL {e.qty} {e.symbol} ({e.reason})")
+            return {"symbol": e.symbol, "qty": e.qty, "reason": e.reason, "status": "debug"}
         req = MarketOrderRequest(
             symbol=e.symbol,
             qty=int(e.qty),
@@ -368,9 +388,9 @@ class PMAgent:
         return {"symbol": e.symbol, "qty": e.qty, "reason": e.reason, "order_id": str(resp.id), "status": "submitted"}
 
     def _execute_buy(self, order: BuyOrder) -> dict:
-        if self.dry_run:
-            print(f"[DRY RUN] BUY {order.shares} {order.symbol} @ ~${order.entry_price:.2f}")
-            return {"symbol": order.symbol, "shares": order.shares, "status": "dry_run"}
+        if self.debug:
+            print(f"[DEBUG] BUY {order.shares} {order.symbol} @ ~${order.entry_price:.2f}")
+            return {"symbol": order.symbol, "shares": order.shares, "status": "debug"}
         req = MarketOrderRequest(
             symbol=order.symbol,
             qty=order.shares,
