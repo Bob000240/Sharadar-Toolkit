@@ -5,7 +5,7 @@ from typing import Literal
 @dataclass
 class AgentVerdict:
     symbol: str
-    signal_type: str
+    strategy: str
     direction: Literal["bullish", "neutral", "bearish"]
     confidence: float
     reasoning: str
@@ -21,7 +21,7 @@ class AgentVerdict:
         return (
             f"AgentVerdict(\n"
             f"  symbol={self.symbol!r},\n"
-            f"  signal_type={self.signal_type!r},\n"
+            f"  strategy={self.strategy!r},\n"
             f"  direction={self.direction!r},\n"
             f"  confidence={self.confidence:.2f} ({self.confidence:.0%}),\n"
             f"  reasoning={self.reasoning!r},\n"
@@ -32,14 +32,6 @@ class AgentVerdict:
 class SignalAgent(ABC):
     def __init__(self, model: str = None):
         self.model = model
-
-    @property
-    @abstractmethod
-    def signal_type(self) -> str: ...
-
-    @property
-    @abstractmethod
-    def system_prompt(self) -> str: ...
 
     @abstractmethod
     def prefilter(self, **kwargs) -> list[str]: ...

@@ -1,0 +1,35 @@
+{
+  "WDC": {
+    "stop_price": 598.19,
+    "target_price": 929.32,
+    "entry_date": "2026-06-16",
+    "max_hold_days": 20,
+    "atr": 41.3924,
+    "avg_entry_price": 681.0,
+    "high_water_mark": 681.0,
+    "partial_exit_done": false,
+    "strategy": "Relative Strength Momentum"
+  },
+  "MAR": {
+    "stop_price": 381.15,
+    "target_price": 452.54,
+    "entry_date": "2026-06-16",
+    "max_hold_days": 20,
+    "atr": 8.923,
+    "avg_entry_price": 398.98,
+    "high_water_mark": 398.98,
+    "partial_exit_done": false,
+    "strategy": "Relative Strength Momentum"
+  },
+  "AMAT": {
+    "stop_price": 508.66,
+    "target_price": 746.33,
+    "entry_date": "2026-06-16",
+    "max_hold_days": 20,
+    "atr": 29.7093,
+    "avg_entry_price": 568.08,
+    "high_water_mark": 568.08,
+    "partial_exit_done": false,
+    "strategy": "Relative Strength Momentum"
+  }
+}

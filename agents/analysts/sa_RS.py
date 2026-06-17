@@ -19,7 +19,7 @@ MOMENTUM_SECTIONS = [
 
 _BENCHMARK = "SPY"
 _ETFS = [s for s in BENCHMARK_SYMBOLS if s != "SPY"]
-
+_STRATEGY = "Relative Strength Momentum"
 _SYSTEM_PROMPT = """
 You are SA-RS (Relative Strength Momentum), a strategy agent evaluating entry timing for pre-qualified candidates.
 
@@ -90,7 +90,7 @@ Confidence calibration:
 
 
 class RSMomentumAgent(SignalAgent):
-    def __init__(self, analysis_model : str=REMOTE_MODEL):
+    def __init__(self, analysis_model: str = REMOTE_MODEL):
         super().__init__(analysis_model)
         self.signal_day = pd.Timestamp.today()
         self._mom_model = sig_mom.MomentumFactorsModel(self.signal_day, STOCK_SYMBOLS, _BENCHMARK, _ETFS)
@@ -100,6 +100,8 @@ class RSMomentumAgent(SignalAgent):
             (1 + self.stock_data["return_252d"]) / (1 + self.stock_data["return_20d"]) - 1
         )
         self.stock_data["_cs_rank"] = self.stock_data["_cs_return_12_1"].rank(pct=True)
+        self.strategy = _STRATEGY
+        self.system_prompt = _SYSTEM_PROMPT
 
     def prefilter(
         self,
@@ -110,17 +112,17 @@ class RSMomentumAgent(SignalAgent):
     ) -> list[str]:
         df = self.stock_data.copy()
 
-        # - Gate 0: Cross-sectional momentum rank (quant layer) -
+        # Gate 0: Cross-sectional momentum rank
         cs_pass = df["_cs_rank"] >= (1.0 - top_cs_pct)
 
-        # - Gate 1: Short-term RS -
+        # Gate 1: Short-term RS
         rs_pass = (
             (df["return_20d_percentile"] > min_rs_percentile) &
             (df["excess_return_20d"] > 0) &
             (df["sector_relative_20d"] > 0)
         )
 
-        # - Gate 2: Trend health -
+        # Gate 2: Trend health
         trend_pass = (
             (df["above_sma_200"] == True) &
             (df["above_sma_50"] == True) &
@@ -128,7 +130,7 @@ class RSMomentumAgent(SignalAgent):
             (df["slope_x_r2"] > 0)
         )
 
-        # - Gate 3: Entry signal (OR logic — at least one must fire) -
+        # Gate 3: Entry signal (OR logic)
         breakout_pass = (
             (df["price_vs_20d_high"] > -0.03) &
             (df["volume_ratio"] > 1.5)
@@ -161,15 +163,7 @@ class RSMomentumAgent(SignalAgent):
             modes.append("crossover")
         return modes
 
-    @property
-    def signal_type(self) -> str:
-        return "Relative Strength Momentum"
-
-    @property
-    def system_prompt(self) -> str:
-        return _SYSTEM_PROMPT
-
-    def _exit_conditions(self, symbol: str) -> dict:
+    def exit_signals(self, symbol: str) -> dict:
         row = self.stock_data.loc[symbol]
         price = float(row["close"])
         atr = float(row["atr_14"])
@@ -205,20 +199,20 @@ class RSMomentumAgent(SignalAgent):
         snapshot = self._mom_model.build_snapshot(symbol, MOMENTUM_SECTIONS)
         thesis = self.analyze(snapshot, active_modes)
         direction, confidence = self._parse_output_block(thesis)
-        risk = self._exit_conditions(symbol)
+        exit_signals = self.exit_signals(symbol)
         return AgentVerdict(
             symbol=symbol,
-            signal_type=self.signal_type,
+            strategy=self.strategy,
             direction=direction,
             confidence=confidence,
             reasoning=thesis,
             sector=str(self.stock_data.loc[symbol, "sector"]),
-            stop_price=risk["stop_price"],
-            stop_pct=risk["stop_pct"],
-            target_price=risk["target_price"],
-            target_pct=risk["target_pct"],
-            atr=risk["atr"],
-            max_hold_days=risk["max_hold_days"],
+            stop_price=exit_signals["stop_price"],
+            stop_pct=exit_signals["stop_pct"],
+            target_price=exit_signals["target_price"],
+            target_pct=exit_signals["target_pct"],
+            atr=exit_signals["atr"],
+            max_hold_days=exit_signals["max_hold_days"],
         )
 
 
