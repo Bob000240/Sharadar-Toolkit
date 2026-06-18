@@ -1,9 +1,9 @@
+from config import STOCK_SYMBOLS, ALL_SYMBOLS, SP500_SYMBOLS
 from raw_data.market_data import MarketData
 from raw_data.descriptors_data import DescriptorsData
 from raw_data.fundamentals_data import FundamentalsData
 from processed_data.fundamentals_transform import build_quality, build_value, build_growth
 from processed_data.indicators import compute_indicators
-from config import ALL_SYMBOLS, STOCK_SYMBOLS, BENCHMARK_SYMBOLS
 import database.market_repository as market_repo
 import database.indicator_repository as indicator_repo
 import database.descriptors_repository as descriptor_repo
@@ -55,6 +55,7 @@ if __name__ == "__main__":
     # print("Inserted growth data")
     # fund_repo.insert_value(build_value(fd))
     # print("Inserted value data")
+    print(len(SP500_SYMBOLS))
 
     pd.set_option("display.max_columns", None)
     df = market_repo.get_OHLCV(["SPY", "AAPL"], start_date, end_date)

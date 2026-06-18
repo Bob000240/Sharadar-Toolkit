@@ -24,7 +24,9 @@ _SYSTEM_PROMPT = """
 You are SA-RS (Relative Strength Momentum), a strategy agent evaluating entry timing for pre-qualified candidates.
 
 CONTEXT - WHAT IS ALREADY ESTABLISHED:
-The stock has passed all four prefilter gates:
+The stock passed all four prefilter gates using prior-day closing data. The snapshot below reflects today's intraday data, so some indicators may have shifted since the prefilter ran. If a key indicator has deteriorated meaningfully (e.g. MACD turned negative, price fell below SMA-20 for a pullback setup), treat that as a genuine concern and lower confidence accordingly.
+
+Prefilter gates (evaluated on prior-day close):
 - Gate 0 CS Rank: top 30% of universe by 12-1 month cross-sectional momentum (medium-term systematic rank)
 - Gate 1 RS: return_20d_percentile > 75th, outperforming SPY and sector ETF on 20d basis
 - Gate 2 Trend: above SMA-200 and SMA-50, r_squared_60d > 0.65, slope_x_r2 > 0
@@ -33,7 +35,7 @@ The stock has passed all four prefilter gates:
     * Pullback: tight consolidation, price within -5% to +3% of SMA-20
     * Crossover: MACD histogram positive AND 5d momentum > 20d momentum (short-term acceleration)
 
-DO NOT re-evaluate Gates 0-2. They are established facts. Your job is to assess entry quality for the active signal(s). If multiple signals are active, treat the confluence as a positive factor and reflect it in your confidence score.
+DO NOT re-evaluate Gates 0-2. Your job is to assess entry quality using today's snapshot for the active signal(s). If multiple signals are active, treat the confluence as a positive factor and reflect it in your confidence score.
 
 YOUR RESPONSIBILITIES:
 1. Entry signal quality — does the overall picture support the declared signal(s)?
@@ -124,8 +126,8 @@ class RSMomentumAgent(SignalAgent):
 
         # Gate 2: Trend health
         trend_pass = (
-            (df["above_sma_200"] == True) &
-            (df["above_sma_50"] == True) &
+            df["above_sma_200"] &
+            df["above_sma_50"] &
             (df["r_squared_60d"] > min_r_squared) &
             (df["slope_x_r2"] > 0)
         )
@@ -185,7 +187,10 @@ class RSMomentumAgent(SignalAgent):
     def analyze(self, snapshot, active_modes: list[str]) -> str:
         modes_str = " + ".join(active_modes) if active_modes else "none"
         user_prompt = f"Active entry signals: {modes_str}\n\n{snapshot.to_agent_prompt()}"
-        return call_llm_analyze(self.system_prompt, user_prompt, model=self.analysis_model)
+        print(f"[SA-RS] Analyzing {snapshot.symbol} ({modes_str})...")
+        result = call_llm_analyze(self.system_prompt, user_prompt, model=self.analysis_model)
+        print(f"[SA-RS] Done {snapshot.symbol}")
+        return result
 
     def _parse_output_block(self, thesis: str) -> tuple[str, float]:
         dir_match = re.search(r"DIRECTION:\s*(BUY|WAIT|AVOID)", thesis)

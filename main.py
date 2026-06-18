@@ -1,9 +1,9 @@
-from dotenv import load_dotenv
-load_dotenv()
-
 import os
+from dotenv import load_dotenv
 from alpaca.trading.client import TradingClient
 from agents.pm_agent import PMAgent
+
+load_dotenv()
 
 
 def main(debug: bool = False):
@@ -20,4 +20,4 @@ def main(debug: bool = False):
 
 
 if __name__ == "__main__":
-    main()
+    main(debug=True)

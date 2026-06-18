@@ -1,6 +1,6 @@
 import database.indicator_repository as indicator_repo
 import pandas as pd
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 SECTOR_ETF_MAP = {
     "XLK":  "Technology",

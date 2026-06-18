@@ -1,8 +1,7 @@
 from dotenv import load_dotenv
-load_dotenv()
-
-import os
 from openai import OpenAI
+
+load_dotenv()
 
 _openai_client = OpenAI()
 _local_client = OpenAI(base_url="http://localhost:11434/v1", api_key="ollama")

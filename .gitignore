@@ -20,7 +20,4 @@ __pycache__/
 .pytest_cache/
 tests/
 
-# AI assistant generated files
-.claude/
-
 requirements.txt

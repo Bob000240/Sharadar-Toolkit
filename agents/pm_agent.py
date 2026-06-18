@@ -4,7 +4,6 @@ from datetime import date
 from pathlib import Path
 from typing import Optional
 import json
-import os
 
 from alpaca.trading.client import TradingClient
 from alpaca.trading.requests import MarketOrderRequest
@@ -221,12 +220,15 @@ class StrategyReceiver:
             f"Max hold: {verdict.max_hold_days}d\n"
             f"Reasoning: {verdict.reasoning}"
         )
+        print(f"[PM] Evaluating {verdict.symbol}...")
         raw = call_llm_analyze(system=system, user=user, model=self.model)
         text = raw.strip()
         if "```" in text:
             text = text.split("```")[1].lstrip("json").strip()
         data = json.loads(text)
-        if data.get("action") == "BUY":
+        action = data.get("action")
+        print(f"[PM] {verdict.symbol} → {action}")
+        if action == "BUY":
             return BuyDecision(verdict=verdict, rationale=data.get("rationale", ""))
         return None
 
@@ -387,6 +389,8 @@ class PMAgent:
         if not candidates:
             print("No candidates — skipping buy")
             return
+
+        analyst._mom_model.refresh_live(candidates)
 
         held = {p.symbol for p in self.alpaca.get_all_positions()}
         verdicts = [analyst.run(s) for s in candidates]
