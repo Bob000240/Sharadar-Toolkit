@@ -1,5 +1,6 @@
 import database.descriptors_repository as descriptor_repo
 import database.market_repository as market_repo
+import database.indicator_repository as indicator_repo
 from raw_data.market_data import MarketData
 from processed_data.indicators import compute_indicators
 
@@ -233,14 +234,15 @@ class MomentumFactorsModel:
         self.etf_data = None
         self._load_data()
 
-    def _load_data(self):
+    def _compute_live(self, symbols: list[str]) -> pd.DataFrame:
+        """Fetch OHLCV + today's live snapshot for symbols, compute indicators, return last-row DataFrame."""
         lookback_start = self.signal_day - pd.Timedelta(days=400)
         yesterday = self.signal_day - pd.Timedelta(days=1)
 
-        ohlcv = market_repo.get_OHLCV(self.all_symbols, lookback_start, yesterday)
+        ohlcv = market_repo.get_OHLCV(symbols, lookback_start, yesterday)
         ohlcv["date"] = pd.to_datetime(ohlcv["date"])
 
-        live = MarketData().get_live_snapshot(self.all_symbols)
+        live = MarketData().get_live_snapshot(symbols)
         if not live.empty:
             today = pd.Timestamp(self.signal_day.date())
             live_rows = live.reset_index().rename(columns={"index": "symbol"})
@@ -256,29 +258,49 @@ class MomentumFactorsModel:
                 last = ind.iloc[-1].to_dict()
                 last["symbol"] = sym
                 rows.append(last)
+        return pd.DataFrame(rows).set_index("symbol")
 
-        sector_mapping = descriptor_repo.get_descriptors(self.all_symbols)[["symbol", "sector"]].set_index("symbol")
+    def _from_db(self) -> pd.DataFrame:
+        print(f"[Data] Loading pre-computed indicators for {len(self.all_symbols)} symbols...")
+        yesterday = self.signal_day - pd.Timedelta(days=1)
+        df = indicator_repo.get_latest_indicators(self.all_symbols, yesterday)
+        print("[Data] Loaded.")
+        return df.set_index("symbol")
 
-        all_indicators = pd.DataFrame(rows).set_index("symbol")
-        all_indicators["sector"] = sector_mapping["sector"]
-        all_indicators["above_sma_50"]  = all_indicators["close"] > all_indicators["sma_50"]
-        all_indicators["above_sma_200"] = all_indicators["close"] > all_indicators["sma_200"]
-
-        self.stock_data     = all_indicators.loc[self.stock_symbols].copy()
-        self.benchmark_data = all_indicators.loc[[self.benchmark_symbol]].copy()
-        self.etf_data       = all_indicators.loc[self.etf_symbols].copy()
+    def _load_data(self, live: bool = False, symbols: list[str] | None = None) -> None:
+        if live and symbols:
+            print(f"[Data] Fetching live data for {len(symbols)} candidates: {symbols}")
+            all_indicators = self._compute_live(symbols)
+            for sym in all_indicators.index:
+                if sym not in self.stock_data.index:
+                    continue
+                for col in all_indicators.columns:
+                    if col in self.stock_data.columns:
+                        self.stock_data.at[sym, col] = all_indicators.at[sym, col]
+                self.stock_data.at[sym, "above_sma_50"]  = all_indicators.at[sym, "close"] > all_indicators.at[sym, "sma_50"]
+                self.stock_data.at[sym, "above_sma_200"] = all_indicators.at[sym, "close"] > all_indicators.at[sym, "sma_200"]
+        else:
+            all_indicators = self._from_db()
+            sector_mapping = descriptor_repo.get_descriptors(self.all_symbols)[["symbol", "sector"]].set_index("symbol")
+            all_indicators["sector"] = sector_mapping["sector"]
+            all_indicators["above_sma_50"]  = all_indicators["close"] > all_indicators["sma_50"]
+            all_indicators["above_sma_200"] = all_indicators["close"] > all_indicators["sma_200"]
+            self.stock_data     = all_indicators.loc[self.stock_symbols].copy()
+            self.benchmark_data = all_indicators.loc[[self.benchmark_symbol]].copy()
+            self.etf_data       = all_indicators.loc[self.etf_symbols].copy()
 
         bench_5d  = self.benchmark_data.loc[self.benchmark_symbol, "return_5d"]
         bench_20d = self.benchmark_data.loc[self.benchmark_symbol, "return_20d"]
         self.stock_data["excess_return_5d"]  = self.stock_data["return_5d"]  - bench_5d
         self.stock_data["excess_return_20d"] = self.stock_data["return_20d"] - bench_20d
-
         etf_returns = self.etf_data.set_index("sector")
         self.stock_data["sector_relative_5d"]  = self.stock_data["return_5d"]  - self.stock_data["sector"].map(etf_returns["return_5d"])
         self.stock_data["sector_relative_20d"] = self.stock_data["return_20d"] - self.stock_data["sector"].map(etf_returns["return_20d"])
-
         for col in ["return_5d", "return_20d", "return_60d", "return_252d"]:
             self.stock_data[f"{col}_percentile"] = self.stock_data[col].rank(pct=True) * 100
+
+        if live:
+            print("[Data] Live refresh done")
 
     def get(self, symbol: str, col: str):
         if symbol not in self.stock_data.index:

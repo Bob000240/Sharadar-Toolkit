@@ -1,23 +1,23 @@
 {
   "CAT": {
-    "stop_price": 907.02,
-    "target_price": 1157.78,
+    "stop_price": 927.66,
+    "target_price": 1157.96,
     "entry_date": "2026-06-17",
     "max_hold_days": 15,
     "atr": 32.1398,
-    "avg_entry_price": 964.94,
-    "high_water_mark": 971.295,
+    "avg_entry_price": 965.12,
+    "high_water_mark": 991.94,
     "partial_exit_done": false,
     "strategy": "Relative Strength Momentum"
   },
   "JBL": {
-    "stop_price": 348.96,
-    "target_price": 488.89,
+    "stop_price": 343.08,
+    "target_price": 489.32,
     "entry_date": "2026-06-17",
     "max_hold_days": 20,
     "atr": 18.2801,
-    "avg_entry_price": 379.21,
-    "high_water_mark": 385.52,
+    "avg_entry_price": 379.64,
+    "high_water_mark": 379.64,
     "partial_exit_done": false,
     "strategy": "Relative Strength Momentum"
   },
@@ -29,6 +29,17 @@
     "atr": 7.1743,
     "avg_entry_price": 257.67,
     "high_water_mark": 257.67,
+    "partial_exit_done": false,
+    "strategy": "Relative Strength Momentum"
+  },
+  "STLD": {
+    "stop_price": 253.23,
+    "target_price": 320.76,
+    "entry_date": "2026-06-18",
+    "max_hold_days": 10,
+    "atr": 8.4402,
+    "avg_entry_price": 270.11,
+    "high_water_mark": 270.11,
     "partial_exit_done": false,
     "strategy": "Relative Strength Momentum"
   }

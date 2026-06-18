@@ -11,6 +11,9 @@ def create_indicators_table():
             symbol TEXT NOT NULL,
             date DATE NOT NULL,
 
+            -- Price
+            close DOUBLE PRECISION,
+
             -- Returns
             return_1d DOUBLE PRECISION,
             return_5d DOUBLE PRECISION,
@@ -91,6 +94,7 @@ def drop_indicators_table():
 _COLUMNS = [
     "symbol",
     "date",
+    "close",
     "return_1d",
     "return_5d",
     "return_20d",

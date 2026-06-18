@@ -390,7 +390,7 @@ class PMAgent:
             print("No candidates — skipping buy")
             return
 
-        analyst._mom_model.refresh_live(candidates)
+        analyst._mom_model._load_data(live=True, symbols=candidates)
 
         held = {p.symbol for p in self.alpaca.get_all_positions()}
         verdicts = [analyst.run(s) for s in candidates]
@@ -399,7 +399,7 @@ class PMAgent:
             print("\n--- Verdicts ---")
             for v in verdicts:
                 print(f"  {v.symbol} | {v.direction} | confidence={v.confidence:.0%} | stop=${v.stop_price} target=${v.target_price}")
-                print(f"    {v.reasoning[:300]}...")
+                print(f"    {v.reasoning}")
             print()
 
         decisions = StrategyReceiver().run(verdicts, held)
