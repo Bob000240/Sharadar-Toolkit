@@ -29,67 +29,8 @@ _GROWTH_COLS = [
 _ALL_QUALITY = [c for c in _QUALITY_COLS if c not in ("symbol", "date")]
 _ALL_VALUE = [c for c in _VALUE_COLS if c not in ("symbol", "date")]
 
-def create_fundamentals_tables():
-    engine = get_connection()
-    with engine.begin() as conn:
-        conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS quality_fundamentals (
-                symbol              TEXT NOT NULL,
-                date                DATE NOT NULL,
-                roe                 DOUBLE PRECISION,
-                roa                 DOUBLE PRECISION,
-                roic                DOUBLE PRECISION,
-                gross_margin        DOUBLE PRECISION,
-                operating_margin    DOUBLE PRECISION,
-                net_margin          DOUBLE PRECISION,
-                fcf_margin          DOUBLE PRECISION,
-                cash_conversion     DOUBLE PRECISION,
-                accruals_ratio      DOUBLE PRECISION,
-                debt_to_equity      DOUBLE PRECISION,
-                net_debt_to_ebitda  DOUBLE PRECISION,
-                interest_coverage   DOUBLE PRECISION,
-                current_ratio       DOUBLE PRECISION,
-                asset_turnover      DOUBLE PRECISION,
-                PRIMARY KEY (symbol, date)
-            );
-        """))
-        conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS value_fundamentals (
-                symbol              TEXT NOT NULL,
-                date                DATE NOT NULL,
-                pe_ratio            DOUBLE PRECISION,
-                earnings_yield      DOUBLE PRECISION,
-                pb_ratio            DOUBLE PRECISION,
-                price_to_sales      DOUBLE PRECISION,
-                ev_ebitda           DOUBLE PRECISION,
-                ev_sales            DOUBLE PRECISION,
-                ev_fcf              DOUBLE PRECISION,
-                price_to_fcf        DOUBLE PRECISION,
-                fcf_yield           DOUBLE PRECISION,
-                dividend_yield      DOUBLE PRECISION,
-                PRIMARY KEY (symbol, date)
-            );
-        """))
-        conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS growth_fundamentals (
-                symbol                  TEXT NOT NULL,
-                date                    DATE NOT NULL,
-                period                  TEXT NOT NULL,
-                revenue_growth_yoy      DOUBLE PRECISION,
-                eps_growth_yoy          DOUBLE PRECISION,
-                revenue_growth_qoq      DOUBLE PRECISION,
-                eps_growth_qoq          DOUBLE PRECISION,
-                PRIMARY KEY (symbol, date, period)
-            );
-        """))
-
-
-def drop_fundamentals_tables():
-    engine = get_connection()
-    with engine.begin() as conn:
-        conn.execute(text("DROP TABLE IF EXISTS quality_fundamentals;"))
-        conn.execute(text("DROP TABLE IF EXISTS value_fundamentals;"))
-        conn.execute(text("DROP TABLE IF EXISTS growth_fundamentals;"))
+# Schema (quality_/value_/growth_fundamentals tables) is managed by Alembic —
+# see migrations/versions/0001_initial_schema.py. Run `alembic upgrade head`.
 
 def _insert(table: str, cols: list[str], df: pd.DataFrame):
     missing = [c for c in cols if c not in df.columns]

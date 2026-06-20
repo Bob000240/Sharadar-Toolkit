@@ -2,28 +2,8 @@ from database.db_connection import get_connection
 import pandas as pd
 from sqlalchemy import text
 
-def create_descriptors_table():
-    engine = get_connection()
-    with engine.begin() as conn:
-        conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS stock_descriptors (
-                symbol       TEXT PRIMARY KEY,
-                company_name TEXT,
-                sector       TEXT,
-                industry     TEXT,
-                country      TEXT,
-                exchange     TEXT,
-                currency     TEXT,
-                market_cap   NUMERIC,
-                size_bucket  TEXT,
-                is_etf       BOOLEAN
-            );
-        """))
-
-def drop_descriptors_table():
-    engine = get_connection()
-    with engine.begin() as conn:
-        conn.execute(text("DROP TABLE IF EXISTS stock_descriptors;"))
+# Schema (the stock_descriptors table) is managed by Alembic — see
+# migrations/versions/0001_initial_schema.py. Run `alembic upgrade head`.
 
 def insert_descriptors(df: pd.DataFrame):
     df = df.where(pd.notnull(df), None)

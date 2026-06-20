@@ -2,30 +2,8 @@ from database.db_connection import get_connection
 import pandas as pd
 from sqlalchemy import text
 
-def create_OHLCV_table():
-    engine = get_connection()
-
-    query = text("""
-        CREATE TABLE IF NOT EXISTS OHLCV_data (
-            symbol TEXT NOT NULL,
-            date DATE NOT NULL,
-            open DOUBLE PRECISION,
-            high DOUBLE PRECISION,
-            low DOUBLE PRECISION,
-            close DOUBLE PRECISION,
-            volume BIGINT,
-            PRIMARY KEY (symbol, date)
-        );
-    """)
-
-    with engine.begin() as conn:
-        conn.execute(query)
-
-def drop_OHLCV_table():
-    engine = get_connection()
-
-    with engine.begin() as conn:
-        conn.execute(text("DROP TABLE IF EXISTS OHLCV_data;"))
+# Schema (the ohlcv_data table) is managed by Alembic — see
+# migrations/versions/0001_initial_schema.py. Run `alembic upgrade head`.
 
 def insert_OHLCV_table(df: pd.DataFrame):
     df = df.where(pd.notnull(df), None)

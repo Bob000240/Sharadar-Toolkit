@@ -104,7 +104,7 @@ if __name__ == "__main__":
     start = "2024-01-01"
     end   = pd.Timestamp.today().strftime("%Y-%m-%d")
 
-    macro_repo.create_macro_table()
+    # Schema is managed by Alembic; run `alembic upgrade head` before inserting.
 
     md = MacroeconomicData()
     df = md.get_macro(start, end)

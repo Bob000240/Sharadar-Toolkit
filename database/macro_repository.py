@@ -13,29 +13,8 @@ _COLUMNS = [
 _COL_LIST = ", ".join(_COLUMNS)
 _BIND_LIST = ", ".join(f":{c}" for c in _COLUMNS)
 
-def create_macro_table():
-    engine = get_connection()
-    query = text("""
-        CREATE TABLE IF NOT EXISTS macro_data (
-            date DATE PRIMARY KEY,
-            yield_10y DOUBLE PRECISION,
-            yield_2y DOUBLE PRECISION,
-            yield_curve DOUBLE PRECISION,
-            real_yield DOUBLE PRECISION,
-            cpi_yoy DOUBLE PRECISION,
-            unemployment_rate DOUBLE PRECISION,
-            credit_spread_hy DOUBLE PRECISION,
-            credit_spread_ig DOUBLE PRECISION,
-            vix DOUBLE PRECISION
-        );
-    """)
-    with engine.begin() as conn:
-        conn.execute(query)
-
-def drop_macro_table():
-    engine = get_connection()
-    with engine.begin() as conn:
-        conn.execute(text("DROP TABLE IF EXISTS macro_data;"))
+# Schema (the macro_data table) is managed by Alembic — see
+# migrations/versions/0001_initial_schema.py. Run `alembic upgrade head`.
 
 def insert_macro(df: pd.DataFrame):
     df = df.where(pd.notnull(df), None)

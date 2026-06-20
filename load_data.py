@@ -1,4 +1,14 @@
-from config import STOCK_SYMBOLS, ALL_SYMBOLS, SP500_SYMBOLS
+"""One-time initial data load.
+
+Prerequisite: the schema must already exist. Apply migrations first:
+
+    alembic upgrade head
+
+This script then populates the (empty) tables from the upstream data sources.
+It is destructive only in that it fetches and inserts large amounts of data;
+the inserts themselves are idempotent (`ON CONFLICT DO NOTHING`).
+"""
+from config import STOCK_SYMBOLS, ALL_SYMBOLS
 from raw_data.market_data import MarketData
 from raw_data.descriptors_data import DescriptorsData
 from raw_data.fundamentals_data import FundamentalsData
@@ -10,63 +20,44 @@ import database.descriptors_repository as descriptor_repo
 import database.fundamentals_repository as fund_repo
 import pandas as pd
 
-if __name__ == "__main__":
+
+def load_market_and_indicators(start_date, end_date) -> None:
+    market_repo.insert_OHLCV_table(
+        MarketData().get_OHLCV(ALL_SYMBOLS, start_date, end_date)
+    )
+    for symbol in ALL_SYMBOLS:
+        print(f"Processing {symbol}")
+        df = market_repo.get_OHLCV(symbol, start_date, end_date)
+        df = compute_indicators(df)
+        if "symbol" not in df.columns or df["symbol"].isna().any():
+            print(f"ERROR: bad symbol column for {symbol}")
+            continue
+        indicator_repo.insert_indicators(df)
+
+
+def load_descriptors() -> None:
+    descriptor_repo.insert_descriptors(DescriptorsData(ALL_SYMBOLS).get_descriptors())
+
+
+def load_fundamentals() -> None:
+    fd = FundamentalsData(STOCK_SYMBOLS)
+    fund_repo.insert_quality(build_quality(fd))
+    print("Inserted quality data")
+    fund_repo.insert_growth(build_growth(fd))
+    print("Inserted growth data")
+    fund_repo.insert_value(build_value(fd))
+    print("Inserted value data")
+
+
+def main() -> None:
     start_date = "2025-01-01"
-    end_date   = pd.Timestamp.today()
+    end_date = pd.Timestamp.today()
 
-    # market_repo.drop_OHLCV_table()
-    # market_repo.create_OHLCV_table()
-    # market_repo.insert_OHLCV_table(
-    #     MarketData().get_OHLCV(ALL_SYMBOLS, start_date, end_date)
-    # )
+    load_market_and_indicators(start_date, end_date)
+    load_descriptors()
+    load_fundamentals()
+    print("Initial load complete.")
 
-    # indicator_repo.drop_indicators_table()
-    # indicator_repo.create_indicators_table()
 
-    # descriptor_repo.drop_descriptors_table()
-    # descriptor_repo.create_descriptors_table()
-
-    # for symbol in ALL_SYMBOLS:
-    #     print(f"Processing {symbol}")
-
-    #     df = market_repo.get_OHLCV(symbol, start_date, end_date)
-    #     df = compute_indicators(df)
-
-    #     if "symbol" not in df.columns:
-    #         print(f"ERROR: symbol column missing for {symbol}")
-    #         print(df.columns)
-    #         break
-
-    #     if df["symbol"].isna().any():
-    #         print(f"ERROR: symbol contains NaN for {symbol}")
-    #         break
-
-    #     indicator_repo.insert_indicators(df)
-
-    # descriptor_repo.insert_descriptors(DescriptorsData(ALL_SYMBOLS).get_descriptors())
-
-    # fund_repo.drop_fundamentals_tables()
-    # fund_repo.create_fundamentals_tables()
-
-    # fd = FundamentalsData(STOCK_SYMBOLS)
-    # fund_repo.insert_quality(build_quality(fd))
-    # print("Inserted quality data")
-    # fund_repo.insert_growth(build_growth(fd))
-    # print("Inserted growth data")
-    # fund_repo.insert_value(build_value(fd))
-    # print("Inserted value data")
-    print(len(SP500_SYMBOLS))
-
-    pd.set_option("display.max_columns", None)
-    df = market_repo.get_OHLCV(["SPY", "AAPL"], start_date, end_date)
-    print(df.sort_values("date", ascending=False).head())
-    df = indicator_repo.get_indicators(["SPY", "AAPL"], start_date, end_date)
-    print(df.sort_values("date", ascending=False).head())
-    df = descriptor_repo.get_descriptors(["SPY", "AAPL"])
-    print(df)
-    df = fund_repo.get_quality(["SPY", "AAPL"], start_date, end_date)
-    print(df.sort_values("date", ascending=False).head())
-    df = fund_repo.get_growth(["SPY", "AAPL"], start_date, end_date)
-    print(df.sort_values("date", ascending=False).head())
-    df = fund_repo.get_value(["SPY", "AAPL"], start_date,end_date)
-    print(df.sort_values("date", ascending=False).head())
+if __name__ == "__main__":
+    main()

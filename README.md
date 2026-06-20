@@ -58,7 +58,7 @@ Risk-based: 2× ATR stop distance, 3:1 reward/risk target, max 10% of NAV per po
 
 ### Prerequisites
 - Python 3.11+
-- PostgreSQL
+- Docker + Docker Compose (provides TimescaleDB + pgvector, Redis, MinIO)
 - [Ollama](https://ollama.com) with `qwen3:14b` pulled
 - Alpaca paper trading account
 - OpenAI API key
@@ -68,33 +68,27 @@ Risk-based: 2× ATR stop distance, 3:1 reward/risk target, max 10% of NAV per po
 ```bash
 python -m venv venv
 source venv/bin/activate
-pip install -r requirements.txt
+pip install -e ".[dev]"     # dependencies live in pyproject.toml
+cp .env.example .env         # then fill in API keys
 ```
 
-### Environment
+### Bring up infrastructure & schema
 
-Create a `.env` file:
+```bash
+make infra      # start db (TimescaleDB+pgvector), redis, minio
+make migrate    # apply Alembic migrations  (== alembic upgrade head)
+```
 
-```
-ALPACA_PUBLIC_KEY=your_key
-ALPACA_SECRET_KEY=your_secret
-OPENAI_API_KEY=your_key
-DATABASE_URL=postgresql://user:password@localhost/quorumnexus
-```
+The database schema is managed entirely by **Alembic** (`migrations/`). There
+are no `create_table` calls in application code — `alembic upgrade head` builds
+every table from scratch, and migrations are versioned and reversible.
 
 ### Initial Data Load
 
-Run once to populate the database with historical data:
+With the schema applied, populate the tables with historical data:
 
 ```bash
 python load_data.py
-```
-
-Then run the one-time migration to add `close` to the indicators table:
-
-```python
-from database.indicator_repository import migrate_add_close
-migrate_add_close()
 ```
 
 ## Daily Workflow
