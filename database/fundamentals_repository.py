@@ -1,223 +1,247 @@
-from database.db_connection import get_connection
+"""
+Single unified fundamentals table sourced from Sharadar SF1.
+Point-in-time safe: all queries filter on date_key (filing date), not calendar_date.
+
+Replaces the old quality_fundamentals / value_fundamentals / growth_fundamentals trio.
+"""
+from __future__ import annotations
 import pandas as pd
 from sqlalchemy import text
+from database.db_connection import get_connection
 
-_QUALITY_COLS = [
-    "symbol", "date",
-    "roe", "roa", "roic",
-    "gross_margin", "operating_margin", "net_margin", "fcf_margin",
-    "cash_conversion", "accruals_ratio",
-    "debt_to_equity", "net_debt_to_ebitda", "interest_coverage",
-    "current_ratio", "asset_turnover",
-]
+DDL = """
+CREATE TABLE IF NOT EXISTS fundamentals (
+    ticker              VARCHAR(16)  NOT NULL,
+    dimension           VARCHAR(8)   NOT NULL,   -- ARY, ARQ, ART, MRY, MRQ, MRT
+    calendar_date       DATE         NOT NULL,   -- period end (not safe for point-in-time)
+    date_key            DATE         NOT NULL,   -- filing date (point-in-time safe key)
+    report_period       DATE,
+    fiscal_period       VARCHAR(8),
+    fiscal_year         INT,
+    last_updated        DATE,
 
-_VALUE_COLS = [
-    "symbol", "date",
-    "pe_ratio", "earnings_yield",
-    "pb_ratio", "price_to_sales",
-    "ev_ebitda", "ev_sales", "ev_fcf",
-    "price_to_fcf", "fcf_yield",
-    "dividend_yield",
-]
+    -- Income statement
+    revenue             NUMERIC(20,4),
+    gross_profit        NUMERIC(20,4),
+    operating_income    NUMERIC(20,4),
+    net_income          NUMERIC(20,4),
+    ebit                NUMERIC(20,4),
+    ebitda              NUMERIC(20,4),
+    eps                 NUMERIC(14,6),
+    eps_diluted         NUMERIC(14,6),
+    interest_expense    NUMERIC(20,4),
 
-_GROWTH_COLS = [
-    "symbol", "date", "period",
-    "revenue_growth_yoy", "eps_growth_yoy",
-    "revenue_growth_qoq", "eps_growth_qoq",
-]
+    -- Balance sheet
+    assets              NUMERIC(20,4),
+    assets_current      NUMERIC(20,4),
+    equity              NUMERIC(20,4),
+    liabilities         NUMERIC(20,4),
+    debt                NUMERIC(20,4),
+    debt_current        NUMERIC(20,4),
+    cash                NUMERIC(20,4),
+    inventory           NUMERIC(20,4),
+    receivables         NUMERIC(20,4),
+    payables            NUMERIC(20,4),
 
-_ALL_QUALITY = [c for c in _QUALITY_COLS if c not in ("symbol", "date")]
-_ALL_VALUE = [c for c in _VALUE_COLS if c not in ("symbol", "date")]
+    -- Cash flow
+    ncfo                NUMERIC(20,4),   -- operating cash flow
+    fcf                 NUMERIC(20,4),
+    capex               NUMERIC(20,4),
 
-def create_fundamentals_tables():
-    engine = get_connection()
-    with engine.begin() as conn:
-        conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS quality_fundamentals (
-                symbol              TEXT NOT NULL,
-                date                DATE NOT NULL,
-                roe                 DOUBLE PRECISION,
-                roa                 DOUBLE PRECISION,
-                roic                DOUBLE PRECISION,
-                gross_margin        DOUBLE PRECISION,
-                operating_margin    DOUBLE PRECISION,
-                net_margin          DOUBLE PRECISION,
-                fcf_margin          DOUBLE PRECISION,
-                cash_conversion     DOUBLE PRECISION,
-                accruals_ratio      DOUBLE PRECISION,
-                debt_to_equity      DOUBLE PRECISION,
-                net_debt_to_ebitda  DOUBLE PRECISION,
-                interest_coverage   DOUBLE PRECISION,
-                current_ratio       DOUBLE PRECISION,
-                asset_turnover      DOUBLE PRECISION,
-                PRIMARY KEY (symbol, date)
-            );
-        """))
-        conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS value_fundamentals (
-                symbol              TEXT NOT NULL,
-                date                DATE NOT NULL,
-                pe_ratio            DOUBLE PRECISION,
-                earnings_yield      DOUBLE PRECISION,
-                pb_ratio            DOUBLE PRECISION,
-                price_to_sales      DOUBLE PRECISION,
-                ev_ebitda           DOUBLE PRECISION,
-                ev_sales            DOUBLE PRECISION,
-                ev_fcf              DOUBLE PRECISION,
-                price_to_fcf        DOUBLE PRECISION,
-                fcf_yield           DOUBLE PRECISION,
-                dividend_yield      DOUBLE PRECISION,
-                PRIMARY KEY (symbol, date)
-            );
-        """))
-        conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS growth_fundamentals (
-                symbol                  TEXT NOT NULL,
-                date                    DATE NOT NULL,
-                period                  TEXT NOT NULL,
-                revenue_growth_yoy      DOUBLE PRECISION,
-                eps_growth_yoy          DOUBLE PRECISION,
-                revenue_growth_qoq      DOUBLE PRECISION,
-                eps_growth_qoq          DOUBLE PRECISION,
-                PRIMARY KEY (symbol, date, period)
-            );
-        """))
+    -- Pre-computed ratios from SF1
+    roe                 NUMERIC(14,6),
+    roa                 NUMERIC(14,6),
+    roic                NUMERIC(14,6),
+    gross_margin        NUMERIC(10,6),
+    ebitda_margin       NUMERIC(10,6),
+    net_margin          NUMERIC(10,6),
+    fcf_margin          NUMERIC(10,6),
+    current_ratio       NUMERIC(10,4),
+    debt_to_equity      NUMERIC(10,4),
+    asset_turnover      NUMERIC(10,4),
+    interest_coverage   NUMERIC(10,4),
+    piotroski           INT,            -- 0-9 Piotroski F-score
+
+    -- Shares outstanding
+    shares_basic        NUMERIC(20,4),
+    shares_diluted      NUMERIC(20,4),
+    shares_wabdil       NUMERIC(20,4),
+
+    -- Revenue (USD-normalized for cross-currency comparison)
+    revenue_usd         NUMERIC(20,4),
+    equity_usd          NUMERIC(20,4),
+    eps_usd             NUMERIC(14,6),
+
+    PRIMARY KEY (ticker, dimension, date_key)
+);
+CREATE INDEX IF NOT EXISTS idx_fund_ticker_dim_cal
+    ON fundamentals (ticker, dimension, calendar_date DESC);
+CREATE INDEX IF NOT EXISTS idx_fund_ticker_datekey
+    ON fundamentals (ticker, date_key DESC);
+"""
+
+# Mapping from SF1 raw column names → our DB column names
+_SF1_MAP = {
+    "ticker":           "ticker",
+    "dimension":        "dimension",
+    "calendardate":     "calendar_date",
+    "datekey":          "date_key",
+    "reportperiod":     "report_period",
+    "fiscalperiod":     "fiscal_period",
+    "fiscalyear":       "fiscal_year",
+    "lastupdated":      "last_updated",
+    "revenue":          "revenue",
+    "gp":               "gross_profit",
+    "opinc":            "operating_income",
+    "netinc":           "net_income",
+    "ebit":             "ebit",
+    "ebitda":           "ebitda",
+    "eps":              "eps",
+    "epsdil":           "eps_diluted",
+    "intexp":           "interest_expense",
+    "assets":           "assets",
+    "assetsc":          "assets_current",
+    "equity":           "equity",
+    "liabilities":      "liabilities",
+    "debt":             "debt",
+    "debtc":            "debt_current",
+    "cashneq":          "cash",
+    "inventory":        "inventory",
+    "receivables":      "receivables",
+    "payables":         "payables",
+    "ncfo":             "ncfo",
+    "fcf":              "fcf",
+    "capex":            "capex",
+    "roe":              "roe",
+    "roa":              "roa",
+    "roic":             "roic",
+    "grossmargin":      "gross_margin",
+    "ebitdamargin":     "ebitda_margin",
+    "netmargin":        "net_margin",
+    "fcfmargin":        "fcf_margin",
+    "currentratio":     "current_ratio",
+    "de":               "debt_to_equity",
+    "assetturnover":    "asset_turnover",
+    "intcov":           "interest_coverage",
+    "piotroski":        "piotroski",
+    "sharesbasic":      "shares_basic",
+    "sharesdiluted":    "shares_diluted",
+    "shareswabdil":     "shares_wabdil",
+    "revenueusd":       "revenue_usd",
+    "equityusd":        "equity_usd",
+    "epsusd":           "eps_usd",
+}
+
+_DB_COLS = list({v for v in _SF1_MAP.values()})
 
 
-def drop_fundamentals_tables():
-    engine = get_connection()
-    with engine.begin() as conn:
-        conn.execute(text("DROP TABLE IF EXISTS quality_fundamentals;"))
-        conn.execute(text("DROP TABLE IF EXISTS value_fundamentals;"))
-        conn.execute(text("DROP TABLE IF EXISTS growth_fundamentals;"))
+def create_table() -> None:
+    with get_connection().connect() as conn:
+        conn.execute(text(DDL))
+        conn.commit()
 
-def _insert(table: str, cols: list[str], df: pd.DataFrame):
-    missing = [c for c in cols if c not in df.columns]
-    for c in missing:
-        df[c] = None
-    df = df[cols].where(pd.notnull(df[cols]), None)
-    records = df.to_dict(orient="records")
-    if not records:
-        return
+
+def drop_table() -> None:
+    with get_connection().connect() as conn:
+        conn.execute(text("DROP TABLE IF EXISTS fundamentals CASCADE"))
+        conn.commit()
+
+
+def _df_from_sf1(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.rename(columns=_SF1_MAP)
+    keep = [c for c in _DB_COLS if c in df.columns]
+    return df[keep].where(pd.notnull(df[keep]), None)
+
+
+def upsert_fundamentals(df: pd.DataFrame) -> int:
+    """Map SF1 dataframe columns and upsert into fundamentals table."""
+    df = _df_from_sf1(df)
+    if df.empty:
+        return 0
+
+    cols = [c for c in _DB_COLS if c in df.columns]
     col_list  = ", ".join(cols)
     bind_list = ", ".join(f":{c}" for c in cols)
-    pk = {"quality_fundamentals": "(symbol, date)",
-          "value_fundamentals":   "(symbol, date)",
-          "growth_fundamentals":  "(symbol, date, period)"}[table]
-    engine = get_connection()
-    with engine.begin() as conn:
-        conn.execute(text(f"""
-            INSERT INTO {table} ({col_list})
-            VALUES ({bind_list})
-            ON CONFLICT {pk} DO NOTHING;
-        """), records)
+    non_pk = [c for c in cols if c not in ("ticker", "dimension", "date_key")]
+    update_set = ", ".join(f"{c}=EXCLUDED.{c}" for c in non_pk)
 
-def delete_value_today(symbols: list[str], date) -> None:
-    """Delete today's value rows so they can be refreshed with current prices."""
-    engine = get_connection()
-    with engine.begin() as conn:
-        conn.execute(text("""
-            DELETE FROM value_fundamentals
-            WHERE symbol = ANY(:symbols) AND date = :date
-        """), {"symbols": symbols, "date": date})
+    sql = text(f"""
+        INSERT INTO fundamentals ({col_list})
+        VALUES ({bind_list})
+        ON CONFLICT (ticker, dimension, date_key) DO UPDATE SET {update_set}
+    """)
+    rows = df[cols].to_dict("records")
+    with get_connection().connect() as conn:
+        conn.execute(sql, rows)
+        conn.commit()
+    return len(rows)
 
-def insert_quality(df: pd.DataFrame):
-    _insert("quality_fundamentals", _QUALITY_COLS, df.copy())
 
-def insert_value(df: pd.DataFrame):
-    _insert("value_fundamentals", _VALUE_COLS, df.copy())
+def get_fundamentals(
+    tickers: list[str],
+    dimension: str,
+    as_of: date | pd.Timestamp | None = None,
+) -> pd.DataFrame:
+    """Most recent row per ticker on or before as_of (point-in-time safe via date_key)."""
+    day = as_of.date() if hasattr(as_of, "date") else as_of
+    if day is None:
+        sql = text("""
+            SELECT DISTINCT ON (ticker) * FROM fundamentals
+            WHERE ticker = ANY(:t) AND dimension = :dim
+            ORDER BY ticker, date_key DESC
+        """)
+        params = {"t": tickers, "dim": dimension}
+    else:
+        sql = text("""
+            SELECT DISTINCT ON (ticker) * FROM fundamentals
+            WHERE ticker = ANY(:t) AND dimension = :dim AND date_key <= :d
+            ORDER BY ticker, date_key DESC
+        """)
+        params = {"t": tickers, "dim": dimension, "d": day}
+    with get_connection().connect() as conn:
+        return pd.DataFrame(conn.execute(sql, params).fetchall())
 
-def insert_growth(df: pd.DataFrame):
-    _insert("growth_fundamentals", _GROWTH_COLS, df.copy())
+
+def get_fundamentals_series(
+    tickers: list[str],
+    dimension: str,
+    start: date | str | None = None,
+    end: date | str | None = None,
+) -> pd.DataFrame:
+    sql = text("""
+        SELECT * FROM fundamentals
+        WHERE ticker = ANY(:t) AND dimension = :dim
+          AND (:s IS NULL OR date_key >= :s)
+          AND (:e IS NULL OR date_key <= :e)
+        ORDER BY ticker, date_key
+    """)
+    with get_connection().connect() as conn:
+        return pd.DataFrame(
+            conn.execute(sql, {"t": tickers, "dim": dimension, "s": start, "e": end}).fetchall()
+        )
+
+
+# ---------------------------------------------------------------------------
+# Backward-compat shims for existing code that calls the old three-table API
+# ---------------------------------------------------------------------------
 
 def get_latest_fundamentals(symbols: str | list[str], signal_day: pd.Timestamp) -> pd.DataFrame:
+    """Single-row-per-ticker join used by legacy signal modules.
+
+    Returns ARY (annual) row.  Callers expecting the old quality/value/growth
+    column set should migrate to get_fundamentals() directly.
     """
-    Return one row per symbol joining the most recent quality, value, and growth data.
-    Annual growth (yoy) and quarterly growth (qoq) are fetched from separate rows
-    since they live on different dates in growth_fundamentals.
-    """
-    engine  = get_connection()
-    symbols = [symbols] if isinstance(symbols, str) else symbols
-    day     = signal_day.date() if hasattr(signal_day, "date") else signal_day
-
-    _ANN_GROWTH = ["revenue_growth_yoy", "eps_growth_yoy"]
-    _QTR_GROWTH = ["revenue_growth_qoq", "eps_growth_qoq"]
-
-    q_cols  = ", ".join(f"q.{c}"  for c in _ALL_QUALITY)
-    v_cols  = ", ".join(f"v.{c}"  for c in _ALL_VALUE)
-    ga_cols = ", ".join(f"ga.{c}" for c in _ANN_GROWTH)
-    gq_cols = ", ".join(f"gq.{c}" for c in _QTR_GROWTH)
-
-    query = text(f"""
-        SELECT
-            COALESCE(q.symbol, v.symbol) AS symbol,
-            {q_cols},
-            {v_cols},
-            {ga_cols},
-            {gq_cols}
-        FROM (
-            SELECT DISTINCT ON (symbol) *
-            FROM quality_fundamentals
-            WHERE symbol = ANY(:symbols) AND date <= :day
-            ORDER BY symbol, date DESC
-        ) q
-        FULL JOIN (
-            SELECT DISTINCT ON (symbol) *
-            FROM value_fundamentals
-            WHERE symbol = ANY(:symbols) AND date <= :day
-            ORDER BY symbol, date DESC
-        ) v ON q.symbol = v.symbol
-        LEFT JOIN (
-            SELECT DISTINCT ON (symbol) symbol, revenue_growth_yoy, eps_growth_yoy
-            FROM growth_fundamentals
-            WHERE symbol = ANY(:symbols) AND date <= :day AND period = 'annual'
-            ORDER BY symbol, date DESC
-        ) ga ON COALESCE(q.symbol, v.symbol) = ga.symbol
-        LEFT JOIN (
-            SELECT DISTINCT ON (symbol) symbol, revenue_growth_qoq, eps_growth_qoq
-            FROM growth_fundamentals
-            WHERE symbol = ANY(:symbols) AND date <= :day AND period = 'quarter'
-            ORDER BY symbol, date DESC
-        ) gq ON COALESCE(q.symbol, v.symbol) = gq.symbol
-    """)
-
-    return pd.read_sql_query(query, engine, params={"symbols": symbols, "day": day})
-
-def get_quality(
-    symbols: str | list[str],
-    start_date: str | None = None,
-    end_date:   str | None = None,
-) -> pd.DataFrame:
-    return _range_query("quality_fundamentals", _QUALITY_COLS, symbols, start_date, end_date)
-
-def get_value(
-    symbols: str | list[str],
-    start_date: str | None = None,
-    end_date:   str | None = None,
-) -> pd.DataFrame:
-    return _range_query("value_fundamentals", _VALUE_COLS, symbols, start_date, end_date)
-
-def get_growth(
-    symbols: str | list[str],
-    start_date: str | None = None,
-    end_date:   str | None = None,
-) -> pd.DataFrame:
-    return _range_query("growth_fundamentals", _GROWTH_COLS, symbols, start_date, end_date)
-
-def _range_query(table, cols, symbols, start_date, end_date) -> pd.DataFrame:
-    engine  = get_connection()
-    symbols = [symbols] if isinstance(symbols, str) else symbols
-    col_list = ", ".join(cols)
-    sql = f"SELECT {col_list} FROM {table} WHERE symbol = ANY(:symbols)"
-    params: dict = {"symbols": symbols}
-    if start_date is not None:
-        sql += " AND date >= :start_date"
-        params["start_date"] = start_date
-    if end_date is not None:
-        sql += " AND date <= :end_date"
-        params["end_date"] = end_date
-    sql += " ORDER BY symbol ASC, date ASC"
-    df = pd.read_sql_query(text(sql), engine, params=params)
-    if not df.empty:
-        df["date"] = pd.to_datetime(df["date"])
+    tickers = [symbols] if isinstance(symbols, str) else symbols
+    df = get_fundamentals(tickers, dimension="ARY", as_of=signal_day)
+    if not df.empty and "ticker" in df.columns:
+        df = df.rename(columns={"ticker": "symbol"})
     return df
+
+
+# Keep old drop/create names so setup_db.py can call them without importing old code.
+def drop_fundamentals_tables() -> None:
+    drop_table()
+
+
+def create_fundamentals_tables() -> None:
+    create_table()

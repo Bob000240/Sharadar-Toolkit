@@ -53,67 +53,6 @@ class SectorRotationSnapshot:
     pct_sectors_above_spy_20d: float
     n_sectors_positive_20d:    int
 
-    def _fmt_header(self) -> str:
-        regime_note = {
-            "cyclical":  "Capital rotating into growth/risk sectors.",
-            "defensive": "Capital rotating into safety/yield sectors.",
-            "neutral":   "No clear rotation signal.",
-        }.get(self.rotation_regime, "")
-        return "\n".join([
-            f"SECTOR ROTATION SNAPSHOT | Signal date: {self.signal_day}",
-            f"Rotation regime: {self.rotation_regime.upper()}  — {regime_note}",
-            f"Breadth: {self.n_sectors_positive_20d}/11 sectors positive 20d | "
-            f"{self.pct_sectors_above_spy_20d:.0%} outperforming SPY",
-        ])
-
-    def _fmt_sector_table(self) -> str:
-        header     = "--- SECTOR RETURNS (ranked by 20d) ---"
-        col_header = f"  {'Rank':>4}  {'Sector':<24}  {'5d':>7}  {'20d':>7}  {'60d':>7}  {'vs SPY 20d':>11}"
-        separator  = "  " + "-" * 70
-        rows = []
-        sorted_sectors = sorted(
-            self.sector_rank_20d, key=lambda s: self.sector_rank_20d[s]
-        )
-        for sector in sorted_sectors:
-            rank   = self.sector_rank_20d[sector]
-            r5     = self.sector_returns_5d.get(sector, 0)
-            r20    = self.sector_returns_20d.get(sector, 0)
-            r60    = self.sector_returns_60d.get(sector, 0)
-            vs_spy = self.sector_vs_spy_20d.get(sector, 0)
-            rows.append(
-                f"  {rank:>4}  {sector:<24}  {r5:>+7.2%}  {r20:>+7.2%}  {r60:>+7.2%}  {vs_spy:>+11.2%}"
-            )
-        return "\n".join([header, col_header, separator] + rows)
-
-    def _fmt_top_bottom(self) -> str:
-        return "\n".join([
-            "--- TOP & BOTTOM SECTORS (20d) ---",
-            f"  Top 3:    {', '.join(self.top_3_sectors)}",
-            f"  Bottom 3: {', '.join(self.bottom_3_sectors)}",
-        ])
-
-    def _fmt_rotation_analysis(self) -> str:
-        spread_note = (
-            "cyclical sectors outperforming"
-            if self.cyclical_vs_defensive_spread > 0
-            else "defensive sectors outperforming"
-        )
-        return "\n".join([
-            "--- CYCLICAL vs DEFENSIVE ROTATION ---",
-            f"  Cyclical avg return (20d):   {self.cyclical_avg_return_20d:+.2%}",
-            f"  Defensive avg return (20d):  {self.defensive_avg_return_20d:+.2%}",
-            f"  Spread (cyc - def):          {self.cyclical_vs_defensive_spread:+.2%}  ({spread_note})",
-        ])
-
-    def to_agent_prompt(self) -> str:
-        return "\n\n".join([
-            self._fmt_header(),
-            self._fmt_sector_table(),
-            self._fmt_top_bottom(),
-            self._fmt_rotation_analysis(),
-        ])
-
-
 class SectorRotationFactorsModel:
     def __init__(self, signal_day: pd.Timestamp):
         self.signal_day = signal_day
@@ -193,5 +132,4 @@ class SectorRotationFactorsModel:
 if __name__ == "__main__":
     signal_day = pd.Timestamp.today()
     model = SectorRotationFactorsModel(signal_day)
-    snapshot = model.build_snapshot()
-    print(snapshot.to_agent_prompt())
+    print(model.build_snapshot())

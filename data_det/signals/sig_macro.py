@@ -48,71 +48,6 @@ class MacroSnapshot:
     # Regime
     risk_regime: str    # "risk_on", "caution", "risk_off"
 
-    @staticmethod
-    def _pct(v: float) -> str:
-        return f"{v:+.2f}%"
-
-    def _fmt_header(self) -> str:
-        regime_note = {
-            "risk_on":  "All clear — low volatility, positive trend, tight spreads.",
-            "caution":  "Mixed signals — monitor closely before new entries.",
-            "risk_off": "Elevated risk — defensive posture recommended.",
-        }.get(self.risk_regime, "")
-        return "\n".join([
-            f"MACRO SNAPSHOT | Signal date: {self.signal_day}",
-            f"Risk regime: {self.risk_regime.upper()}  — {regime_note}",
-        ])
-
-    def _fmt_rates(self) -> str:
-        curve_note = "normal (positive slope)" if self.yield_curve >= 0 else "INVERTED (recessionary signal)"
-        return "\n".join([
-            "--- INTEREST RATES ---",
-            f"  10-year Treasury yield:   {self.yield_10y:.2f}%",
-            f"   2-year Treasury yield:   {self.yield_2y:.2f}%",
-            f"  Yield curve (10y - 2y):   {self.yield_curve:+.2f}%  ({curve_note})",
-            f"  Real yield (10y - CPI):   {self.real_yield:+.2f}%  (positive = restrictive for growth)",
-        ])
-
-    def _fmt_economy(self) -> str:
-        return "\n".join([
-            "--- ECONOMIC CONDITIONS ---",
-            f"  CPI (year-over-year):      {self.cpi_yoy:.1f}%  (Fed target: ~2%)",
-            f"  Unemployment rate:         {self.unemployment_rate:.1f}%",
-        ])
-
-    def _fmt_risk_indicators(self) -> str:
-        vix_note = "low" if self.vix < 20 else ("elevated" if self.vix < 30 else "HIGH — fear dominant")
-        hy_note = "tight" if self.credit_spread_hy < 4 else ("widening" if self.credit_spread_hy < 6 else "WIDE — stress signal")
-        return "\n".join([
-            "--- RISK INDICATORS ---",
-            f"  VIX (fear index):          {self.vix:.1f}  ({vix_note}; <20 = calm, >30 = fear)",
-            f"  High-yield credit spread:  {self.credit_spread_hy:.2f}%  ({hy_note})",
-            f"  Inv-grade credit spread:   {self.credit_spread_ig:.2f}%",
-            f"  SPY above 200-day SMA:     {self.spy_above_sma_200}  (True = broad market uptrend intact)",
-        ])
-
-    def _fmt_regime_assessment(self) -> str:
-        signals = {
-            "Yield curve":      "positive" if self.yield_curve >= 0 else "negative",
-            "VIX level":        "low" if self.vix < 20 else ("moderate" if self.vix < 30 else "high"),
-            "Credit spreads":   "tight" if self.credit_spread_hy < 4 else "wide",
-            "SPY trend":        "above SMA200" if self.spy_above_sma_200 else "below SMA200",
-            "Real yield":       "negative (accommodative)" if self.real_yield < 0 else "positive (restrictive)",
-        }
-        lines = ["--- REGIME SIGNAL SUMMARY ---"]
-        for label, state in signals.items():
-            lines.append(f"  {label:<22}: {state}")
-        return "\n".join(lines)
-
-    def to_agent_prompt(self) -> str:
-        return "\n\n".join([
-            self._fmt_header(),
-            self._fmt_rates(),
-            self._fmt_economy(),
-            self._fmt_risk_indicators(),
-            self._fmt_regime_assessment(),
-        ])
-
 
 class MacroFactorsModel:
     def __init__(self, signal_day: pd.Timestamp):
@@ -162,5 +97,4 @@ class MacroFactorsModel:
 if __name__ == "__main__":
     signal_day = pd.Timestamp.today()
     model = MacroFactorsModel(signal_day)
-    snapshot = model.build_snapshot()
-    print(snapshot.to_agent_prompt())
+    print(model.build_snapshot())

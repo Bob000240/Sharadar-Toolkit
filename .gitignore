@@ -19,6 +19,3 @@ __pycache__/
 # Testing
 .pytest_cache/
 tests/
-
-PROJECT_CONSTRAINTS.md
-PROJECT_STRATEGY.md
