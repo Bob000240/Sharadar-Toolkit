@@ -1,182 +1,133 @@
 """
-Initial data load script.
-Assumes setup_db.py has already been run (all tables exist and are empty).
+Initial full data load. Run once after setup_db.py.
 
-Run order:
-  1. python set_up/setup_db.py      -- drops and recreates all tables
-  2. python set_up/load_data.py     -- populates all tables from source APIs
-  3. python set_up/daily_update.py  -- daily incremental refresh thereafter
-
-Data sources:
-  - OHLCV + indicators:   Alpaca (unchanged)
-  - Descriptors:          Sharadar TICKERS
-  - Fundamentals:         Sharadar SF1
-  - Insider:              Sharadar SF2
-  - Institutional:        Sharadar SF3A (summary)
-  - Market metrics:       Sharadar DAILY, METRICS, EVENTS, ACTIONS, SP500
-  - Fund prices:          Sharadar SFP (sector ETFs)
-  - Macro:                FRED (unchanged)
+    uv run python -m set_up.load_data
 """
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import pandas as pd
-from set_up.config import STOCK_SYMBOLS, ALL_SYMBOLS, BENCHMARK_SYMBOLS
-from data_det.raw_data.sharadar_data import SharadarData
-from data_det.raw_data.market_data import MarketData
-from data_det.processed_data.indicators import compute_indicators
-import database.market_repository as market_repo
-import database.indicator_repository as indicator_repo
-import database.descriptors_repository as descriptor_repo
-import database.fundamentals_repository as fund_repo
-import database.institutional_repository as inst_repo
-import database.market_metrics_repository as mm_repo
+from set_up.config import STOCK_SYMBOLS, BENCHMARK_SYMBOLS
+from data.sharadar_data import SharadarData
+from data.macro_data import MacroData
+from data.indicators import compute_indicators
+
+import database.market.equity_repo as equity_repo
+import database.market.fund_repo as fund_repo
+import database.market.indicators_repo as indicators_repo
+import database.market.tickers_repo as tickers_repo
+import database.market.fundamentals_repo as fundamentals_repo
+import database.market.insider_repo as insider_repo
+import database.market.institutional_repo as institutional_repo
+import database.market.event_repo as event_repo
+import database.market.macro_repo as macro_repo
 
 START_DATE = "2021-01-01"
-END_DATE   = pd.Timestamp.today().strftime("%Y-%m-%d")
-SECTOR_ETFS = [s for s in BENCHMARK_SYMBOLS if s != "SPY"]
+END_DATE = pd.Timestamp.today().strftime("%Y-%m-%d")
 
 
-def load_ohlcv() -> None:
-    print("Loading OHLCV from Alpaca...")
-    df = MarketData().get_OHLCV(ALL_SYMBOLS, START_DATE, END_DATE)
-    if not df.empty:
-        market_repo.insert_OHLCV_table(df)
-        print(f"  {len(df):,} rows inserted")
-    else:
-        print("  No data returned")
+def load_tickers(sh: SharadarData):
+    print("Loading tickers...")
+    equities = sh.tickers(table="SEP", is_delisted=False)
+    funds = sh.tickers(table="SFP", tickers=BENCHMARK_SYMBOLS)
+    df = pd.concat([equities, funds], ignore_index=True)
+    tickers_repo.insert(df)
+    print(f"  {len(df):,} rows")
 
 
-def load_indicators() -> None:
-    print("Computing and loading indicators...")
-    count = 0
-    for sym in ALL_SYMBOLS:
-        df = market_repo.get_OHLCV(sym, START_DATE, END_DATE)
+def _batched(sh_fn, repo_insert, label: str, symbols: list = None, batch_size: int = 50, **kwargs):
+    symbols = symbols or STOCK_SYMBOLS
+    total = 0
+    n_batches = -(-len(symbols) // batch_size)
+    for i in range(0, len(symbols), batch_size):
+        batch = symbols[i:i + batch_size]
+        df = sh_fn(tickers=batch, **kwargs)
+        if not df.empty:
+            repo_insert(df)
+            total += len(df)
+        print(f"  {label} batch {i // batch_size + 1}/{n_batches}: {len(df):,} rows")
+    print(f"  {label} total: {total:,} rows")
+
+
+def load_equity_prices(sh: SharadarData):
+    print("Loading equity prices (SEP)...")
+    _batched(sh.equity_prices, equity_repo.insert, "SEP",
+             start_date=START_DATE, end_date=END_DATE)
+
+
+def load_fund_prices(sh: SharadarData):
+    print("Loading fund prices (SFP)...")
+    _batched(sh.fund_prices, fund_repo.insert, "SFP",
+             symbols=BENCHMARK_SYMBOLS, start_date=START_DATE, end_date=END_DATE)
+
+
+def load_indicators():
+    print("Computing indicators from equity prices...")
+    total = 0
+    for i in range(0, len(STOCK_SYMBOLS), 50):
+        batch = STOCK_SYMBOLS[i:i + 50]
+        df = equity_repo.get(tickers=batch, start_date=START_DATE)
         if df.empty:
             continue
-        ind = compute_indicators(df.sort_values("date").reset_index(drop=True))
-        if not ind.empty:
-            indicator_repo.insert_indicators(ind)
-            count += len(ind)
-    print(f"  {count:,} indicator rows inserted")
+        parts = [
+            compute_indicators(g.reset_index(drop=True))
+            for _, g in df.sort_values(["ticker", "date"]).groupby("ticker", sort=False)
+        ]
+        ind_df = pd.concat(parts, ignore_index=True)
+        indicators_repo.insert(ind_df)
+        total += len(ind_df)
+        print(f"  batch {i // 50 + 1}/{-(-len(STOCK_SYMBOLS) // 50)}: {len(ind_df):,} rows")
+    print(f"  total: {total:,} rows")
 
 
-def load_descriptors(sh: SharadarData) -> None:
-    print("Loading descriptors from Sharadar TICKERS...")
-    df = sh.tickers(table="SEP", is_delisted=False)
-    if not df.empty:
-        descriptor_repo.insert_descriptors(df)
-        print(f"  {len(df):,} stock descriptors inserted")
-
-    df_etf = sh.tickers(table="SFP")
-    if not df_etf.empty:
-        descriptor_repo.insert_descriptors(df_etf)
-        print(f"  {len(df_etf):,} ETF/fund descriptors inserted")
-
-
-def load_fundamentals(sh: SharadarData) -> None:
-    print("Loading fundamentals from Sharadar SF1...")
+def load_fundamentals(sh: SharadarData):
+    print("Loading fundamentals (SF1)...")
     for dim in ("ARY", "ARQ", "ART"):
-        print(f"  Dimension {dim}...")
-        df = sh.fundamentals(dimension=dim, start_date=START_DATE)
-        if not df.empty:
-            n = fund_repo.upsert_fundamentals(df)
-            print(f"    {n:,} rows")
-        else:
-            print(f"    No data")
+        _batched(sh.fundamentals, fundamentals_repo.insert, dim,
+                 dimension=dim, start_date=START_DATE, end_date=END_DATE)
 
 
-def load_insider(sh: SharadarData) -> None:
-    print("Loading insider transactions from Sharadar SF2...")
-    df = sh.insider_transactions(start_date=START_DATE)
-    if not df.empty:
-        n = inst_repo.upsert_insider(df)
-        print(f"  {n:,} rows inserted")
-    else:
-        print("  No data")
+def load_insider(sh: SharadarData):
+    print("Loading insider transactions (SF2)...")
+    _batched(sh.insider_transactions, insider_repo.insert, "SF2",
+             start_date=START_DATE, end_date=END_DATE)
 
 
-def load_institutional(sh: SharadarData) -> None:
-    print("Loading institutional summary from Sharadar SF3A...")
-    df = sh.institutional_by_company(start_date=START_DATE)
-    if not df.empty:
-        n = inst_repo.upsert_institutional_summary(df)
-        print(f"  {n:,} rows inserted")
-    else:
-        print("  No data")
+def load_institutional(sh: SharadarData):
+    print("Loading institutional holdings (SF3)...")
+    _batched(sh.institutional_holdings, institutional_repo.insert, "SF3",
+             start_date=START_DATE, end_date=END_DATE)
 
 
-def load_daily_metrics(sh: SharadarData) -> None:
-    print("Loading DAILY valuation metrics from Sharadar...")
-    df = sh.daily_metrics(start_date=START_DATE)
-    if not df.empty:
-        n = mm_repo.upsert_daily(df)
-        print(f"  {n:,} rows inserted")
-    else:
-        print("  No data")
+def load_events(sh: SharadarData):
+    print("Loading events (EVENTS)...")
+    _batched(sh.events, event_repo.insert, "EVENTS",
+             start_date=START_DATE, end_date=END_DATE)
 
 
-def load_market_metrics(sh: SharadarData) -> None:
-    print("Loading METRICS (technical/risk) from Sharadar...")
-    df = sh.market_metrics(start_date=START_DATE)
-    if not df.empty:
-        n = mm_repo.upsert_market_metrics(df)
-        print(f"  {n:,} rows inserted")
-    else:
-        print("  No data")
-
-
-def load_events(sh: SharadarData) -> None:
-    print("Loading corporate events from Sharadar EVENTS...")
-    df = sh.events(start_date=START_DATE)
-    if not df.empty:
-        n = mm_repo.upsert_events(df)
-        print(f"  {n:,} rows inserted")
-    else:
-        print("  No data")
-
-
-def load_sp500(sh: SharadarData) -> None:
-    print("Loading S&P 500 constituent history from Sharadar SP500...")
-    df = sh.sp500_history()
-    if not df.empty:
-        n = mm_repo.upsert_sp500(df)
-        print(f"  {n:,} rows inserted")
-    else:
-        print("  No data")
-
-
-def load_fund_prices(sh: SharadarData) -> None:
-    print(f"Loading fund/ETF prices from Sharadar SFP ({len(SECTOR_ETFS)} ETFs + SPY)...")
-    etfs = ["SPY"] + SECTOR_ETFS
-    df = sh.fund_prices(tickers=etfs, start_date=START_DATE)
-    if not df.empty:
-        n = mm_repo.upsert_fund_prices(df)
-        print(f"  {n:,} rows inserted")
-    else:
-        print("  No data")
+def load_macro():
+    print("Loading macro data (FRED)...")
+    df = MacroData().get_macro(START_DATE, END_DATE)
+    macro_repo.insert(df)
+    print(f"  {len(df):,} rows")
 
 
 if __name__ == "__main__":
+    print(f"=== QuorumNexus initial data load ===")
+    print(f"Date range: {START_DATE} → {END_DATE}")
+    print(f"Universe: {len(STOCK_SYMBOLS)} stocks, {len(BENCHMARK_SYMBOLS)} ETFs\n")
+
     sh = SharadarData()
 
-    print("=== QuorumNexus initial data load ===")
-    print(f"Date range: {START_DATE} → {END_DATE}")
-    print(f"Universe: {len(STOCK_SYMBOLS)} stocks, {len(ALL_SYMBOLS)} total symbols\n")
-
-    load_descriptors(sh)
+    load_tickers(sh)
+    load_equity_prices(sh)
+    load_fund_prices(sh)
+    load_indicators()
     load_fundamentals(sh)
     load_insider(sh)
     load_institutional(sh)
-    load_daily_metrics(sh)
-    load_market_metrics(sh)
     load_events(sh)
-    load_sp500(sh)
-    load_fund_prices(sh)
-
-    print("\n--- Alpaca-sourced data ---")
-    load_ohlcv()
-    load_indicators()
+    load_macro()
 
     print("\n=== Load complete ===")

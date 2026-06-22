@@ -1,9 +1,8 @@
 """
-Master database setup script.
-Drops all tables, enables pgvector, then recreates everything in dependency order.
+Creates all DB tables in dependency order.
+Run once before load_data.py.
 
-Run once before load_data.py:
-    python set_up/setup_db.py
+    uv run python -m set_up.setup_db
 """
 import sys
 from pathlib import Path
@@ -12,117 +11,70 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from sqlalchemy import text
 from database.db_connection import get_connection
 
-import database.market_repository as market_repo
-import database.indicator_repository as indicator_repo
-import database.descriptors_repository as descriptor_repo
-import database.fundamentals_repository as fund_repo
-import database.institutional_repository as inst_repo
-import database.market_metrics_repository as mm_repo
-import database.prefilter_profiles_repository as profile_repo
-import database.screened_candidates_repository as candidates_repo
-import database.decision_memory_repository as memory_repo
-import database.trade_outcomes_repository as outcomes_repo
-import database.eval_repository as eval_repo
+import database.market.equity_repo as equity_repo
+import database.market.fund_repo as fund_repo
+import database.market.indicators_repo as indicators_repo
+import database.market.tickers_repo as tickers_repo
+import database.market.fundamentals_repo as fundamentals_repo
+import database.market.insider_repo as insider_repo
+import database.market.institutional_repo as institutional_repo
+import database.market.event_repo as event_repo
+import database.market.macro_repo as macro_repo
+import database.operational.prefilter_profiles_repository as profiles_repo
+import database.operational.screened_candidates_repository as candidates_repo
+import database.agent_memory.decision_memory_repository as memory_repo
+import database.outcomes.trade_outcomes_repository as outcomes_repo
+import database.outcomes.eval_repository as eval_repo
 
 
-def _enable_pgvector() -> None:
-    with get_connection().connect() as conn:
+def enable_pgvector():
+    with get_connection().begin() as conn:
         conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-        conn.commit()
-    print("pgvector extension enabled")
+    print("pgvector enabled")
 
 
-def _drop_all() -> None:
-    """Drop all tables in reverse dependency order."""
-    drops = [
-        # System / eval
-        "eval_results",
-        "trade_outcomes",
-        "decision_memory",
-        "screened_candidates",
-        "prefilter_profiles",
-        # Market metrics (DAILY / METRICS / EVENTS / ACTIONS / SP500 / SFP)
-        "fund_prices",
-        "sp500_membership",
-        "corporate_actions",
-        "corporate_events",
-        "market_metrics",
-        "daily_metrics",
-        # Institutional
-        "institutional_investors",
-        "institutional_summary",
-        "institutional_holdings",
-        "insider_transactions",
-        # Core data
-        "fundamentals",
-        "stock_descriptors",
-        # Legacy fundamentals (safe to drop even if already gone)
-        "quality_fundamentals",
-        "value_fundamentals",
-        "growth_fundamentals",
-        # OHLCV / indicators
-        "indicators_data",
-        "OHLCV_data",
-        # Macro
-        "macro_data",
+def drop_all():
+    tables = [
+        "eval_results", "trade_outcomes", "decision_memory",
+        "screened_candidates", "prefilter_profiles",
+        "events", "institutional_holdings", "insider_transactions",
+        "fundamentals", "tickers", "indicators", "fund_prices", "equity_prices",
+        "macro",
     ]
-    with get_connection().connect() as conn:
-        for tbl in drops:
-            conn.execute(text(f'DROP TABLE IF EXISTS "{tbl}" CASCADE'))
-            print(f"  dropped {tbl}")
-        conn.commit()
+    with get_connection().begin() as conn:
+        for t in tables:
+            conn.execute(text(f'DROP TABLE IF EXISTS "{t}" CASCADE'))
+            print(f"  dropped {t}")
     print("All tables dropped")
 
 
-def _create_all() -> None:
-    # 1. OHLCV and indicators (Alpaca-sourced, unchanged)
-    market_repo.create_OHLCV_table()
-    print("  created OHLCV_data")
+def create_all():
+    # Market data
+    equity_repo.create_table();       print("  created equity_prices")
+    fund_repo.create_table();         print("  created fund_prices")
+    indicators_repo.create_table();   print("  created indicators")
+    tickers_repo.create_table();      print("  created tickers")
+    fundamentals_repo.create_table(); print("  created fundamentals")
+    insider_repo.create_table();      print("  created insider_transactions")
+    institutional_repo.create_table();print("  created institutional_holdings")
+    event_repo.create_table();        print("  created events")
+    macro_repo.create_table();        print("  created macro")
 
-    indicator_repo.create_indicators_table()
-    print("  created indicators_data")
+    # Operational
+    profiles_repo.create_table();     print("  created prefilter_profiles")
+    candidates_repo.create_table();   print("  created screened_candidates")
 
-    # 2. Descriptors (Sharadar TICKERS)
-    descriptor_repo.create_descriptors_table()
-    print("  created stock_descriptors")
-
-    # 3. Fundamentals (Sharadar SF1 — unified table)
-    fund_repo.create_table()
-    print("  created fundamentals")
-
-    # 4. Institutional (SF2, SF3, SF3A, SF3B)
-    inst_repo.create_tables()
-    print("  created insider_transactions, institutional_holdings, institutional_summary, institutional_investors")
-
-    # 5. Market metrics (DAILY, METRICS, EVENTS, ACTIONS, SP500, SFP)
-    mm_repo.create_tables()
-    print("  created daily_metrics, market_metrics, corporate_events, corporate_actions, sp500_membership, fund_prices")
-
-    # 6. System tables (dependency order: profiles → candidates → memory → outcomes → eval)
-    profile_repo.create_table()
-    print("  created prefilter_profiles")
-
-    candidates_repo.create_table()
-    print("  created screened_candidates")
-
-    memory_repo.create_table()
-    print("  created decision_memory")
-
-    outcomes_repo.create_table()
-    print("  created trade_outcomes")
-
-    eval_repo.create_table()
-    print("  created eval_results")
+    # Agent memory + outcomes
+    memory_repo.create_table();       print("  created decision_memory")
+    outcomes_repo.create_table();     print("  created trade_outcomes")
+    eval_repo.create_table();         print("  created eval_results")
 
     print("All tables created")
 
 
 if __name__ == "__main__":
     print("=== QuorumNexus DB setup ===")
-    print("Enabling pgvector...")
-    _enable_pgvector()
-    print("Dropping all tables...")
-    _drop_all()
-    print("Creating all tables...")
-    _create_all()
-    print("=== Setup complete ===")
+    enable_pgvector()
+    drop_all()
+    create_all()
+    print("=== Done ===")

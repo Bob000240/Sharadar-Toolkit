@@ -1,180 +1,138 @@
 """
-Daily incremental update script.
-Run each market day after close to keep all tables current.
+Daily incremental update. Run each market day after close.
 
-Sharadar data is updated daily by Nasdaq Data Link;
-Alpaca OHLCV is fetched directly from the market.
+    uv run python -m set_up.daily_update
 """
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import pandas as pd
-from set_up.config import ALL_SYMBOLS, STOCK_SYMBOLS, BENCHMARK_SYMBOLS
-from data_det.raw_data.sharadar_data import SharadarData
-from data_det.raw_data.market_data import MarketData
-from data_det.processed_data.indicators import compute_indicators
-import database.market_repository as market_repo
-import database.indicator_repository as indicator_repo
-import database.descriptors_repository as descriptor_repo
-import database.fundamentals_repository as fund_repo
-import database.institutional_repository as inst_repo
-import database.market_metrics_repository as mm_repo
+from set_up.config import STOCK_SYMBOLS, BENCHMARK_SYMBOLS
+from data.sharadar_data import SharadarData
+from data.macro_data import MacroData
+from data.indicators import compute_indicators
 
-SECTOR_ETFS = [s for s in BENCHMARK_SYMBOLS if s != "SPY"]
+import database.market.equity_repo as equity_repo
+import database.market.fund_repo as fund_repo
+import database.market.indicators_repo as indicators_repo
+import database.market.tickers_repo as tickers_repo
+import database.market.fundamentals_repo as fundamentals_repo
+import database.market.insider_repo as insider_repo
+import database.market.institutional_repo as institutional_repo
+import database.market.event_repo as event_repo
+import database.market.macro_repo as macro_repo
 
-
-def _latest_date_str(latest_df: pd.DataFrame, col: str = "latest_date") -> str | None:
-    if latest_df.empty or col not in latest_df.columns:
-        return None
-    return str(latest_df[col].min())
+TODAY = pd.Timestamp.today().strftime("%Y-%m-%d")
 
 
-def update_ohlcv() -> None:
-    latest = market_repo.get_latest_date(ALL_SYMBOLS)
+def _batched(sh_fn, repo_insert, label: str, symbols: list = None, batch_size: int = 50, **kwargs):
+    symbols = symbols or STOCK_SYMBOLS
+    total = 0
+    for i in range(0, len(symbols), batch_size):
+        batch = symbols[i:i + batch_size]
+        df = sh_fn(tickers=batch, **kwargs)
+        if not df.empty:
+            repo_insert(df)
+            total += len(df)
+    print(f"{label}: {total:,} rows upserted")
+
+
+def update_equity_prices(sh: SharadarData):
+    latest = equity_repo.get_latest_date()
+    since = str(latest["latest_date"].min() + pd.Timedelta(days=1)) if not latest.empty else "2021-01-01"
+    _batched(sh.equity_prices, equity_repo.insert, "Equity prices",
+             start_date=since, end_date=TODAY)
+
+
+def update_fund_prices(sh: SharadarData):
+    latest = fund_repo.get_latest_date()
+    since = str(latest["latest_date"].min() + pd.Timedelta(days=1)) if not latest.empty else "2021-01-01"
+    _batched(sh.fund_prices, fund_repo.insert, "Fund prices",
+             symbols=BENCHMARK_SYMBOLS, start_date=since, end_date=TODAY)
+
+
+def update_indicators():
+    latest = indicators_repo.get_latest_date()
     if latest.empty:
-        print("OHLCV: no data — run load_data.py first")
-        return
-    start = pd.Timestamp(latest["latest_date"].min()) + pd.Timedelta(days=1)
-    today = pd.Timestamp.today()
-    if start.date() > today.date():
-        print("OHLCV: up to date")
-        return
-    df = MarketData().get_OHLCV(ALL_SYMBOLS, start, today)
-    if not df.empty:
-        market_repo.insert_OHLCV_table(df)
-        print(f"OHLCV: {len(df):,} new rows")
-    else:
-        print("OHLCV: no new rows")
-
-
-def update_indicators() -> None:
-    latest = indicator_repo.get_latest_date(ALL_SYMBOLS)
-    if latest.empty:
-        print("Indicators: no data — run load_data.py first")
+        print("Indicators: no base data")
         return
     latest_date = latest["latest_date"].min()
-    today = pd.Timestamp.today().date()
-    if latest_date >= today:
-        print("Indicators: up to date")
-        return
     lookback = pd.Timestamp(latest_date) - pd.Timedelta(days=400)
-    all_ohlcv = market_repo.get_OHLCV(ALL_SYMBOLS, lookback, today)
-    all_ohlcv = all_ohlcv.sort_values(["symbol", "date"])
-    parts = [
-        compute_indicators(g.reset_index(drop=True))
-        for _, g in all_ohlcv.groupby("symbol", sort=False)
-    ]
-    processed = pd.concat(parts, ignore_index=True)
-    new_rows = processed[processed["date"] > latest_date]
-    if not new_rows.empty:
-        indicator_repo.insert_indicators(new_rows)
-        print(f"Indicators: {len(new_rows):,} new rows")
-    else:
-        print("Indicators: up to date")
-
-
-def update_descriptors(sh: SharadarData) -> None:
-    print("Descriptors: refreshing from Sharadar TICKERS...")
-    df = sh.tickers(table="SEP", is_delisted=False)
-    if not df.empty:
-        descriptor_repo.insert_descriptors(df)
-    df_etf = sh.tickers(table="SFP")
-    if not df_etf.empty:
-        descriptor_repo.insert_descriptors(df_etf)
-    print(f"Descriptors: {len(df) + len(df_etf):,} upserted")
-
-
-def update_fundamentals(sh: SharadarData) -> None:
-    """Re-fetch the last 90 days of SF1 to catch late filings."""
-    since = (pd.Timestamp.today() - pd.Timedelta(days=90)).strftime("%Y-%m-%d")
     total = 0
+    for i in range(0, len(STOCK_SYMBOLS), 50):
+        batch = STOCK_SYMBOLS[i:i + 50]
+        df = equity_repo.get(tickers=batch, start_date=str(lookback.date()))
+        if df.empty:
+            continue
+        parts = [
+            compute_indicators(g.reset_index(drop=True))
+            for _, g in df.sort_values(["ticker", "date"]).groupby("ticker", sort=False)
+        ]
+        ind_df = pd.concat(parts, ignore_index=True)
+        new_rows = ind_df[ind_df["date"] > latest_date]
+        if not new_rows.empty:
+            indicators_repo.insert(new_rows)
+            total += len(new_rows)
+    print(f"Indicators: {total:,} new rows")
+
+
+def update_fundamentals(sh: SharadarData):
+    since = (pd.Timestamp.today() - pd.Timedelta(days=90)).strftime("%Y-%m-%d")
     for dim in ("ARY", "ARQ", "ART"):
-        df = sh.fundamentals(dimension=dim, start_date=since)
-        if not df.empty:
-            total += fund_repo.upsert_fundamentals(df)
-    print(f"Fundamentals: {total:,} rows upserted (last 90d)")
+        _batched(sh.fundamentals, fundamentals_repo.insert, f"Fundamentals {dim}",
+                 dimension=dim, start_date=since)
 
 
-def update_insider(sh: SharadarData) -> None:
-    """Fetch last 14 days of SF2 to catch new Form 4 filings."""
+def update_insider(sh: SharadarData):
     since = (pd.Timestamp.today() - pd.Timedelta(days=14)).strftime("%Y-%m-%d")
-    df = sh.insider_transactions(start_date=since)
-    if not df.empty:
-        n = inst_repo.upsert_insider(df)
-        print(f"Insider: {n:,} rows upserted")
-    else:
-        print("Insider: no new filings")
+    _batched(sh.insider_transactions, insider_repo.insert, "Insider",
+             start_date=since)
 
 
-def update_institutional(sh: SharadarData) -> None:
-    """SF3A is quarterly — only update if a new quarter has been filed."""
+def update_institutional(sh: SharadarData):
     since = (pd.Timestamp.today() - pd.Timedelta(days=120)).strftime("%Y-%m-%d")
-    df = sh.institutional_by_company(start_date=since)
-    if not df.empty:
-        n = inst_repo.upsert_institutional_summary(df)
-        print(f"Institutional: {n:,} rows upserted")
-    else:
-        print("Institutional: no new data")
+    _batched(sh.institutional_holdings, institutional_repo.insert, "Institutional",
+             start_date=since)
 
 
-def update_daily_metrics(sh: SharadarData) -> None:
+def update_events(sh: SharadarData):
     since = (pd.Timestamp.today() - pd.Timedelta(days=7)).strftime("%Y-%m-%d")
-    df = sh.daily_metrics(start_date=since)
-    if not df.empty:
-        n = mm_repo.upsert_daily(df)
-        print(f"Daily metrics: {n:,} rows upserted")
-    else:
-        print("Daily metrics: no new data")
+    _batched(sh.events, event_repo.insert, "Events", start_date=since)
 
 
-def update_market_metrics(sh: SharadarData) -> None:
-    since = (pd.Timestamp.today() - pd.Timedelta(days=7)).strftime("%Y-%m-%d")
-    df = sh.market_metrics(start_date=since)
-    if not df.empty:
-        n = mm_repo.upsert_market_metrics(df)
-        print(f"Market metrics: {n:,} rows upserted")
-    else:
-        print("Market metrics: no new data")
+def update_tickers(sh: SharadarData):
+    equities = sh.tickers(table="SEP", is_delisted=False)
+    funds = sh.tickers(table="SFP", tickers=BENCHMARK_SYMBOLS)
+    df = pd.concat([equities, funds], ignore_index=True)
+    tickers_repo.insert(df)
+    print(f"Tickers: {len(df):,} upserted")
 
 
-def update_events(sh: SharadarData) -> None:
-    since = (pd.Timestamp.today() - pd.Timedelta(days=7)).strftime("%Y-%m-%d")
-    df = sh.events(start_date=since)
-    if not df.empty:
-        n = mm_repo.upsert_events(df)
-        print(f"Events: {n:,} rows upserted")
-    else:
-        print("Events: no new data")
-
-
-def update_fund_prices(sh: SharadarData) -> None:
-    etfs = ["SPY"] + SECTOR_ETFS
-    since = (pd.Timestamp.today() - pd.Timedelta(days=7)).strftime("%Y-%m-%d")
-    df = sh.fund_prices(tickers=etfs, start_date=since)
-    if not df.empty:
-        n = mm_repo.upsert_fund_prices(df)
-        print(f"Fund prices: {n:,} rows upserted")
-    else:
-        print("Fund prices: no new data")
+def update_macro():
+    since = macro_repo.get_latest_date() or "2021-01-01"
+    df = MacroData().get_macro(since, TODAY)
+    if df.empty:
+        print("Macro: up to date")
+        return
+    macro_repo.insert(df)
+    print(f"Macro: {len(df):,} new rows")
 
 
 if __name__ == "__main__":
+    print(f"=== QuorumNexus daily update — {TODAY} ===")
     sh = SharadarData()
-    today = pd.Timestamp.today().strftime("%Y-%m-%d")
-    print(f"=== QuorumNexus daily update — {today} ===")
 
-    update_ohlcv()
+    update_equity_prices(sh)
+    update_fund_prices(sh)
     update_indicators()
     update_fundamentals(sh)
     update_insider(sh)
-    update_daily_metrics(sh)
-    update_market_metrics(sh)
     update_events(sh)
-    update_fund_prices(sh)
+    update_macro()
 
-    # Weekly refreshes (run every day — all are upsert-safe)
-    update_descriptors(sh)
+    # Slower cadence but upsert-safe to run daily
+    update_tickers(sh)
     update_institutional(sh)
 
     print("=== Done ===")
