@@ -20,4 +20,5 @@ __pycache__/
 .pytest_cache/
 tests/
 
-requirements.txt
+PROJECT_CONSTRAINTS.md
+PROJECT_STRATEGY.md

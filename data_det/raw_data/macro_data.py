@@ -1,4 +1,3 @@
-import yfinance as yf
 import pandas as pd
 from fredapi import Fred
 import os
@@ -13,17 +12,9 @@ def _fred_series(fred: Fred, series_id: str, start: str, end: str) -> pd.Series:
     return s.reindex(pd.date_range(start, end, freq="D")).ffill()
 
 
-def _yf_series(ticker: str, start: str, end: str, field: str = "Close") -> pd.Series:
-    """Fetch a daily price series from yfinance."""
-    df = yf.download(ticker, start=start, end=end, auto_adjust=True, progress=False)
-    if df.empty:
-        return pd.Series(dtype=float)
-    return df[field].squeeze()
-
-
 class MacroeconomicData:
     """
-    Collects daily macro indicators from FRED and yfinance.
+    Collects daily macro indicators from FRED.
 
     FRED series used:
         DGS10        — 10-year Treasury yield (%)
@@ -33,9 +24,7 @@ class MacroeconomicData:
         UNRATE       — Unemployment rate (%)
         BAMLH0A0HYM2 — ICE BofA HY option-adjusted spread (%)
         BAMLC0A0CM   — ICE BofA IG option-adjusted spread (%)
-
-    yfinance tickers used:
-        ^VIX         — CBOE Volatility Index
+        VIXCLS       — CBOE Volatility Index (daily close)
     """
 
     def __init__(self):
@@ -51,7 +40,6 @@ class MacroeconomicData:
 
         start_date / end_date: "YYYY-MM-DD" strings.
         """
-        print("Fetching FRED series...")
         yield_10y = _fred_series(self.fred, "DGS10",        start_date, end_date)
         yield_2y  = _fred_series(self.fred, "DGS2",         start_date, end_date)
         real_yield = _fred_series(self.fred, "DFII10",       start_date, end_date)
@@ -60,8 +48,7 @@ class MacroeconomicData:
         hy_spread  = _fred_series(self.fred, "BAMLH0A0HYM2", start_date, end_date)
         ig_spread  = _fred_series(self.fred, "BAMLC0A0CM",   start_date, end_date)
 
-        print("Fetching VIX from yfinance...")
-        vix = _yf_series("^VIX", start_date, end_date)
+        vix        = _fred_series(self.fred, "VIXCLS",       start_date, end_date)
 
         # Align all series on a common daily index
         idx = pd.date_range(start_date, end_date, freq="D")

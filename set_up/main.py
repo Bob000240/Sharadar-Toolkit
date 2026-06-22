@@ -1,7 +1,11 @@
 import os
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 from dotenv import load_dotenv
 from alpaca.trading.client import TradingClient
-from agents.pm_agent import PMAgent
+from decision_layer.agentic_layer.pm_agent import PMAgent
 
 load_dotenv()
 

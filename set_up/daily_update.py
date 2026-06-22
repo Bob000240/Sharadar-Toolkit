@@ -1,14 +1,18 @@
-from raw_data.market_data import MarketData
-from raw_data.descriptors_data import DescriptorsData
-from raw_data.fundamentals_data import FundamentalsData
-from processed_data.fundamentals_transform import build_quality, build_value, build_growth
-from processed_data.indicators import compute_indicators
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from data_det.raw_data.market_data import MarketData
+from data_det.raw_data.descriptors_data import DescriptorsData
+from data_det.raw_data.fundamentals_data import FundamentalsData
+from data_det.processed_data.fundamentals_transform import build_quality, build_value, build_growth
+from data_det.processed_data.indicators import compute_indicators
 import database.market_repository as market_repo
 import database.indicator_repository as indicator_repo
 import database.descriptors_repository as descriptor_repo
 import database.fundamentals_repository as fund_repo
 import pandas as pd
-from config import ALL_SYMBOLS, STOCK_SYMBOLS
+from set_up.config import ALL_SYMBOLS, STOCK_SYMBOLS
 
 
 def update_market_data():

@@ -1,8 +1,8 @@
 import database.descriptors_repository as descriptor_repo
 import database.market_repository as market_repo
 import database.indicator_repository as indicator_repo
-from raw_data.market_data import MarketData
-from processed_data.indicators import compute_indicators
+from data_det.raw_data.market_data import MarketData
+from data_det.processed_data.indicators import compute_indicators
 
 import pandas as pd
 from dataclasses import dataclass

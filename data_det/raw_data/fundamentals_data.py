@@ -100,17 +100,17 @@ class FundamentalsData:
     # Ratios
     # -------------------------------------------------------------------------
 
-    def key_metrics(self, sym: str | list[str], limit: int = 10) -> pd.DataFrame:
+    def key_metrics(self, sym: str | list[str], period: str = "annual", limit: int = 10) -> pd.DataFrame:
         sym = [sym] if isinstance(sym, str) else sym
-        return pd.DataFrame(self._fetch_multi("key-metrics", sym, period="annual", limit=limit))
+        return pd.DataFrame(self._fetch_multi("key-metrics", sym, period=period, limit=limit))
 
     def key_metrics_ttm(self, sym: str | list[str]) -> pd.DataFrame:
         sym = [sym] if isinstance(sym, str) else sym
         return self._ttm("key-metrics-ttm", sym)
 
-    def ratios(self, sym: str | list[str], limit: int = 10) -> pd.DataFrame:
+    def ratios(self, sym: str | list[str], period: str = "annual", limit: int = 10) -> pd.DataFrame:
         sym = [sym] if isinstance(sym, str) else sym
-        return pd.DataFrame(self._fetch_multi("ratios", sym, period="annual", limit=limit))
+        return pd.DataFrame(self._fetch_multi("ratios", sym, period=period, limit=limit))
 
     def ratios_ttm(self, sym: str | list[str]) -> pd.DataFrame:
         sym = [sym] if isinstance(sym, str) else sym
@@ -185,6 +185,16 @@ class FundamentalsData:
         sym = [sym] if isinstance(sym, str) else sym
         return pd.DataFrame(self._fetch_multi("analyst-estimates", sym, period="annual", limit=limit))
 
+    def latest_statements(self, sym: str) -> dict:
+        income_q = self.income(sym, period="quarter", limit=1)
+        balance_q = self.balance(sym, period="quarter", limit=1)
+        cashflow_q = self.cashflow(sym, period="quarter", limit=1)
+
+        return {
+            "income": income_q.iloc[0].to_dict() if not income_q.empty else {},
+            "balance": balance_q.iloc[0].to_dict() if not balance_q.empty else {},
+            "cashflow": cashflow_q.iloc[0].to_dict() if not cashflow_q.empty else {},
+        }
 
 
 if __name__ == "__main__":

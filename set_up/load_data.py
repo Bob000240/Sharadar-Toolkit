@@ -1,9 +1,13 @@
-from config import STOCK_SYMBOLS, ALL_SYMBOLS, SP500_SYMBOLS
-from raw_data.market_data import MarketData
-from raw_data.descriptors_data import DescriptorsData
-from raw_data.fundamentals_data import FundamentalsData
-from processed_data.fundamentals_transform import build_quality, build_value, build_growth
-from processed_data.indicators import compute_indicators
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from set_up.config import STOCK_SYMBOLS, ALL_SYMBOLS, SP500_SYMBOLS
+from data_det.raw_data.market_data import MarketData
+from data_det.raw_data.descriptors_data import DescriptorsData
+from data_det.raw_data.fundamentals_data import FundamentalsData
+from data_det.processed_data.fundamentals_transform import build_quality, build_value, build_growth
+from data_det.processed_data.indicators import compute_indicators
 import database.market_repository as market_repo
 import database.indicator_repository as indicator_repo
 import database.descriptors_repository as descriptor_repo
@@ -11,7 +15,7 @@ import database.fundamentals_repository as fund_repo
 import pandas as pd
 
 if __name__ == "__main__":
-    start_date = "2025-01-01"
+    start_date = "2024-01-01"
     end_date   = pd.Timestamp.today()
 
     # market_repo.drop_OHLCV_table()
@@ -45,16 +49,16 @@ if __name__ == "__main__":
 
     # descriptor_repo.insert_descriptors(DescriptorsData(ALL_SYMBOLS).get_descriptors())
 
-    # fund_repo.drop_fundamentals_tables()
-    # fund_repo.create_fundamentals_tables()
+    fund_repo.drop_fundamentals_tables()
+    fund_repo.create_fundamentals_tables()
 
-    # fd = FundamentalsData(STOCK_SYMBOLS)
-    # fund_repo.insert_quality(build_quality(fd))
-    # print("Inserted quality data")
-    # fund_repo.insert_growth(build_growth(fd))
-    # print("Inserted growth data")
-    # fund_repo.insert_value(build_value(fd))
-    # print("Inserted value data")
+    fd = FundamentalsData(STOCK_SYMBOLS)
+    fund_repo.insert_quality(build_quality(fd))
+    print("Inserted quality data")
+    fund_repo.insert_growth(build_growth(fd))
+    print("Inserted growth data")
+    fund_repo.insert_value(build_value(fd))
+    print("Inserted value data")
     print(len(SP500_SYMBOLS))
 
     pd.set_option("display.max_columns", None)
