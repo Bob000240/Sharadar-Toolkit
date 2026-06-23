@@ -201,6 +201,23 @@ def get(
     return pd.read_sql_query(text(q), get_connection(), params=params)
 
 
+def get_latest(tickers: str | list[str], dimension: str, signal_day: pd.Timestamp) -> pd.DataFrame:
+    params = {
+        "tickers":    [tickers] if isinstance(tickers, str) else tickers,
+        "dim":        dimension,
+        "signal_day": signal_day.date() if hasattr(signal_day, "date") else signal_day,
+    }
+    q = text("""
+        SELECT DISTINCT ON (ticker) *
+        FROM fundamentals
+        WHERE ticker = ANY(:tickers)
+          AND dimension = :dim
+          AND datekey <= :signal_day
+        ORDER BY ticker, datekey DESC
+    """)
+    return pd.read_sql_query(q, get_connection(), params=params)
+
+
 def get_latest_date(tickers: str | list[str] | None = None) -> pd.DataFrame:
     q = "SELECT ticker, MAX(datekey) AS latest_date FROM fundamentals"
     params = {}

@@ -13,7 +13,7 @@ def main():
     if cmd == "setup":
         from set_up.setup_db import enable_pgvector, drop_all, create_all
         enable_pgvector()
-        drop_all()
+        # drop_all()
         create_all()
 
     elif cmd == "load":
@@ -22,10 +22,10 @@ def main():
         # load_data.load_tickers(sh)
         # load_data.load_equity_prices(sh)
         # load_data.load_fund_prices(sh)
-        # load_data.load_indicators()
+        load_data.load_indicators()
         # load_data.load_fundamentals(sh)
         # load_data.load_insider(sh)
-        load_data.load_institutional(sh)
+        # load_data.load_institutional(sh)
         # load_data.load_events(sh)
         # load_data.load_macro()
 

@@ -7,16 +7,15 @@ _COLUMNS = [
     "ticker", "date", "close",
     "return_1d", "return_5d", "return_20d", "return_60d", "return_252d",
     "sma_20", "sma_50", "sma_200",
-    "ema_9", "ema_21", "ema_9_above_21", "ema_crossover_days_ago",
+    "ema_9", "ema_21", "ema_crossover_days_ago",
     "pct_from_sma_20", "pct_from_sma_50",
     "volume_sma_10", "volume_sma_50", "volume_ratio",
     "obv", "dollar_volume", "dollar_volume_20d_avg",
     "rsi_14", "macd", "macd_signal", "macd_hist",
     "atr_14", "atr_pct", "volatility_20", "vol_adjusted_momentum", "consolidation_tightness",
-    "high_52w", "pct_from_52w_high", "new_52w_high",
-    "r_squared_60d", "trend_slope_60d", "slope_x_r2",
-    "rolling_20d_high", "drawdown_from_recent_high", "price_vs_20d_high",
-    "momentum_accel_20_60", "momentum_accel_5_20",
+    "high_52w", "pct_from_52w_high",
+    "r_squared_60d", "trend_slope_60d",
+    "rolling_20d_high", "drawdown_from_recent_high",
 ]
 _COL_LIST = ", ".join(_COLUMNS)
 _BIND_LIST = ", ".join(f":{c}" for c in _COLUMNS)
@@ -41,7 +40,6 @@ def create_table():
                 sma_200                 DOUBLE PRECISION,
                 ema_9                   DOUBLE PRECISION,
                 ema_21                  DOUBLE PRECISION,
-                ema_9_above_21          BOOLEAN,
                 ema_crossover_days_ago  DOUBLE PRECISION,
                 pct_from_sma_20         DOUBLE PRECISION,
                 pct_from_sma_50         DOUBLE PRECISION,
@@ -66,18 +64,12 @@ def create_table():
 
                 high_52w                DOUBLE PRECISION,
                 pct_from_52w_high       DOUBLE PRECISION,
-                new_52w_high            BOOLEAN,
 
                 r_squared_60d           DOUBLE PRECISION,
                 trend_slope_60d         DOUBLE PRECISION,
-                slope_x_r2              DOUBLE PRECISION,
 
                 rolling_20d_high        DOUBLE PRECISION,
                 drawdown_from_recent_high DOUBLE PRECISION,
-                price_vs_20d_high       DOUBLE PRECISION,
-
-                momentum_accel_20_60    DOUBLE PRECISION,
-                momentum_accel_5_20     DOUBLE PRECISION,
 
                 PRIMARY KEY (ticker, date)
             );

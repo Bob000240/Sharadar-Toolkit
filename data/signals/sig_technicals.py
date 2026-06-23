@@ -1,11 +1,20 @@
+import numpy as np
 import pandas as pd
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 
 import database.market.equity_repo as equity_repo
+import database.market.fund_repo as fund_repo
 import database.market.indicators_repo as indicators_repo
 import database.market.tickers_repo as tickers_repo
 from data.live_equity import MarketData
 from data.indicators import compute_indicators
+from set_up.config import BENCHMARK_SYMBOLS, ETF_SECTOR_MAP
+
+
+def _python_scalar(value):
+    if isinstance(value, np.generic):
+        return value.item()
+    return value
 
 
 @dataclass
@@ -17,7 +26,6 @@ class TechnicalsSnapshot:
     return_20d: float
     return_60d: float
     return_252d: float
-    momentum_consistency: int
 
     excess_return_5d: float
     excess_return_20d: float
@@ -27,21 +35,22 @@ class TechnicalsSnapshot:
     sector: str
 
     price: float
-    above_sma_200: bool
-    above_sma_50: bool
+    sma_20: float
+    sma_50: float
+    sma_200: float
+    high_52w: float
+    rolling_20d_high: float
     pct_from_52w_high: float
-    new_52w_high: bool
 
     r_squared_60d: float
     trend_slope_60d: float
-    slope_x_r2: float
-
-    momentum_accel_20_60: float
-    momentum_accel_5_20: float
 
     volume_ratio: float
     dollar_volume_20d_avg: float
 
+    atr_14: float
+    atr_pct: float
+    volatility_20: float
     vol_adjusted_momentum: float
 
     return_5d_percentile: float
@@ -49,7 +58,7 @@ class TechnicalsSnapshot:
     return_60d_percentile: float
     return_252d_percentile: float
 
-    price_vs_20d_high: float
+    drawdown_from_recent_high: float
     consolidation_tightness: float
 
     pct_from_sma_20: float
@@ -57,11 +66,169 @@ class TechnicalsSnapshot:
 
     ema_9: float
     ema_21: float
-    ema_9_above_21: bool
     ema_crossover_days_ago: int
 
     rsi_14: float
+    macd: float
+    macd_signal: float
     macd_hist: float
+
+    def __post_init__(self) -> None:
+        for field in fields(self):
+            setattr(self, field.name, _python_scalar(getattr(self, field.name)))
+
+    @property
+    def momentum_consistency(self) -> int:
+        return sum([
+            self.return_5d > 0,
+            self.return_20d > 0,
+            self.return_60d > 0,
+            self.return_252d > 0,
+        ])
+
+    @property
+    def above_sma_200(self) -> bool:
+        return self.price > self.sma_200
+
+    @property
+    def above_sma_50(self) -> bool:
+        return self.price > self.sma_50
+
+    @property
+    def new_52w_high(self) -> bool:
+        return self.pct_from_52w_high >= 0
+
+    @property
+    def slope_x_r2(self) -> float:
+        return self.trend_slope_60d * self.r_squared_60d
+
+    @property
+    def momentum_accel_20_60(self) -> float:
+        return self.return_20d - self.return_60d
+
+    @property
+    def momentum_accel_5_20(self) -> float:
+        return self.return_5d - self.return_20d
+
+    @property
+    def price_vs_20d_high(self) -> float:
+        return self.drawdown_from_recent_high
+
+    @property
+    def ema_9_above_21(self) -> bool:
+        return self.ema_9 > self.ema_21
+
+    def absolute_momentum(self) -> dict[str, bool]:
+        return {
+            "5d+":   self.return_5d > 0,
+            "20d+":  self.return_20d > 0,
+            "60d+":  self.return_60d > 0,
+            "252d+": self.return_252d > 0,
+        }
+
+    def relative_strength(self) -> dict[str, bool]:
+        return {
+            "outperform_bench_5d":   self.excess_return_5d > 0,
+            "outperform_bench_20d":  self.excess_return_20d > 0,
+            "outperform_sector_5d":  self.sector_relative_5d > 0,
+            "outperform_sector_20d": self.sector_relative_20d > 0,
+        }
+
+    def trend_quality(self) -> dict[str, bool]:
+        return {
+            "above_sma_200": self.above_sma_200,
+            "above_sma_50":  self.above_sma_50,
+            "new_52w_high":  self.new_52w_high,
+            "near_52w_high": self.pct_from_52w_high >= -0.05,
+        }
+
+    def trend_linearity(self) -> dict[str, bool]:
+        return {
+            "slope_up":        self.trend_slope_60d > 0,
+            "high_r2":         self.r_squared_60d > 0.7,
+            "trend_confirmed": self.slope_x_r2 > 0,
+        }
+
+    def momentum_structure(self) -> dict[str, bool]:
+        return {
+            "consistent_3of4":  self.momentum_consistency >= 3,
+            "consistent_4of4":  self.momentum_consistency == 4,
+            "accel_short":      self.momentum_accel_5_20 > 0,
+            "accel_mid":        self.momentum_accel_20_60 > 0,
+            "vol_adj_positive": self.vol_adjusted_momentum > 0,
+        }
+
+    def volume_signals(self) -> dict[str, bool]:
+        return {
+            "volume_surge": self.volume_ratio > 1.5,
+            "volume_spike": self.volume_ratio > 2.0,
+            "liquid":       self.dollar_volume_20d_avg >= 5_000_000,
+        }
+
+    def volatility_signals(self) -> dict[str, bool]:
+        return {
+            "low_volatility":  self.volatility_20 < 0.02,
+            "high_volatility": self.volatility_20 > 0.04,
+            "atr_elevated":    self.atr_pct > 0.04,
+        }
+
+    def price_structure(self) -> dict[str, bool]:
+        return {
+            "near_20d_high":      self.price_vs_20d_high >= -0.03,
+            "tight_base":         self.consolidation_tightness < 0.7,
+            "healthy_above_sma20": 0 < self.pct_from_sma_20 < 0.10,
+            "healthy_above_sma50": 0 < self.pct_from_sma_50 < 0.15,
+        }
+
+    def moving_average_structure(self) -> dict[str, bool]:
+        return {
+            "price_above_sma20": self.price > self.sma_20,
+            "price_above_sma50": self.above_sma_50,
+            "price_above_sma200": self.above_sma_200,
+            "sma20_above_sma50": self.sma_20 > self.sma_50,
+            "sma50_above_sma200": self.sma_50 > self.sma_200,
+            "stacked_bullish": self.price > self.sma_20 > self.sma_50 > self.sma_200,
+        }
+
+    def breakout_context(self) -> dict[str, bool]:
+        return {
+            "within_3pct_20d_high": self.drawdown_from_recent_high >= -0.03,
+            "within_5pct_52w_high": self.pct_from_52w_high >= -0.05,
+            "at_52w_high":          self.new_52w_high,
+        }
+
+    def macd_signals(self) -> dict[str, bool]:
+        return {
+            "macd_above_signal": self.macd > self.macd_signal,
+            "macd_positive":     self.macd > 0,
+            "hist_positive":     self.macd_hist > 0,
+        }
+
+    def oscillator_signals(self) -> dict[str, bool]:
+        return {
+            "rsi_bull":        self.rsi_14 > 50,
+            "macd_bull":       self.macd_hist > 0,
+            "ema_bull":        self.ema_9_above_21,
+            "recent_ema_cross": 0 <= self.ema_crossover_days_ago <= 5,
+        }
+
+    def momentum_score(self) -> float:
+        return (
+            0.40 * self.return_20d_percentile +
+            0.30 * self.return_60d_percentile +
+            0.20 * self.return_252d_percentile +
+            0.10 * self.return_5d_percentile
+        ) / 100
+
+    def risk_flags(self) -> dict[str, bool]:
+        return {
+            "overbought":       self.rsi_14 > 70,
+            "low_liquidity":    self.dollar_volume_20d_avg < 1_000_000,
+            "extended_drawdown": self.pct_from_52w_high < -0.30,
+            "volatile_base":    self.consolidation_tightness > 1.5,
+            "high_volatility":  self.volatility_20 > 0.04,
+            "atr_elevated":     self.atr_pct > 0.04,
+        }
 
 
 class TechnicalsModel:
@@ -110,8 +277,26 @@ class TechnicalsModel:
         return pd.DataFrame(rows).set_index("ticker")
 
     def _from_db(self) -> pd.DataFrame:
-        df = indicators_repo.get_latest(self.all_tickers, self.signal_day)
+        df = indicators_repo.get_latest(self.stock_tickers, self.signal_day)
         return df.set_index("ticker")
+
+    def _fund_returns(self, tickers: list[str]) -> pd.DataFrame:
+        lookback = self.signal_day - pd.Timedelta(days=300)
+        prices = fund_repo.get(
+            tickers=tickers,
+            start_date=str(lookback.date()),
+            end_date=str(self.signal_day.date()),
+        )
+        prices["date"] = pd.to_datetime(prices["date"])
+        rows = []
+        for tkr, grp in prices.groupby("ticker"):
+            c = grp.sort_values("date")["close"].values
+            rows.append({
+                "ticker":     tkr,
+                "return_5d":  (c[-1] / c[-6]  - 1) if len(c) >= 6  else 0.0,
+                "return_20d": (c[-1] / c[-21] - 1) if len(c) >= 21 else 0.0,
+            })
+        return pd.DataFrame(rows).set_index("ticker")
 
     def _load_data(self, live: bool = False, tickers: list[str] | None = None) -> None:
         if live and tickers:
@@ -127,15 +312,17 @@ class TechnicalsModel:
         else:
             all_indicators = self._from_db()
             sector_map = (
-                tickers_repo.get(tickers=self.all_tickers)[["ticker", "sector"]]
+                tickers_repo.get(tickers=self.stock_tickers)[["ticker", "sector"]]
                 .set_index("ticker")["sector"]
             )
-            all_indicators["sector"] = sector_map
+            all_indicators["sector"] = sector_map.reindex(all_indicators.index)
             all_indicators["above_sma_50"]  = all_indicators["close"] > all_indicators["sma_50"]
             all_indicators["above_sma_200"] = all_indicators["close"] > all_indicators["sma_200"]
-            self.stock_data     = all_indicators.loc[self.stock_tickers].copy()
-            self.benchmark_data = all_indicators.loc[[self.benchmark_ticker]].copy()
-            self.etf_data       = all_indicators.loc[self.etf_tickers].copy()
+            self.stock_data = all_indicators.loc[self.stock_tickers].copy()
+
+            fund_data = self._fund_returns([self.benchmark_ticker] + self.etf_tickers)
+            self.benchmark_data = fund_data.loc[[self.benchmark_ticker]]
+            self.etf_data = fund_data.loc[self.etf_tickers]
 
         bench_5d  = self.benchmark_data.loc[self.benchmark_ticker, "return_5d"]
         bench_20d = self.benchmark_data.loc[self.benchmark_ticker, "return_20d"]
@@ -143,7 +330,7 @@ class TechnicalsModel:
         self.stock_data["excess_return_20d"] = self.stock_data["return_20d"] - bench_20d
 
         etf_returns = self.etf_data[["return_5d", "return_20d"]].copy()
-        etf_returns.index = all_indicators.loc[self.etf_tickers, "sector"]
+        etf_returns.index = etf_returns.index.map(ETF_SECTOR_MAP)
         self.stock_data["sector_relative_5d"]  = self.stock_data["return_5d"]  - self.stock_data["sector"].map(etf_returns["return_5d"])
         self.stock_data["sector_relative_20d"] = self.stock_data["return_20d"] - self.stock_data["sector"].map(etf_returns["return_20d"])
 
@@ -158,49 +345,86 @@ class TechnicalsModel:
         return self.stock_data.loc[ticker, col]
 
     def build_snapshot(self, ticker: str) -> TechnicalsSnapshot:
+        if ticker not in self.stock_data.index:
+            raise ValueError(f"Ticker {ticker} not in stock_data")
+        row = self.stock_data.loc[ticker]
+
         return TechnicalsSnapshot(
             ticker=ticker,
             signal_day=self.signal_day,
-            return_5d=self.get(ticker, "return_5d"),
-            return_20d=self.get(ticker, "return_20d"),
-            return_60d=self.get(ticker, "return_60d"),
-            return_252d=self.get(ticker, "return_252d"),
-            momentum_consistency=sum([
-                self.get(ticker, "return_5d") > 0,
-                self.get(ticker, "return_20d") > 0,
-                self.get(ticker, "return_60d") > 0,
-                self.get(ticker, "return_252d") > 0,
-            ]),
-            excess_return_5d=self.get(ticker, "excess_return_5d"),
-            excess_return_20d=self.get(ticker, "excess_return_20d"),
-            sector_relative_5d=self.get(ticker, "sector_relative_5d"),
-            sector_relative_20d=self.get(ticker, "sector_relative_20d"),
-            sector=self.get(ticker, "sector"),
-            price=self.get(ticker, "close"),
-            above_sma_200=self.get(ticker, "above_sma_200"),
-            above_sma_50=self.get(ticker, "above_sma_50"),
-            pct_from_52w_high=self.get(ticker, "pct_from_52w_high"),
-            new_52w_high=self.get(ticker, "new_52w_high"),
-            r_squared_60d=self.get(ticker, "r_squared_60d"),
-            trend_slope_60d=self.get(ticker, "trend_slope_60d"),
-            slope_x_r2=self.get(ticker, "slope_x_r2"),
-            momentum_accel_20_60=self.get(ticker, "momentum_accel_20_60"),
-            momentum_accel_5_20=self.get(ticker, "momentum_accel_5_20"),
-            volume_ratio=self.get(ticker, "volume_ratio"),
-            dollar_volume_20d_avg=self.get(ticker, "dollar_volume_20d_avg"),
-            vol_adjusted_momentum=self.get(ticker, "vol_adjusted_momentum"),
-            return_5d_percentile=self.get(ticker, "return_5d_percentile"),
-            return_20d_percentile=self.get(ticker, "return_20d_percentile"),
-            return_60d_percentile=self.get(ticker, "return_60d_percentile"),
-            return_252d_percentile=self.get(ticker, "return_252d_percentile"),
-            price_vs_20d_high=self.get(ticker, "price_vs_20d_high"),
-            consolidation_tightness=self.get(ticker, "consolidation_tightness"),
-            pct_from_sma_20=self.get(ticker, "pct_from_sma_20"),
-            pct_from_sma_50=self.get(ticker, "pct_from_sma_50"),
-            ema_9=self.get(ticker, "ema_9"),
-            ema_21=self.get(ticker, "ema_21"),
-            ema_9_above_21=self.get(ticker, "ema_9_above_21"),
-            ema_crossover_days_ago=self.get(ticker, "ema_crossover_days_ago"),
-            rsi_14=self.get(ticker, "rsi_14"),
-            macd_hist=self.get(ticker, "macd_hist"),
+            return_5d=row["return_5d"],
+            return_20d=row["return_20d"],
+            return_60d=row["return_60d"],
+            return_252d=row["return_252d"],
+            excess_return_5d=row["excess_return_5d"],
+            excess_return_20d=row["excess_return_20d"],
+            sector_relative_5d=row["sector_relative_5d"],
+            sector_relative_20d=row["sector_relative_20d"],
+            sector=row["sector"],
+            price=row["close"],
+            sma_20=row["sma_20"],
+            sma_50=row["sma_50"],
+            sma_200=row["sma_200"],
+            high_52w=row["high_52w"],
+            rolling_20d_high=row["rolling_20d_high"],
+            pct_from_52w_high=row["pct_from_52w_high"],
+            r_squared_60d=row["r_squared_60d"],
+            trend_slope_60d=row["trend_slope_60d"],
+            volume_ratio=row["volume_ratio"],
+            dollar_volume_20d_avg=row["dollar_volume_20d_avg"],
+            atr_14=row["atr_14"],
+            atr_pct=row["atr_pct"],
+            volatility_20=row["volatility_20"],
+            vol_adjusted_momentum=row["vol_adjusted_momentum"],
+            return_5d_percentile=row["return_5d_percentile"],
+            return_20d_percentile=row["return_20d_percentile"],
+            return_60d_percentile=row["return_60d_percentile"],
+            return_252d_percentile=row["return_252d_percentile"],
+            drawdown_from_recent_high=row["drawdown_from_recent_high"],
+            consolidation_tightness=row["consolidation_tightness"],
+            pct_from_sma_20=row["pct_from_sma_20"],
+            pct_from_sma_50=row["pct_from_sma_50"],
+            ema_9=row["ema_9"],
+            ema_21=row["ema_21"],
+            ema_crossover_days_ago=row["ema_crossover_days_ago"],
+            rsi_14=row["rsi_14"],
+            macd=row["macd"],
+            macd_signal=row["macd_signal"],
+            macd_hist=row["macd_hist"],
         )
+
+
+def print_snapshot_report(snapshot: TechnicalsSnapshot) -> None:
+    sections = {
+        "Absolute Momentum": snapshot.absolute_momentum(),
+        "Relative Strength": snapshot.relative_strength(),
+        "Trend Quality": snapshot.trend_quality(),
+        "Trend Linearity": snapshot.trend_linearity(),
+        "Moving Averages": snapshot.moving_average_structure(),
+        "Breakout Context": snapshot.breakout_context(),
+        "Momentum Structure": snapshot.momentum_structure(),
+        "MACD Signals": snapshot.macd_signals(),
+        "Volume Signals": snapshot.volume_signals(),
+        "Volatility Signals": snapshot.volatility_signals(),
+        "Price Structure": snapshot.price_structure(),
+        "Oscillators": snapshot.oscillator_signals(),
+        "Risk Flags": snapshot.risk_flags(),
+    }
+
+    print(f"\n=== {snapshot.ticker} | {snapshot.signal_day.date()} ===")
+    print(snapshot)
+    print(f"Momentum Score: {snapshot.momentum_score():.3f}")
+    for title, values in sections.items():
+        print(f"{title}: {values}")
+
+
+if __name__ == "__main__":
+    signal_day = pd.Timestamp("2024-06-30")
+    stock_tickers = ["AAPL", "MSFT", "GOOGL"]
+    benchmark_ticker = "SPY"
+    etf_tickers = [ticker for ticker in BENCHMARK_SYMBOLS if ticker != benchmark_ticker]
+
+    model = TechnicalsModel(signal_day, stock_tickers, benchmark_ticker, etf_tickers)
+    for ticker in stock_tickers:
+        snapshot = model.build_snapshot(ticker)
+        print_snapshot_report(snapshot)

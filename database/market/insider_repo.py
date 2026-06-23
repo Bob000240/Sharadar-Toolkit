@@ -3,7 +3,7 @@ import pandas as pd
 from sqlalchemy import text
 
 _COLUMNS = [
-    "rownum", "ticker", "filingdate", "formtype", "issuername", "ownername", "officertitle",
+    "ticker", "filingdate", "formtype", "issuername", "ownername", "officertitle",
     "isdirector", "isofficer", "istenpercentowner",
     "transactiondate", "transactioncode", "transactionshares", "transactionpricepershare",
     "transactionvalue", "sharesownedbeforetransaction", "sharesownedfollowingtransaction",
@@ -18,7 +18,6 @@ def create_table():
     with get_connection().begin() as conn:
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS insider_transactions (
-                rownum                          INTEGER         PRIMARY KEY,
                 ticker                          TEXT            NOT NULL,
                 filingdate                      DATE,
                 formtype                        TEXT,
@@ -41,7 +40,8 @@ def create_table():
                 natureofownership               TEXT,
                 dateexercisable                 DATE,
                 expirationdate                  DATE,
-                priceexercisable                DOUBLE PRECISION
+                priceexercisable                DOUBLE PRECISION,
+                UNIQUE (ticker, filingdate, ownername, transactiondate, transactioncode)
             );
             CREATE INDEX IF NOT EXISTS idx_insider_ticker ON insider_transactions (ticker);
             CREATE INDEX IF NOT EXISTS idx_insider_filingdate ON insider_transactions (filingdate);
@@ -60,7 +60,7 @@ def insert(df: pd.DataFrame):
     records = [{k: None if v is pd.NaT else v for k, v in r.items()} for r in records]
     with get_connection().begin() as conn:
         conn.execute(
-            text(f"INSERT INTO insider_transactions ({_COL_LIST}) VALUES ({_BIND_LIST}) ON CONFLICT DO NOTHING"),
+            text(f"INSERT INTO insider_transactions ({_COL_LIST}) VALUES ({_BIND_LIST}) ON CONFLICT (ticker, filingdate, ownername, transactiondate, transactioncode) DO NOTHING"),
             records,
         )
 

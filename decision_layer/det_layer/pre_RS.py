@@ -29,6 +29,9 @@ class RSMomentumAgent(SignalAgent):
         self._mom_model = sig_mom.MomentumFactorsModel(self.signal_day, STOCK_SYMBOLS, _BENCHMARK, _ETFS)
         self.stock_data = self._mom_model.stock_data.copy()
         self.analysis_model = analysis_model
+        self.stock_data["slope_x_r2"] = self.stock_data["trend_slope_60d"] * self.stock_data["r_squared_60d"]
+        self.stock_data["momentum_accel_5_20"] = self.stock_data["return_5d"] - self.stock_data["return_20d"]
+        self.stock_data["price_vs_20d_high"] = self.stock_data["drawdown_from_recent_high"]
         self.stock_data["_cs_return_12_1"] = (
             (1 + self.stock_data["return_252d"]) / (1 + self.stock_data["return_20d"]) - 1
         )

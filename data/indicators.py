@@ -66,9 +66,8 @@ def compute_indicators(df: pd.DataFrame):
     # EMAs and crossover
     df["ema_9"] = _ema(df["close"], 9)
     df["ema_21"] = _ema(df["close"], 21)
-    df["ema_9_above_21"] = df["ema_9"] > df["ema_21"]
     seq = pd.Series(range(len(df)), index=df.index, dtype=float)
-    cross_flags = df["ema_9_above_21"].astype(float).diff().abs() > 0
+    cross_flags = (df["ema_9"] > df["ema_21"]).astype(float).diff().abs() > 0
     df["ema_crossover_days_ago"] = (seq - seq.where(cross_flags).ffill())
 
     # Relative volume
@@ -103,7 +102,6 @@ def compute_indicators(df: pd.DataFrame):
     # 52-week high
     df["high_52w"] = df["close"].rolling(252).max()
     df["pct_from_52w_high"] = (df["close"] - df["high_52w"]) / df["high_52w"]
-    df["new_52w_high"] = df["close"] >= df["high_52w"]
 
     # Volume based
     df["obv"] = _obv(df["close"], df["volume"])
@@ -126,15 +124,8 @@ def compute_indicators(df: pd.DataFrame):
         )
     )
 
-    df["slope_x_r2"] = df["trend_slope_60d"] * df["r_squared_60d"]
-
     # Drawdown / breakout from recent high
     df["rolling_20d_high"] = df["close"].rolling(20).max()
     df["drawdown_from_recent_high"] = (df["close"] - df["rolling_20d_high"]) / df["rolling_20d_high"]
-    df["price_vs_20d_high"] = df["drawdown_from_recent_high"]
-
-    # Acceleration
-    df["momentum_accel_20_60"] = df["return_20d"] - df["return_60d"]
-    df["momentum_accel_5_20"] = df["return_5d"] - df["return_20d"]
 
     return df.reset_index(drop=True)
