@@ -5,6 +5,7 @@ import nasdaqdatalink
 
 load_dotenv()
 
+
 class SharadarData:
     def __init__(self):
         self.key = os.getenv("SHARADAR_KEY")
@@ -34,7 +35,11 @@ class SharadarData:
     ) -> pd.DataFrame:
         return nasdaqdatalink.get_table(
             "SHARADAR/SF1",
-            **self._params(ticker=tickers, dimension=dimension, calendardate=self._date_range(start_date, end_date)),
+            **self._params(
+                ticker=tickers,
+                dimension=dimension,
+                calendardate=self._date_range(start_date, end_date),
+            ),
             paginate=paginate,
         )
 
@@ -51,7 +56,9 @@ class SharadarData:
     ) -> pd.DataFrame:
         return nasdaqdatalink.get_table(
             "SHARADAR/SF2",
-            **self._params(ticker=tickers, filingdate=self._date_range(start_date, end_date)),
+            **self._params(
+                ticker=tickers, filingdate=self._date_range(start_date, end_date)
+            ),
             paginate=paginate,
         )
 
@@ -68,7 +75,9 @@ class SharadarData:
     ) -> pd.DataFrame:
         return nasdaqdatalink.get_table(
             "SHARADAR/SF3",
-            **self._params(ticker=tickers, calendardate=self._date_range(start_date, end_date)),
+            **self._params(
+                ticker=tickers, calendardate=self._date_range(start_date, end_date)
+            ),
             paginate=paginate,
         )
 
@@ -145,24 +154,33 @@ class SharadarData:
             paginate=paginate,
         )
 
+
 if __name__ == "__main__":
     sh = SharadarData()
 
     print("--- SF1: Fundamentals ---")
-    fundamentals = sh.fundamentals(tickers=["AAPL", "NVDA"], start_date="2020-01-01", end_date="2020-12-31")
+    fundamentals = sh.fundamentals(
+        tickers=["AAPL", "NVDA"], start_date="2020-01-01", end_date="2020-12-31"
+    )
     print(fundamentals)
     pd.set_option("display.max_columns", None)
     pd.set_option("display.width", None)
     print("--- SF2: Insider Transactions ---")
-    insiders = sh.insider_transactions(tickers=["AAPL", "NVDA"], start_date="2020-01-01", end_date="2020-12-31")
+    insiders = sh.insider_transactions(
+        tickers=["AAPL", "NVDA"], start_date="2020-01-01", end_date="2020-12-31"
+    )
     print(insiders)
 
     print("--- SF3: Institutional Holdings ---")
-    institutions = sh.institutional_holdings(tickers=["AAPL", "NVDA"], start_date="2020-01-01", end_date="2020-12-31")
+    institutions = sh.institutional_holdings(
+        tickers=["AAPL", "NVDA"], start_date="2020-01-01", end_date="2020-12-31"
+    )
     print(institutions)
 
     print("--- SEP: Equity Prices ---")
-    prices = sh.equity_prices(tickers=["AAPL", "NVDA"], start_date="2020-01-01", end_date="2020-01-10")
+    prices = sh.equity_prices(
+        tickers=["AAPL", "NVDA"], start_date="2020-01-01", end_date="2020-01-10"
+    )
     print(prices)
 
     print("--- TICKERS: Company Descriptors ---")
@@ -170,10 +188,13 @@ if __name__ == "__main__":
     print(descriptors)
 
     print("--- EVENTS: Corporate Events ---")
-    events = sh.events(tickers=["AAPL", "NVDA"], start_date="2020-01-01", end_date="2020-12-31")
+    events = sh.events(
+        tickers=["AAPL", "NVDA"], start_date="2020-01-01", end_date="2020-12-31"
+    )
     print(events)
 
     print("--- SFP: Fund Prices ---")
-    fund_prices = sh.fund_prices(tickers=["SPY", "QQQ"], start_date="2020-01-01", end_date="2020-01-10")
+    fund_prices = sh.fund_prices(
+        tickers=["SPY", "QQQ"], start_date="2020-01-01", end_date="2020-01-10"
+    )
     print(fund_prices)
-

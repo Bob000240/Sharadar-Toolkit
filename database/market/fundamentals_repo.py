@@ -3,28 +3,118 @@ import pandas as pd
 from sqlalchemy import text
 
 _COLUMNS = [
-    "ticker", "dimension", "calendardate", "datekey", "reportperiod", "fiscalperiod", "lastupdated",
-    "accoci", "assets", "assetsavg", "assetsc", "assetsnc", "assetturnover",
-    "bvps", "capex", "cashneq", "cashnequsd", "consolinc", "cor", "currentratio",
-    "de", "debt", "debtc", "debtnc", "debtusd", "deferredrev", "depamor", "deposits",
-    "divyield", "dps",
-    "ebit", "ebitda", "ebitdamargin", "ebitdausd", "ebitusd", "ebt",
-    "eps", "epsdil", "epsusd",
-    "equity", "equityavg", "equityusd",
-    "ev", "evebit", "evebitda",
-    "fcf", "fcfps", "fxusd",
-    "gp", "grossmargin",
-    "intangibles", "intexp", "invcap", "invcapavg", "inventory",
-    "investments", "investmentsc", "investmentsnc",
-    "liabilities", "liabilitiesc", "liabilitiesnc",
+    "ticker",
+    "dimension",
+    "calendardate",
+    "datekey",
+    "reportperiod",
+    "fiscalperiod",
+    "lastupdated",
+    "accoci",
+    "assets",
+    "assetsavg",
+    "assetsc",
+    "assetsnc",
+    "assetturnover",
+    "bvps",
+    "capex",
+    "cashneq",
+    "cashnequsd",
+    "consolinc",
+    "cor",
+    "currentratio",
+    "de",
+    "debt",
+    "debtc",
+    "debtnc",
+    "debtusd",
+    "deferredrev",
+    "depamor",
+    "deposits",
+    "divyield",
+    "dps",
+    "ebit",
+    "ebitda",
+    "ebitdamargin",
+    "ebitdausd",
+    "ebitusd",
+    "ebt",
+    "eps",
+    "epsdil",
+    "epsusd",
+    "equity",
+    "equityavg",
+    "equityusd",
+    "ev",
+    "evebit",
+    "evebitda",
+    "fcf",
+    "fcfps",
+    "fxusd",
+    "gp",
+    "grossmargin",
+    "intangibles",
+    "intexp",
+    "invcap",
+    "invcapavg",
+    "inventory",
+    "investments",
+    "investmentsc",
+    "investmentsnc",
+    "liabilities",
+    "liabilitiesc",
+    "liabilitiesnc",
     "marketcap",
-    "ncf", "ncfbus", "ncfcommon", "ncfdebt", "ncfdiv", "ncff", "ncfi", "ncfinv", "ncfo", "ncfx",
-    "netinc", "netinccmn", "netinccmnusd", "netincdis", "netincnci", "netmargin",
-    "opex", "opinc",
-    "payables", "payoutratio", "pb", "pe", "pe1", "ppnenet", "prefdivis", "price", "ps", "ps1",
-    "receivables", "retearn", "revenue", "revenueusd", "rnd", "roa", "roe", "roic", "ros",
-    "sbcomp", "sgna", "sharefactor", "sharesbas", "shareswa", "shareswadil", "sps",
-    "tangibles", "taxassets", "taxexp", "taxliabilities", "tbvps", "workingcapital",
+    "ncf",
+    "ncfbus",
+    "ncfcommon",
+    "ncfdebt",
+    "ncfdiv",
+    "ncff",
+    "ncfi",
+    "ncfinv",
+    "ncfo",
+    "ncfx",
+    "netinc",
+    "netinccmn",
+    "netinccmnusd",
+    "netincdis",
+    "netincnci",
+    "netmargin",
+    "opex",
+    "opinc",
+    "payables",
+    "payoutratio",
+    "pb",
+    "pe",
+    "pe1",
+    "ppnenet",
+    "prefdivis",
+    "price",
+    "ps",
+    "ps1",
+    "receivables",
+    "retearn",
+    "revenue",
+    "revenueusd",
+    "rnd",
+    "roa",
+    "roe",
+    "roic",
+    "ros",
+    "sbcomp",
+    "sgna",
+    "sharefactor",
+    "sharesbas",
+    "shareswa",
+    "shareswadil",
+    "sps",
+    "tangibles",
+    "taxassets",
+    "taxexp",
+    "taxliabilities",
+    "tbvps",
+    "workingcapital",
 ]
 _COL_LIST = ", ".join(_COLUMNS)
 _BIND_LIST = ", ".join(f":{c}" for c in _COLUMNS)
@@ -32,7 +122,8 @@ _BIND_LIST = ", ".join(f":{c}" for c in _COLUMNS)
 
 def create_table():
     with get_connection().begin() as conn:
-        conn.execute(text("""
+        conn.execute(
+            text("""
             CREATE TABLE IF NOT EXISTS fundamentals (
                 ticker          TEXT    NOT NULL,
                 dimension       TEXT    NOT NULL,
@@ -153,7 +244,8 @@ def create_table():
             );
             CREATE INDEX IF NOT EXISTS idx_fundamentals_ticker ON fundamentals (ticker);
             CREATE INDEX IF NOT EXISTS idx_fundamentals_date ON fundamentals (calendardate);
-        """))
+        """)
+        )
 
 
 def drop_table():
@@ -168,11 +260,15 @@ _UPDATE_SET = ", ".join(f"{c}=EXCLUDED.{c}" for c in _NON_PK)
 def insert(df: pd.DataFrame):
     if df.empty:
         return
-    records = df[_COLUMNS].where(pd.notnull(df[_COLUMNS]), None).to_dict(orient="records")
+    records = (
+        df[_COLUMNS].where(pd.notnull(df[_COLUMNS]), None).to_dict(orient="records")
+    )
     with get_connection().begin() as conn:
         conn.execute(
-            text(f"INSERT INTO fundamentals ({_COL_LIST}) VALUES ({_BIND_LIST}) "
-                 f"ON CONFLICT (ticker, dimension, datekey) DO UPDATE SET {_UPDATE_SET}"),
+            text(
+                f"INSERT INTO fundamentals ({_COL_LIST}) VALUES ({_BIND_LIST}) "
+                f"ON CONFLICT (ticker, dimension, datekey) DO UPDATE SET {_UPDATE_SET}"
+            ),
             records,
         )
 
@@ -201,10 +297,12 @@ def get(
     return pd.read_sql_query(text(q), get_connection(), params=params)
 
 
-def get_latest(tickers: str | list[str], dimension: str, signal_day: pd.Timestamp) -> pd.DataFrame:
+def get_latest(
+    tickers: str | list[str], dimension: str, signal_day: pd.Timestamp
+) -> pd.DataFrame:
     params = {
-        "tickers":    [tickers] if isinstance(tickers, str) else tickers,
-        "dim":        dimension,
+        "tickers": [tickers] if isinstance(tickers, str) else tickers,
+        "dim": dimension,
         "signal_day": signal_day.date() if hasattr(signal_day, "date") else signal_day,
     }
     q = text("""

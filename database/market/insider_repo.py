@@ -3,12 +3,29 @@ import pandas as pd
 from sqlalchemy import text
 
 _COLUMNS = [
-    "ticker", "filingdate", "formtype", "issuername", "ownername", "officertitle",
-    "isdirector", "isofficer", "istenpercentowner",
-    "transactiondate", "transactioncode", "transactionshares", "transactionpricepershare",
-    "transactionvalue", "sharesownedbeforetransaction", "sharesownedfollowingtransaction",
-    "securitytitle", "securityadcode", "directorindirect", "natureofownership",
-    "dateexercisable", "expirationdate", "priceexercisable",
+    "ticker",
+    "filingdate",
+    "formtype",
+    "issuername",
+    "ownername",
+    "officertitle",
+    "isdirector",
+    "isofficer",
+    "istenpercentowner",
+    "transactiondate",
+    "transactioncode",
+    "transactionshares",
+    "transactionpricepershare",
+    "transactionvalue",
+    "sharesownedbeforetransaction",
+    "sharesownedfollowingtransaction",
+    "securitytitle",
+    "securityadcode",
+    "directorindirect",
+    "natureofownership",
+    "dateexercisable",
+    "expirationdate",
+    "priceexercisable",
 ]
 _COL_LIST = ", ".join(_COLUMNS)
 _BIND_LIST = ", ".join(f":{c}" for c in _COLUMNS)
@@ -16,7 +33,8 @@ _BIND_LIST = ", ".join(f":{c}" for c in _COLUMNS)
 
 def create_table():
     with get_connection().begin() as conn:
-        conn.execute(text("""
+        conn.execute(
+            text("""
             CREATE TABLE IF NOT EXISTS insider_transactions (
                 ticker                          TEXT            NOT NULL,
                 filingdate                      DATE,
@@ -45,7 +63,8 @@ def create_table():
             );
             CREATE INDEX IF NOT EXISTS idx_insider_ticker ON insider_transactions (ticker);
             CREATE INDEX IF NOT EXISTS idx_insider_filingdate ON insider_transactions (filingdate);
-        """))
+        """)
+        )
 
 
 def drop_table():
@@ -56,11 +75,15 @@ def drop_table():
 def insert(df: pd.DataFrame):
     if df.empty:
         return
-    records = df[_COLUMNS].where(pd.notnull(df[_COLUMNS]), None).to_dict(orient="records")
+    records = (
+        df[_COLUMNS].where(pd.notnull(df[_COLUMNS]), None).to_dict(orient="records")
+    )
     records = [{k: None if v is pd.NaT else v for k, v in r.items()} for r in records]
     with get_connection().begin() as conn:
         conn.execute(
-            text(f"INSERT INTO insider_transactions ({_COL_LIST}) VALUES ({_BIND_LIST}) ON CONFLICT (ticker, filingdate, ownername, transactiondate, transactioncode) DO NOTHING"),
+            text(
+                f"INSERT INTO insider_transactions ({_COL_LIST}) VALUES ({_BIND_LIST}) ON CONFLICT (ticker, filingdate, ownername, transactiondate, transactioncode) DO NOTHING"
+            ),
             records,
         )
 

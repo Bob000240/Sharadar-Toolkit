@@ -2,6 +2,7 @@
 Registry of active deterministic prefilters and their metadata / risk parameters.
 Each row describes one versioned prefilter; the runner loads only active rows.
 """
+
 from __future__ import annotations
 from sqlalchemy import text
 from database.db_connection import get_connection
@@ -92,13 +93,17 @@ def upsert_profile(row: dict) -> int:
 
 
 def get_active_profiles() -> list[dict]:
-    sql = text("SELECT * FROM prefilter_profiles WHERE is_active = TRUE ORDER BY name, version")
+    sql = text(
+        "SELECT * FROM prefilter_profiles WHERE is_active = TRUE ORDER BY name, version"
+    )
     with get_connection().connect() as conn:
         return [dict(r._mapping) for r in conn.execute(sql)]
 
 
 def get_profile(name: str, version: str = "1.0") -> dict | None:
-    sql = text("SELECT * FROM prefilter_profiles WHERE name = :name AND version = :version")
+    sql = text(
+        "SELECT * FROM prefilter_profiles WHERE name = :name AND version = :version"
+    )
     with get_connection().connect() as conn:
         row = conn.execute(sql, {"name": name, "version": version}).fetchone()
         return dict(row._mapping) if row else None

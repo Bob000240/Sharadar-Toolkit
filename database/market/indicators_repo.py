@@ -4,18 +4,43 @@ import pandas as pd
 from sqlalchemy import text
 
 _COLUMNS = [
-    "ticker", "date", "close",
-    "return_1d", "return_5d", "return_20d", "return_60d", "return_252d",
-    "sma_20", "sma_50", "sma_200",
-    "ema_9", "ema_21", "ema_crossover_days_ago",
-    "pct_from_sma_20", "pct_from_sma_50",
-    "volume_sma_10", "volume_sma_50", "volume_ratio",
-    "obv", "dollar_volume", "dollar_volume_20d_avg",
-    "rsi_14", "macd", "macd_signal", "macd_hist",
-    "atr_14", "atr_pct", "volatility_20", "vol_adjusted_momentum", "consolidation_tightness",
-    "high_52w", "pct_from_52w_high",
-    "r_squared_60d", "trend_slope_60d",
-    "rolling_20d_high", "drawdown_from_recent_high",
+    "ticker",
+    "date",
+    "close",
+    "return_1d",
+    "return_5d",
+    "return_20d",
+    "return_60d",
+    "return_252d",
+    "sma_20",
+    "sma_50",
+    "sma_200",
+    "ema_9",
+    "ema_21",
+    "ema_crossover_days_ago",
+    "pct_from_sma_20",
+    "pct_from_sma_50",
+    "volume_sma_10",
+    "volume_sma_50",
+    "volume_ratio",
+    "obv",
+    "dollar_volume",
+    "dollar_volume_20d_avg",
+    "rsi_14",
+    "macd",
+    "macd_signal",
+    "macd_hist",
+    "atr_14",
+    "atr_pct",
+    "volatility_20",
+    "vol_adjusted_momentum",
+    "consolidation_tightness",
+    "high_52w",
+    "pct_from_52w_high",
+    "r_squared_60d",
+    "trend_slope_60d",
+    "rolling_20d_high",
+    "drawdown_from_recent_high",
 ]
 _COL_LIST = ", ".join(_COLUMNS)
 _BIND_LIST = ", ".join(f":{c}" for c in _COLUMNS)
@@ -23,7 +48,8 @@ _BIND_LIST = ", ".join(f":{c}" for c in _COLUMNS)
 
 def create_table():
     with get_connection().begin() as conn:
-        conn.execute(text("""
+        conn.execute(
+            text("""
             CREATE TABLE IF NOT EXISTS indicators (
                 ticker                  TEXT            NOT NULL,
                 date                    DATE            NOT NULL,
@@ -74,7 +100,8 @@ def create_table():
                 PRIMARY KEY (ticker, date)
             );
             CREATE INDEX IF NOT EXISTS idx_indicators_ticker ON indicators (ticker);
-        """))
+        """)
+        )
 
 
 def drop_table():
@@ -89,7 +116,9 @@ def insert(df: pd.DataFrame):
     records = df.where(pd.notnull(df), None).to_dict(orient="records")
     with get_connection().begin() as conn:
         conn.execute(
-            text(f"INSERT INTO indicators ({_COL_LIST}) VALUES ({_BIND_LIST}) ON CONFLICT DO NOTHING"),
+            text(
+                f"INSERT INTO indicators ({_COL_LIST}) VALUES ({_BIND_LIST}) ON CONFLICT DO NOTHING"
+            ),
             records,
         )
 

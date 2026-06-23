@@ -4,8 +4,10 @@ Run once before load_data.py.
 
     uv run python -m set_up.setup_db
 """
+
 import sys
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from sqlalchemy import text
@@ -35,10 +37,19 @@ def enable_pgvector():
 
 def drop_all():
     tables = [
-        "eval_results", "trade_outcomes", "decision_memory",
-        "screened_candidates", "prefilter_profiles",
-        "events", "institutional_holdings", "insider_transactions",
-        "fundamentals", "tickers", "indicators", "fund_prices", "equity_prices",
+        "eval_results",
+        "trade_outcomes",
+        "decision_memory",
+        "screened_candidates",
+        "prefilter_profiles",
+        "events",
+        "institutional_holdings",
+        "insider_transactions",
+        "fundamentals",
+        "tickers",
+        "indicators",
+        "fund_prices",
+        "equity_prices",
         "macro",
     ]
     with get_connection().begin() as conn:
@@ -50,24 +61,38 @@ def drop_all():
 
 def create_all():
     # Market data
-    equity_repo.create_table();       print("  created equity_prices")
-    fund_repo.create_table();         print("  created fund_prices")
-    indicators_repo.create_table();   print("  created indicators")
-    tickers_repo.create_table();      print("  created tickers")
-    fundamentals_repo.create_table(); print("  created fundamentals")
-    insider_repo.create_table();      print("  created insider_transactions")
-    institutional_repo.create_table();print("  created institutional_holdings")
-    event_repo.create_table();        print("  created events")
-    macro_repo.create_table();        print("  created macro")
+    equity_repo.create_table()
+    print("  created equity_prices")
+    fund_repo.create_table()
+    print("  created fund_prices")
+    indicators_repo.create_table()
+    print("  created indicators")
+    tickers_repo.create_table()
+    print("  created tickers")
+    fundamentals_repo.create_table()
+    print("  created fundamentals")
+    insider_repo.create_table()
+    print("  created insider_transactions")
+    institutional_repo.create_table()
+    print("  created institutional_holdings")
+    event_repo.create_table()
+    print("  created events")
+    macro_repo.create_table()
+    print("  created macro")
 
     # Operational
-    profiles_repo.create_table();     print("  created prefilter_profiles")
-    candidates_repo.create_table();   print("  created screened_candidates")
+    profiles_repo.create_table()
+    print("  created prefilter_profiles")
+    candidates_repo.create_table()
+    print("  created screened_candidates")
 
     # Agent memory + outcomes
-    memory_repo.create_table();       print("  created decision_memory")
-    outcomes_repo.create_table();     print("  created trade_outcomes")
-    eval_repo.create_table();         print("  created eval_results")
+    memory_repo.create_table()
+    print("  created decision_memory")
+    outcomes_repo.create_table()
+    print("  created trade_outcomes")
+    eval_repo.create_table()
+    print("  created eval_results")
 
     print("All tables created")
 

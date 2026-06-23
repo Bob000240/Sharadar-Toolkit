@@ -4,21 +4,50 @@ from sqlalchemy import text
 
 _COLUMNS = [
     "date",
-    "yield_1m", "yield_3m", "yield_6m", "yield_1y", "yield_2y", "yield_5y",
-    "yield_10y", "yield_20y", "yield_30y",
-    "real_yield_5y", "real_yield_10y", "real_yield_20y",
-    "breakeven_5y", "breakeven_10y",
-    "fed_funds_rate", "sofr",
-    "spread_hy", "spread_ig", "yield_hy", "yield_ig", "ted_spread",
-    "cpi", "cpi_core", "pce", "pce_core", "cpi_yoy", "cpi_core_yoy", "pce_yoy",
-    "unemployment_rate", "jobless_claims", "nonfarm_payrolls",
-    "industrial_production", "retail_sales", "gdp",
+    "yield_1m",
+    "yield_3m",
+    "yield_6m",
+    "yield_1y",
+    "yield_2y",
+    "yield_5y",
+    "yield_10y",
+    "yield_20y",
+    "yield_30y",
+    "real_yield_5y",
+    "real_yield_10y",
+    "real_yield_20y",
+    "breakeven_5y",
+    "breakeven_10y",
+    "fed_funds_rate",
+    "sofr",
+    "spread_hy",
+    "spread_ig",
+    "yield_hy",
+    "yield_ig",
+    "ted_spread",
+    "cpi",
+    "cpi_core",
+    "pce",
+    "pce_core",
+    "cpi_yoy",
+    "cpi_core_yoy",
+    "pce_yoy",
+    "unemployment_rate",
+    "jobless_claims",
+    "nonfarm_payrolls",
+    "industrial_production",
+    "retail_sales",
+    "gdp",
     "m2",
-    "housing_starts", "case_shiller_hpi",
+    "housing_starts",
+    "case_shiller_hpi",
     "oil_wti",
-    "dxy", "eurusd", "usdjpy",
+    "dxy",
+    "eurusd",
+    "usdjpy",
     "vix",
-    "yield_curve_2_10", "yield_curve_3m_10",
+    "yield_curve_2_10",
+    "yield_curve_3m_10",
 ]
 _COL_LIST = ", ".join(_COLUMNS)
 _BIND_LIST = ", ".join(f":{c}" for c in _COLUMNS)
@@ -26,7 +55,8 @@ _BIND_LIST = ", ".join(f":{c}" for c in _COLUMNS)
 
 def create_table():
     with get_connection().begin() as conn:
-        conn.execute(text("""
+        conn.execute(
+            text("""
             CREATE TABLE IF NOT EXISTS macro (
                 date                DATE PRIMARY KEY,
 
@@ -103,7 +133,8 @@ def create_table():
                 yield_curve_2_10    DOUBLE PRECISION,
                 yield_curve_3m_10   DOUBLE PRECISION
             );
-        """))
+        """)
+        )
 
 
 def drop_table():
@@ -114,10 +145,14 @@ def drop_table():
 def insert(df: pd.DataFrame):
     if df.empty:
         return
-    records = df[_COLUMNS].where(pd.notnull(df[_COLUMNS]), None).to_dict(orient="records")
+    records = (
+        df[_COLUMNS].where(pd.notnull(df[_COLUMNS]), None).to_dict(orient="records")
+    )
     with get_connection().begin() as conn:
         conn.execute(
-            text(f"INSERT INTO macro ({_COL_LIST}) VALUES ({_BIND_LIST}) ON CONFLICT DO NOTHING"),
+            text(
+                f"INSERT INTO macro ({_COL_LIST}) VALUES ({_BIND_LIST}) ON CONFLICT DO NOTHING"
+            ),
             records,
         )
 

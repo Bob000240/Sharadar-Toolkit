@@ -2,14 +2,23 @@ from database.db_connection import get_connection
 import pandas as pd
 from sqlalchemy import text
 
-_COLUMNS = ["ticker", "investorname", "calendardate", "value", "units", "price", "securitytype"]
+_COLUMNS = [
+    "ticker",
+    "investorname",
+    "calendardate",
+    "value",
+    "units",
+    "price",
+    "securitytype",
+]
 _COL_LIST = ", ".join(_COLUMNS)
 _BIND_LIST = ", ".join(f":{c}" for c in _COLUMNS)
 
 
 def create_table():
     with get_connection().begin() as conn:
-        conn.execute(text("""
+        conn.execute(
+            text("""
             CREATE TABLE IF NOT EXISTS institutional_holdings (
                 ticker          TEXT,
                 investorname    TEXT,
@@ -24,7 +33,8 @@ def create_table():
             );
             CREATE INDEX IF NOT EXISTS idx_institutional_ticker ON institutional_holdings (ticker);
             CREATE INDEX IF NOT EXISTS idx_institutional_date ON institutional_holdings (calendardate);
-        """))
+        """)
+        )
 
 
 def drop_table():
@@ -35,11 +45,15 @@ def drop_table():
 def insert(df: pd.DataFrame):
     if df.empty:
         return
-    records = df[_COLUMNS].where(pd.notnull(df[_COLUMNS]), None).to_dict(orient="records")
+    records = (
+        df[_COLUMNS].where(pd.notnull(df[_COLUMNS]), None).to_dict(orient="records")
+    )
     records = [{k: None if v is pd.NaT else v for k, v in r.items()} for r in records]
     with get_connection().begin() as conn:
         conn.execute(
-            text(f"INSERT INTO institutional_holdings ({_COL_LIST}) VALUES ({_BIND_LIST}) ON CONFLICT DO NOTHING"),
+            text(
+                f"INSERT INTO institutional_holdings ({_COL_LIST}) VALUES ({_BIND_LIST}) ON CONFLICT DO NOTHING"
+            ),
             records,
         )
 

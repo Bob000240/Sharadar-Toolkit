@@ -2,14 +2,26 @@ from database.db_connection import get_connection
 import pandas as pd
 from sqlalchemy import text
 
-_COLUMNS = ["ticker", "date", "open", "high", "low", "close", "volume", "closeadj", "closeunadj", "lastupdated"]
+_COLUMNS = [
+    "ticker",
+    "date",
+    "open",
+    "high",
+    "low",
+    "close",
+    "volume",
+    "closeadj",
+    "closeunadj",
+    "lastupdated",
+]
 _COL_LIST = ", ".join(_COLUMNS)
 _BIND_LIST = ", ".join(f":{c}" for c in _COLUMNS)
 
 
 def create_table():
     with get_connection().begin() as conn:
-        conn.execute(text("""
+        conn.execute(
+            text("""
             CREATE TABLE IF NOT EXISTS equity_prices (
                 ticker          TEXT            NOT NULL,
                 date            DATE            NOT NULL,
@@ -24,7 +36,8 @@ def create_table():
                 PRIMARY KEY (ticker, date)
             );
             CREATE INDEX IF NOT EXISTS idx_equity_ticker ON equity_prices (ticker);
-        """))
+        """)
+        )
 
 
 def drop_table():
@@ -35,10 +48,14 @@ def drop_table():
 def insert(df: pd.DataFrame):
     if df.empty:
         return
-    records = df[_COLUMNS].where(pd.notnull(df[_COLUMNS]), None).to_dict(orient="records")
+    records = (
+        df[_COLUMNS].where(pd.notnull(df[_COLUMNS]), None).to_dict(orient="records")
+    )
     with get_connection().begin() as conn:
         conn.execute(
-            text(f"INSERT INTO equity_prices ({_COL_LIST}) VALUES ({_BIND_LIST}) ON CONFLICT DO NOTHING"),
+            text(
+                f"INSERT INTO equity_prices ({_COL_LIST}) VALUES ({_BIND_LIST}) ON CONFLICT DO NOTHING"
+            ),
             records,
         )
 

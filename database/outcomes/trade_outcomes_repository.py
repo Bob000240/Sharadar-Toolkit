@@ -2,6 +2,7 @@
 Realized outcomes for accepted trades.
 Written back after each position is closed; feeds the eval harness.
 """
+
 from __future__ import annotations
 from datetime import date
 from sqlalchemy import text
@@ -112,9 +113,12 @@ def get_outcomes_by_profile(
         ORDER BY exit_date DESC
     """)
     with get_connection().connect() as conn:
-        return [dict(r._mapping) for r in conn.execute(
-            sql, {"pid": profile_id, "start": start_date, "end": end_date}
-        )]
+        return [
+            dict(r._mapping)
+            for r in conn.execute(
+                sql, {"pid": profile_id, "start": start_date, "end": end_date}
+            )
+        ]
 
 
 def get_profile_summary(profile_id: int) -> dict:

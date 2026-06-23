@@ -3,8 +3,10 @@ Initial full data load. Run once after setup_db.py.
 
     uv run python -m set_up.load_data
 """
+
 import sys
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import pandas as pd
@@ -36,12 +38,14 @@ def load_tickers(sh: SharadarData):
     print(f"  {len(df):,} rows")
 
 
-def _batched(sh_fn, repo_insert, label: str, symbols: list = None, batch_size: int = 50, **kwargs):
+def _batched(
+    sh_fn, repo_insert, label: str, symbols: list = None, batch_size: int = 50, **kwargs
+):
     symbols = symbols or STOCK_SYMBOLS
     total = 0
     n_batches = -(-len(symbols) // batch_size)
     for i in range(0, len(symbols), batch_size):
-        batch = symbols[i:i + batch_size]
+        batch = symbols[i : i + batch_size]
         df = sh_fn(tickers=batch, **kwargs)
         if not df.empty:
             repo_insert(df)
@@ -52,21 +56,32 @@ def _batched(sh_fn, repo_insert, label: str, symbols: list = None, batch_size: i
 
 def load_equity_prices(sh: SharadarData):
     print("Loading equity prices (SEP)...")
-    _batched(sh.equity_prices, equity_repo.insert, "SEP",
-             start_date=START_DATE, end_date=END_DATE)
+    _batched(
+        sh.equity_prices,
+        equity_repo.insert,
+        "SEP",
+        start_date=START_DATE,
+        end_date=END_DATE,
+    )
 
 
 def load_fund_prices(sh: SharadarData):
     print("Loading fund prices (SFP)...")
-    _batched(sh.fund_prices, fund_repo.insert, "SFP",
-             symbols=BENCHMARK_SYMBOLS, start_date=START_DATE, end_date=END_DATE)
+    _batched(
+        sh.fund_prices,
+        fund_repo.insert,
+        "SFP",
+        symbols=BENCHMARK_SYMBOLS,
+        start_date=START_DATE,
+        end_date=END_DATE,
+    )
 
 
 def load_indicators():
     print("Computing indicators from equity prices...")
     total = 0
     for i in range(0, len(STOCK_SYMBOLS), 50):
-        batch = STOCK_SYMBOLS[i:i + 50]
+        batch = STOCK_SYMBOLS[i : i + 50]
         df = equity_repo.get(tickers=batch, start_date=START_DATE)
         if df.empty:
             continue
@@ -77,21 +92,34 @@ def load_indicators():
         ind_df = pd.concat(parts, ignore_index=True)
         indicators_repo.insert(ind_df)
         total += len(ind_df)
-        print(f"  batch {i // 50 + 1}/{-(-len(STOCK_SYMBOLS) // 50)}: {len(ind_df):,} rows")
+        print(
+            f"  batch {i // 50 + 1}/{-(-len(STOCK_SYMBOLS) // 50)}: {len(ind_df):,} rows"
+        )
     print(f"  total: {total:,} rows")
 
 
 def load_fundamentals(sh: SharadarData):
     print("Loading fundamentals (SF1)...")
     for dim in ("ARY", "ARQ", "ART"):
-        _batched(sh.fundamentals, fundamentals_repo.insert, dim,
-                 dimension=dim, start_date=START_DATE, end_date=END_DATE)
+        _batched(
+            sh.fundamentals,
+            fundamentals_repo.insert,
+            dim,
+            dimension=dim,
+            start_date=START_DATE,
+            end_date=END_DATE,
+        )
 
 
 def load_insider(sh: SharadarData):
     print("Loading insider transactions (SF2)...")
-    _batched(sh.insider_transactions, insider_repo.insert, "SF2",
-             start_date=START_DATE, end_date=END_DATE)
+    _batched(
+        sh.insider_transactions,
+        insider_repo.insert,
+        "SF2",
+        start_date=START_DATE,
+        end_date=END_DATE,
+    )
 
 
 def load_institutional(sh: SharadarData):
@@ -99,14 +127,20 @@ def load_institutional(sh: SharadarData):
     years = pd.date_range(START_DATE, END_DATE, freq="YS")
     boundaries = [d.strftime("%Y-%m-%d") for d in years] + [END_DATE]
     for i in range(len(boundaries) - 1):
-        _batched(sh.institutional_holdings, institutional_repo.insert, f"SF3 {boundaries[i][:4]}",
-                 start_date=boundaries[i], end_date=boundaries[i + 1])
+        _batched(
+            sh.institutional_holdings,
+            institutional_repo.insert,
+            f"SF3 {boundaries[i][:4]}",
+            start_date=boundaries[i],
+            end_date=boundaries[i + 1],
+        )
 
 
 def load_events(sh: SharadarData):
     print("Loading events (EVENTS)...")
-    _batched(sh.events, event_repo.insert, "EVENTS",
-             start_date=START_DATE, end_date=END_DATE)
+    _batched(
+        sh.events, event_repo.insert, "EVENTS", start_date=START_DATE, end_date=END_DATE
+    )
 
 
 def load_macro():

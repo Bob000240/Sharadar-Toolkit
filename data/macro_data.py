@@ -8,57 +8,57 @@ load_dotenv()
 # FRED series ID -> column name
 SERIES = {
     # --- Yields ---
-    "DGS1MO":           "yield_1m",
-    "DGS3MO":           "yield_3m",
-    "DGS6MO":           "yield_6m",
-    "DGS1":             "yield_1y",
-    "DGS2":             "yield_2y",
-    "DGS5":             "yield_5y",
-    "DGS10":            "yield_10y",
-    "DGS20":            "yield_20y",
-    "DGS30":            "yield_30y",
+    "DGS1MO": "yield_1m",
+    "DGS3MO": "yield_3m",
+    "DGS6MO": "yield_6m",
+    "DGS1": "yield_1y",
+    "DGS2": "yield_2y",
+    "DGS5": "yield_5y",
+    "DGS10": "yield_10y",
+    "DGS20": "yield_20y",
+    "DGS30": "yield_30y",
     # --- Real yields (TIPS) ---
-    "DFII5":            "real_yield_5y",
-    "DFII10":           "real_yield_10y",
-    "DFII20":           "real_yield_20y",
+    "DFII5": "real_yield_5y",
+    "DFII10": "real_yield_10y",
+    "DFII20": "real_yield_20y",
     # --- Breakeven inflation ---
-    "T5YIE":            "breakeven_5y",
-    "T10YIE":           "breakeven_10y",
+    "T5YIE": "breakeven_5y",
+    "T10YIE": "breakeven_10y",
     # --- Policy rates ---
-    "FEDFUNDS":         "fed_funds_rate",
-    "SOFR":             "sofr",
+    "FEDFUNDS": "fed_funds_rate",
+    "SOFR": "sofr",
     # --- Credit spreads ---
-    "BAMLH0A0HYM2":     "spread_hy",
-    "BAMLC0A0CM":       "spread_ig",
-    "BAMLH0A0HYM2EY":   "yield_hy",
-    "BAMLC0A0CMEY":     "yield_ig",
-    "TEDRATE":          "ted_spread",
+    "BAMLH0A0HYM2": "spread_hy",
+    "BAMLC0A0CM": "spread_ig",
+    "BAMLH0A0HYM2EY": "yield_hy",
+    "BAMLC0A0CMEY": "yield_ig",
+    "TEDRATE": "ted_spread",
     # --- Inflation ---
-    "CPIAUCSL":         "cpi",
-    "CPILFESL":         "cpi_core",
-    "PCEPI":            "pce",
-    "PCEPILFE":         "pce_core",
+    "CPIAUCSL": "cpi",
+    "CPILFESL": "cpi_core",
+    "PCEPI": "pce",
+    "PCEPILFE": "pce_core",
     # --- Labor ---
-    "UNRATE":           "unemployment_rate",
-    "ICSA":             "jobless_claims",
-    "PAYEMS":           "nonfarm_payrolls",
+    "UNRATE": "unemployment_rate",
+    "ICSA": "jobless_claims",
+    "PAYEMS": "nonfarm_payrolls",
     # --- Activity ---
-    "INDPRO":           "industrial_production",
-    "RETAILSMNSA":      "retail_sales",
-    "GDP":              "gdp",
+    "INDPRO": "industrial_production",
+    "RETAILSMNSA": "retail_sales",
+    "GDP": "gdp",
     # --- Money supply ---
-    "M2SL":             "m2",
+    "M2SL": "m2",
     # --- Housing ---
-    "HOUST":            "housing_starts",
-    "CSUSHPISA":        "case_shiller_hpi",
+    "HOUST": "housing_starts",
+    "CSUSHPISA": "case_shiller_hpi",
     # --- Commodities ---
-    "DCOILWTICO":       "oil_wti",
+    "DCOILWTICO": "oil_wti",
     # --- Dollar ---
-    "DTWEXBGS":         "dxy",
-    "DEXUSEU":          "eurusd",
-    "DEXJPUS":          "usdjpy",
+    "DTWEXBGS": "dxy",
+    "DEXUSEU": "eurusd",
+    "DEXJPUS": "usdjpy",
     # --- Volatility ---
-    "VIXCLS":           "vix",
+    "VIXCLS": "vix",
 }
 
 
@@ -71,7 +71,9 @@ class MacroData:
 
     def _fetch(self, series_id: str, start: str, end: str) -> pd.Series:
         try:
-            s = self._fred.get_series(series_id, observation_start=start, observation_end=end)
+            s = self._fred.get_series(
+                series_id, observation_start=start, observation_end=end
+            )
             return s.reindex(pd.date_range(start, end, freq="D")).ffill()
         except Exception as e:
             print(f"Warning: could not fetch {series_id}: {e}")
@@ -95,6 +97,7 @@ class MacroData:
         df = df.reset_index()
         df = df.dropna(subset=["yield_10y", "vix"])
         return df
+
 
 if __name__ == "__main__":
     md = MacroData()

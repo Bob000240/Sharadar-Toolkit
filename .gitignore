@@ -19,3 +19,7 @@ __pycache__/
 # Testing
 .pytest_cache/
 tests/
+
+SHARADAR_KEYS.csv
+PROJECT_CONCEPTS.md
+PROJECT_IMPLEMENTATION.md

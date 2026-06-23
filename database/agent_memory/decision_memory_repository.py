@@ -2,6 +2,7 @@
 Agent verdicts, tool calls, evidence, and selected trade plans.
 Includes a pgvector column for numeric feature-vector similarity search.
 """
+
 from __future__ import annotations
 import json
 from datetime import date
@@ -151,7 +152,9 @@ def get_resolved_decisions(
         return [dict(r._mapping) for r in conn.execute(sql, params)]
 
 
-def search_similar(vector: list[float], before_date: date, limit: int = 10) -> list[dict]:
+def search_similar(
+    vector: list[float], before_date: date, limit: int = 10
+) -> list[dict]:
     """Cosine similarity search over feature vectors (requires pgvector)."""
     sql = text("""
         SELECT *, 1 - (feature_vector <=> :vec::vector) AS similarity
@@ -163,6 +166,9 @@ def search_similar(vector: list[float], before_date: date, limit: int = 10) -> l
         LIMIT :lim
     """)
     with get_connection().connect() as conn:
-        return [dict(r._mapping) for r in conn.execute(
-            sql, {"vec": str(vector), "d": before_date, "lim": limit}
-        )]
+        return [
+            dict(r._mapping)
+            for r in conn.execute(
+                sql, {"vec": str(vector), "d": before_date, "lim": limit}
+            )
+        ]

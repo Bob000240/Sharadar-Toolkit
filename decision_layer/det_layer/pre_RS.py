@@ -22,19 +22,28 @@ _BENCHMARK = "SPY"
 _ETFS = [s for s in BENCHMARK_SYMBOLS if s != "SPY"]
 _STRATEGY = "Relative Strength Momentum"
 
+
 class RSMomentumAgent(SignalAgent):
     def __init__(self, analysis_model: str = REMOTE_MODEL):
         super().__init__(analysis_model)
         self.signal_day = pd.Timestamp.today()
-        self._mom_model = sig_mom.MomentumFactorsModel(self.signal_day, STOCK_SYMBOLS, _BENCHMARK, _ETFS)
+        self._mom_model = sig_mom.MomentumFactorsModel(
+            self.signal_day, STOCK_SYMBOLS, _BENCHMARK, _ETFS
+        )
         self.stock_data = self._mom_model.stock_data.copy()
         self.analysis_model = analysis_model
-        self.stock_data["slope_x_r2"] = self.stock_data["trend_slope_60d"] * self.stock_data["r_squared_60d"]
-        self.stock_data["momentum_accel_5_20"] = self.stock_data["return_5d"] - self.stock_data["return_20d"]
-        self.stock_data["price_vs_20d_high"] = self.stock_data["drawdown_from_recent_high"]
-        self.stock_data["_cs_return_12_1"] = (
-            (1 + self.stock_data["return_252d"]) / (1 + self.stock_data["return_20d"]) - 1
+        self.stock_data["slope_x_r2"] = (
+            self.stock_data["trend_slope_60d"] * self.stock_data["r_squared_60d"]
         )
+        self.stock_data["momentum_accel_5_20"] = (
+            self.stock_data["return_5d"] - self.stock_data["return_20d"]
+        )
+        self.stock_data["price_vs_20d_high"] = self.stock_data[
+            "drawdown_from_recent_high"
+        ]
+        self.stock_data["_cs_return_12_1"] = (1 + self.stock_data["return_252d"]) / (
+            1 + self.stock_data["return_20d"]
+        ) - 1
         self.stock_data["_cs_rank"] = self.stock_data["_cs_return_12_1"].rank(pct=True)
         self.strategy = _STRATEGY
         self.system_prompt = _SYSTEM_PROMPT
@@ -53,33 +62,27 @@ class RSMomentumAgent(SignalAgent):
 
         # Gate 1: Short-term RS
         rs_pass = (
-            (df["return_20d_percentile"] > min_rs_percentile) &
-            (df["excess_return_20d"] > 0) &
-            (df["sector_relative_20d"] > 0)
+            (df["return_20d_percentile"] > min_rs_percentile)
+            & (df["excess_return_20d"] > 0)
+            & (df["sector_relative_20d"] > 0)
         )
 
         # Gate 2: Trend health
         trend_pass = (
-            df["above_sma_200"] &
-            df["above_sma_50"] &
-            (df["r_squared_60d"] > min_r_squared) &
-            (df["slope_x_r2"] > 0)
+            df["above_sma_200"]
+            & df["above_sma_50"]
+            & (df["r_squared_60d"] > min_r_squared)
+            & (df["slope_x_r2"] > 0)
         )
 
         # Gate 3: Entry signal (OR logic)
-        breakout_pass = (
-            (df["price_vs_20d_high"] > -0.03) &
-            (df["volume_ratio"] > 1.5)
-        )
+        breakout_pass = (df["price_vs_20d_high"] > -0.03) & (df["volume_ratio"] > 1.5)
         pullback_pass = (
-            (df["pct_from_sma_20"] > -0.05) &
-            (df["pct_from_sma_20"] < 0.03) &
-            (df["consolidation_tightness"] < 0.7)
+            (df["pct_from_sma_20"] > -0.05)
+            & (df["pct_from_sma_20"] < 0.03)
+            & (df["consolidation_tightness"] < 0.7)
         )
-        crossover_pass = (
-            (df["macd_hist"] > 0) &
-            (df["momentum_accel_5_20"] > 0)
-        )
+        crossover_pass = (df["macd_hist"] > 0) & (df["momentum_accel_5_20"] > 0)
         entry_pass = breakout_pass | pullback_pass | crossover_pass
 
         passed = df[cs_pass & rs_pass & trend_pass & entry_pass]
@@ -93,7 +96,11 @@ class RSMomentumAgent(SignalAgent):
         modes = []
         if row["price_vs_20d_high"] > -0.03 and row["volume_ratio"] > 1.5:
             modes.append("breakout")
-        if row["pct_from_sma_20"] > -0.05 and row["pct_from_sma_20"] < 0.03 and row["consolidation_tightness"] < 0.7:
+        if (
+            row["pct_from_sma_20"] > -0.05
+            and row["pct_from_sma_20"] < 0.03
+            and row["consolidation_tightness"] < 0.7
+        ):
             modes.append("pullback")
         if row["macd_hist"] > 0 and row["momentum_accel_5_20"] > 0:
             modes.append("crossover")
@@ -107,14 +114,16 @@ class RSMomentumAgent(SignalAgent):
 
         modes = self._detect_entry_modes(symbol)
         primary_mode = modes[0] if modes else "breakout"
-        max_hold_days = {"breakout": 20, "pullback": 10, "crossover": 15}.get(primary_mode, 20)
+        max_hold_days = {"breakout": 20, "pullback": 10, "crossover": 15}.get(
+            primary_mode, 20
+        )
 
         return {
-            "stop_price":    round(price - stop_dist, 2),
-            "stop_pct":      round(-stop_dist / price * 100, 2),
-            "target_price":  round(price + 3 * stop_dist, 2),
-            "target_pct":    round(3 * stop_dist / price * 100, 2),
-            "atr":           round(atr, 4),
+            "stop_price": round(price - stop_dist, 2),
+            "stop_pct": round(-stop_dist / price * 100, 2),
+            "target_price": round(price + 3 * stop_dist, 2),
+            "target_pct": round(3 * stop_dist / price * 100, 2),
+            "atr": round(atr, 4),
             "max_hold_days": max_hold_days,
         }
 

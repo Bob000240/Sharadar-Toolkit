@@ -33,34 +33,36 @@ class MarketData:
     ) -> pd.DataFrame:
         symbols = [symbols] if isinstance(symbols, str) else symbols
         start_ms = int(pd.Timestamp(start_date).timestamp() * 1000)
-        end_ms   = int(pd.Timestamp(end_date).timestamp()   * 1000)
+        end_ms = int(pd.Timestamp(end_date).timestamp() * 1000)
 
         data_list = []
         for sym in symbols:
             r = requests.get(
                 f"{_MARKET_BASE}/pricehistory",
                 params={
-                    "symbol":        sym,
-                    "periodType":    "year",
+                    "symbol": sym,
+                    "periodType": "year",
                     "frequencyType": "daily",
-                    "frequency":     1,
-                    "startDate":     start_ms,
-                    "endDate":       end_ms,
+                    "frequency": 1,
+                    "startDate": start_ms,
+                    "endDate": end_ms,
                     "needExtendedHoursData": False,
                 },
                 headers=self._headers(),
             )
             r.raise_for_status()
             for candle in r.json().get("candles", []):
-                data_list.append({
-                    "symbol": sym,
-                    "date":   pd.Timestamp(candle["datetime"], unit="ms").date(),
-                    "open":   candle["open"],
-                    "high":   candle["high"],
-                    "low":    candle["low"],
-                    "close":  candle["close"],
-                    "volume": candle["volume"],
-                })
+                data_list.append(
+                    {
+                        "symbol": sym,
+                        "date": pd.Timestamp(candle["datetime"], unit="ms").date(),
+                        "open": candle["open"],
+                        "high": candle["high"],
+                        "low": candle["low"],
+                        "close": candle["close"],
+                        "volume": candle["volume"],
+                    }
+                )
 
         self.ohlcv = pd.DataFrame(data_list)
         if not self.ohlcv.empty:
@@ -90,14 +92,16 @@ class MarketData:
             q = data.get(sym, {}).get("quote")
             if not q:
                 continue
-            rows.append({
-                "symbol": sym,
-                "open":   float(q.get("openPrice",  0)),
-                "high":   float(q.get("highPrice",  0)),
-                "low":    float(q.get("lowPrice",   0)),
-                "close":  float(q.get("lastPrice",  0)),
-                "volume": float(q.get("totalVolume", 0)),
-            })
+            rows.append(
+                {
+                    "symbol": sym,
+                    "open": float(q.get("openPrice", 0)),
+                    "high": float(q.get("highPrice", 0)),
+                    "low": float(q.get("lowPrice", 0)),
+                    "close": float(q.get("lastPrice", 0)),
+                    "volume": float(q.get("totalVolume", 0)),
+                }
+            )
 
         if not rows:
             return pd.DataFrame()

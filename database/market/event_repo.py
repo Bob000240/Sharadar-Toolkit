@@ -9,7 +9,8 @@ _BIND_LIST = ", ".join(f":{c}" for c in _COLUMNS)
 
 def create_table():
     with get_connection().begin() as conn:
-        conn.execute(text("""
+        conn.execute(
+            text("""
             CREATE TABLE IF NOT EXISTS events (
                 ticker      TEXT NOT NULL,
                 date        DATE NOT NULL,
@@ -17,7 +18,8 @@ def create_table():
                 PRIMARY KEY (ticker, date)
             );
             CREATE INDEX IF NOT EXISTS idx_events_date ON events (date);
-        """))
+        """)
+        )
 
 
 def drop_table():
@@ -28,14 +30,18 @@ def drop_table():
 def insert(df: pd.DataFrame):
     if df.empty:
         return
-    records = df[_COLUMNS].where(pd.notnull(df[_COLUMNS]), None).to_dict(orient="records")
+    records = (
+        df[_COLUMNS].where(pd.notnull(df[_COLUMNS]), None).to_dict(orient="records")
+    )
     records = [{k: None if v is pd.NaT else v for k, v in r.items()} for r in records]
     with get_connection().begin() as conn:
         conn.execute(
-            text(f"INSERT INTO events ({_COL_LIST}) VALUES ({_BIND_LIST}) ON CONFLICT DO NOTHING"),
+            text(
+                f"INSERT INTO events ({_COL_LIST}) VALUES ({_BIND_LIST}) ON CONFLICT DO NOTHING"
+            ),
             records,
         )
-    
+
 
 def get(
     tickers: str | list[str] | None = None,
@@ -57,7 +63,9 @@ def get(
     return pd.read_sql_query(text(q), get_connection(), params=params)
 
 
-def get_upcoming_earnings(tickers: str | list[str], days_ahead: int = 7) -> pd.DataFrame:
+def get_upcoming_earnings(
+    tickers: str | list[str], days_ahead: int = 7
+) -> pd.DataFrame:
     """Returns tickers with an earnings event (code 22) within the next N days."""
     params = {
         "tickers": [tickers] if isinstance(tickers, str) else tickers,
@@ -68,7 +76,7 @@ def get_upcoming_earnings(tickers: str | list[str], days_ahead: int = 7) -> pd.D
         FROM events
         WHERE ticker = ANY(:tickers)
           AND date BETWEEN CURRENT_DATE AND CURRENT_DATE + :days
-          AND eventcodes LIKE '%22%'
+          AND eventcodes ~ '(^|\|)22(\||$)'
         ORDER BY date
     """)
     return pd.read_sql_query(q, get_connection(), params=params)

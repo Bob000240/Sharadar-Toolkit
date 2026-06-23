@@ -23,8 +23,9 @@ _TRADER_BASE = "https://api.schwabapi.com/trader/v1"
 # Enums and request types — same names as Alpaca's
 # ------------------------------------------------------------------
 
+
 class OrderSide(Enum):
-    BUY  = "BUY"
+    BUY = "BUY"
     SELL = "SELL"
 
 
@@ -35,9 +36,9 @@ class TimeInForce(Enum):
 
 @dataclass
 class MarketOrderRequest:
-    symbol:        str
-    qty:           int
-    side:          OrderSide
+    symbol: str
+    qty: int
+    side: OrderSide
     time_in_force: TimeInForce
 
 
@@ -46,21 +47,22 @@ class MarketOrderRequest:
 # needs zero changes when you swap the client
 # ------------------------------------------------------------------
 
+
 @dataclass
 class _Position:
-    symbol:           str
-    qty:              str   # str so float(p.qty) keeps working
-    market_value:     str
-    avg_entry_price:  str
-    current_price:    str
-    unrealized_pl:    str
-    unrealized_plpc:  str
+    symbol: str
+    qty: str  # str so float(p.qty) keeps working
+    market_value: str
+    avg_entry_price: str
+    current_price: str
+    unrealized_pl: str
+    unrealized_plpc: str
 
 
 @dataclass
 class _Account:
     portfolio_value: str
-    cash:            str
+    cash: str
 
 
 @dataclass
@@ -71,6 +73,7 @@ class _OrderResponse:
 # ------------------------------------------------------------------
 # TradingClient — same name as Alpaca's
 # ------------------------------------------------------------------
+
 
 class TradingClient:
     def __init__(self):
@@ -83,7 +86,9 @@ class TradingClient:
     def _get_account_hash(self) -> str:
         if self._account_hash:
             return self._account_hash
-        r = requests.get(f"{_TRADER_BASE}/accounts/accountNumbers", headers=self._headers())
+        r = requests.get(
+            f"{_TRADER_BASE}/accounts/accountNumbers", headers=self._headers()
+        )
         r.raise_for_status()
         accounts = r.json()
         if not accounts:
@@ -107,23 +112,25 @@ class TradingClient:
 
         positions = []
         for p in raw_positions:
-            symbol      = p["instrument"]["symbol"]
-            qty         = float(p.get("longQuantity", 0)) - float(p.get("shortQuantity", 0))
-            avg_price   = float(p.get("averagePrice", 0))
-            mkt_value   = float(p.get("marketValue", 0))
-            open_pl     = float(p.get("longOpenProfitLoss", 0))
+            symbol = p["instrument"]["symbol"]
+            qty = float(p.get("longQuantity", 0)) - float(p.get("shortQuantity", 0))
+            avg_price = float(p.get("averagePrice", 0))
+            mkt_value = float(p.get("marketValue", 0))
+            open_pl = float(p.get("longOpenProfitLoss", 0))
             current_price = (mkt_value / qty) if qty else avg_price
             open_pl_pct = (open_pl / (avg_price * qty)) if avg_price and qty else 0.0
 
-            positions.append(_Position(
-                symbol          = symbol,
-                qty             = str(qty),
-                market_value    = str(mkt_value),
-                avg_entry_price = str(avg_price),
-                current_price   = str(current_price),
-                unrealized_pl   = str(open_pl),
-                unrealized_plpc = str(open_pl_pct),
-            ))
+            positions.append(
+                _Position(
+                    symbol=symbol,
+                    qty=str(qty),
+                    market_value=str(mkt_value),
+                    avg_entry_price=str(avg_price),
+                    current_price=str(current_price),
+                    unrealized_pl=str(open_pl),
+                    unrealized_plpc=str(open_pl_pct),
+                )
+            )
         return positions
 
     def get_account(self) -> _Account:
@@ -132,23 +139,23 @@ class TradingClient:
         r.raise_for_status()
         balances = r.json().get("securitiesAccount", {}).get("currentBalances", {})
         return _Account(
-            portfolio_value = str(balances.get("liquidationValue", 0)),
-            cash            = str(balances.get("cashBalance", 0)),
+            portfolio_value=str(balances.get("liquidationValue", 0)),
+            cash=str(balances.get("cashBalance", 0)),
         )
 
     def submit_order(self, req: MarketOrderRequest) -> _OrderResponse:
         hash_ = self._get_account_hash()
         payload = {
-            "orderType":          "MARKET",
-            "session":            "NORMAL",
-            "duration":           req.time_in_force.value,
-            "orderStrategyType":  "SINGLE",
+            "orderType": "MARKET",
+            "session": "NORMAL",
+            "duration": req.time_in_force.value,
+            "orderStrategyType": "SINGLE",
             "orderLegCollection": [
                 {
                     "instruction": req.side.value,
-                    "quantity":    req.qty,
-                    "instrument":  {
-                        "symbol":    req.symbol,
+                    "quantity": req.qty,
+                    "instrument": {
+                        "symbol": req.symbol,
                         "assetType": "EQUITY",
                     },
                 }

@@ -2,6 +2,7 @@
 Passing candidate packets emitted by deterministic prefilters.
 One row per (symbol, decision_date, profile_id) combination.
 """
+
 from __future__ import annotations
 import json
 from datetime import date
@@ -128,5 +129,7 @@ def get_candidate(symbol: str, decision_date: date, profile_id: int) -> dict | N
         WHERE symbol = :sym AND decision_date = :d AND profile_id = :pid
     """)
     with get_connection().connect() as conn:
-        row = conn.execute(sql, {"sym": symbol, "d": decision_date, "pid": profile_id}).fetchone()
+        row = conn.execute(
+            sql, {"sym": symbol, "d": decision_date, "pid": profile_id}
+        ).fetchone()
         return dict(row._mapping) if row else None

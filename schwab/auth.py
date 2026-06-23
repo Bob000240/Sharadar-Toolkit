@@ -12,14 +12,14 @@ from dotenv import load_dotenv
 load_dotenv()
 
 _TOKEN_PATH = Path(__file__).parent / "tokens.json"
-_AUTH_URL   = "https://api.schwabapi.com/v1/oauth/authorize"
-_TOKEN_URL  = "https://api.schwabapi.com/v1/oauth/token"
+_AUTH_URL = "https://api.schwabapi.com/v1/oauth/authorize"
+_TOKEN_URL = "https://api.schwabapi.com/v1/oauth/token"
 
 
 class SchwabAuth:
     def __init__(self):
-        self.app_key     = os.getenv("SCHWAB_APP_KEY")
-        self.app_secret  = os.getenv("SCHWAB_APP_SECRET")
+        self.app_key = os.getenv("SCHWAB_APP_KEY")
+        self.app_secret = os.getenv("SCHWAB_APP_SECRET")
         self.callback_url = os.getenv("SCHWAB_CALLBACK_URL", "https://127.0.0.1:8182")
         if not self.app_key or not self.app_secret:
             raise ValueError("SCHWAB_APP_KEY and SCHWAB_APP_SECRET must be set in .env")
@@ -49,8 +49,7 @@ class SchwabAuth:
         """Return a valid access token, auto-refreshing if within 60s of expiry."""
         if not self._tokens:
             raise RuntimeError(
-                "No tokens found. Run the auth flow first:\n"
-                "  python -m schwab.auth"
+                "No tokens found. Run the auth flow first:\n  python -m schwab.auth"
             )
         if time.time() >= self._tokens.get("expires_at", 0) - 60:
             self.refresh()
@@ -65,7 +64,7 @@ class SchwabAuth:
                 "Content-Type": "application/x-www-form-urlencoded",
             },
             data={
-                "grant_type":    "refresh_token",
+                "grant_type": "refresh_token",
                 "refresh_token": self._tokens["refresh_token"],
             },
         )
@@ -131,7 +130,12 @@ class SchwabAuth:
 
             # --- Step 3: SMS code ---
             # Schwab may render the OTP input under different IDs across sessions.
-            otp_selectors = ["#OTPInput", "input[name='OtpCode']", "#smscode", "input[type='tel']"]
+            otp_selectors = [
+                "#OTPInput",
+                "input[name='OtpCode']",
+                "#smscode",
+                "input[type='tel']",
+            ]
             otp_selector = None
             for sel in otp_selectors:
                 try:
@@ -150,7 +154,12 @@ class SchwabAuth:
             sms_code = input("\nSchwab sent you an SMS. Enter the code: ").strip()
             page.fill(otp_selector, sms_code)
 
-            submit_selectors = ["#OTPSubmitBtn", "button[type='submit']", "#btnContinue", "#submit-btn"]
+            submit_selectors = [
+                "#OTPSubmitBtn",
+                "button[type='submit']",
+                "#btnContinue",
+                "#submit-btn",
+            ]
             for sel in submit_selectors:
                 try:
                     page.click(sel, timeout=2000)
@@ -181,8 +190,8 @@ class SchwabAuth:
                 "Content-Type": "application/x-www-form-urlencoded",
             },
             data={
-                "grant_type":   "authorization_code",
-                "code":         code,
+                "grant_type": "authorization_code",
+                "code": code,
                 "redirect_uri": self.callback_url,
             },
         )

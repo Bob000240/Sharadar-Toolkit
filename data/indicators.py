@@ -26,19 +26,24 @@ def _macd(series: pd.Series, fast: int, slow: int, signal: int) -> pd.DataFrame:
     macd_line = ema_fast - ema_slow
     signal_line = _ema(macd_line, signal)
     hist = macd_line - signal_line
-    return pd.DataFrame({
-        f"MACD_{fast}_{slow}_{signal}": macd_line,
-        f"MACDs_{fast}_{slow}_{signal}": signal_line,
-        f"MACDh_{fast}_{slow}_{signal}": hist,
-    })
+    return pd.DataFrame(
+        {
+            f"MACD_{fast}_{slow}_{signal}": macd_line,
+            f"MACDs_{fast}_{slow}_{signal}": signal_line,
+            f"MACDh_{fast}_{slow}_{signal}": hist,
+        }
+    )
 
 
 def _atr(high: pd.Series, low: pd.Series, close: pd.Series, length: int) -> pd.Series:
-    tr = pd.concat([
-        high - low,
-        (high - close.shift()).abs(),
-        (low - close.shift()).abs(),
-    ], axis=1).max(axis=1)
+    tr = pd.concat(
+        [
+            high - low,
+            (high - close.shift()).abs(),
+            (low - close.shift()).abs(),
+        ],
+        axis=1,
+    ).max(axis=1)
     return tr.ewm(com=length - 1, adjust=False).mean()
 
 
@@ -68,7 +73,7 @@ def compute_indicators(df: pd.DataFrame):
     df["ema_21"] = _ema(df["close"], 21)
     seq = pd.Series(range(len(df)), index=df.index, dtype=float)
     cross_flags = (df["ema_9"] > df["ema_21"]).astype(float).diff().abs() > 0
-    df["ema_crossover_days_ago"] = (seq - seq.where(cross_flags).ffill())
+    df["ema_crossover_days_ago"] = seq - seq.where(cross_flags).ffill()
 
     # Relative volume
     df["volume_sma_10"] = _sma(df["volume"], 10)
@@ -126,6 +131,8 @@ def compute_indicators(df: pd.DataFrame):
 
     # Drawdown / breakout from recent high
     df["rolling_20d_high"] = df["close"].rolling(20).max()
-    df["drawdown_from_recent_high"] = (df["close"] - df["rolling_20d_high"]) / df["rolling_20d_high"]
+    df["drawdown_from_recent_high"] = (df["close"] - df["rolling_20d_high"]) / df[
+        "rolling_20d_high"
+    ]
 
     return df.reset_index(drop=True)

@@ -3,8 +3,10 @@ Daily incremental update. Run each market day after close.
 
     uv run python -m set_up.daily_update
 """
+
 import sys
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import pandas as pd
@@ -26,11 +28,13 @@ import database.market.macro_repo as macro_repo
 TODAY = pd.Timestamp.today().strftime("%Y-%m-%d")
 
 
-def _batched(sh_fn, repo_insert, label: str, symbols: list = None, batch_size: int = 50, **kwargs):
+def _batched(
+    sh_fn, repo_insert, label: str, symbols: list = None, batch_size: int = 50, **kwargs
+):
     symbols = symbols or STOCK_SYMBOLS
     total = 0
     for i in range(0, len(symbols), batch_size):
-        batch = symbols[i:i + batch_size]
+        batch = symbols[i : i + batch_size]
         df = sh_fn(tickers=batch, **kwargs)
         if not df.empty:
             repo_insert(df)
@@ -40,16 +44,35 @@ def _batched(sh_fn, repo_insert, label: str, symbols: list = None, batch_size: i
 
 def update_equity_prices(sh: SharadarData):
     latest = equity_repo.get_latest_date()
-    since = str(latest["latest_date"].min() + pd.Timedelta(days=1)) if not latest.empty else "2021-01-01"
-    _batched(sh.equity_prices, equity_repo.insert, "Equity prices",
-             start_date=since, end_date=TODAY)
+    since = (
+        str(latest["latest_date"].min() + pd.Timedelta(days=1))
+        if not latest.empty
+        else "2021-01-01"
+    )
+    _batched(
+        sh.equity_prices,
+        equity_repo.insert,
+        "Equity prices",
+        start_date=since,
+        end_date=TODAY,
+    )
 
 
 def update_fund_prices(sh: SharadarData):
     latest = fund_repo.get_latest_date()
-    since = str(latest["latest_date"].min() + pd.Timedelta(days=1)) if not latest.empty else "2021-01-01"
-    _batched(sh.fund_prices, fund_repo.insert, "Fund prices",
-             symbols=BENCHMARK_SYMBOLS, start_date=since, end_date=TODAY)
+    since = (
+        str(latest["latest_date"].min() + pd.Timedelta(days=1))
+        if not latest.empty
+        else "2021-01-01"
+    )
+    _batched(
+        sh.fund_prices,
+        fund_repo.insert,
+        "Fund prices",
+        symbols=BENCHMARK_SYMBOLS,
+        start_date=since,
+        end_date=TODAY,
+    )
 
 
 def update_indicators():
@@ -61,7 +84,7 @@ def update_indicators():
     lookback = pd.Timestamp(latest_date) - pd.Timedelta(days=400)
     total = 0
     for i in range(0, len(STOCK_SYMBOLS), 50):
-        batch = STOCK_SYMBOLS[i:i + 50]
+        batch = STOCK_SYMBOLS[i : i + 50]
         df = equity_repo.get(tickers=batch, start_date=str(lookback.date()))
         if df.empty:
             continue
@@ -80,20 +103,28 @@ def update_indicators():
 def update_fundamentals(sh: SharadarData):
     since = (pd.Timestamp.today() - pd.Timedelta(days=90)).strftime("%Y-%m-%d")
     for dim in ("ARY", "ARQ", "ART"):
-        _batched(sh.fundamentals, fundamentals_repo.insert, f"Fundamentals {dim}",
-                 dimension=dim, start_date=since)
+        _batched(
+            sh.fundamentals,
+            fundamentals_repo.insert,
+            f"Fundamentals {dim}",
+            dimension=dim,
+            start_date=since,
+        )
 
 
 def update_insider(sh: SharadarData):
     since = (pd.Timestamp.today() - pd.Timedelta(days=14)).strftime("%Y-%m-%d")
-    _batched(sh.insider_transactions, insider_repo.insert, "Insider",
-             start_date=since)
+    _batched(sh.insider_transactions, insider_repo.insert, "Insider", start_date=since)
 
 
 def update_institutional(sh: SharadarData):
     since = (pd.Timestamp.today() - pd.Timedelta(days=120)).strftime("%Y-%m-%d")
-    _batched(sh.institutional_holdings, institutional_repo.insert, "Institutional",
-             start_date=since)
+    _batched(
+        sh.institutional_holdings,
+        institutional_repo.insert,
+        "Institutional",
+        start_date=since,
+    )
 
 
 def update_events(sh: SharadarData):

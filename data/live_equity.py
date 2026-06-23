@@ -62,7 +62,6 @@ class MarketData:
 
         return self.ohlcv
 
-
     def get_live_snapshot(self, symbols: list[str] | str) -> pd.DataFrame:
         """
         Fetches today's in-progress daily bar for each symbol.
@@ -91,14 +90,16 @@ class MarketData:
         rows = []
         for asym, bars in raw.data.items():
             if bars:
-                rows.append({
-                    "symbol": symbol_map.get(asym, asym),
-                    "open":   float(bars[0].open),
-                    "high":   float(max(b.high for b in bars)),
-                    "low":    float(min(b.low for b in bars)),
-                    "close":  float(bars[-1].close),
-                    "volume": float(sum(b.volume for b in bars)),
-                })
+                rows.append(
+                    {
+                        "symbol": symbol_map.get(asym, asym),
+                        "open": float(bars[0].open),
+                        "high": float(max(b.high for b in bars)),
+                        "low": float(min(b.low for b in bars)),
+                        "close": float(bars[-1].close),
+                        "volume": float(sum(b.volume for b in bars)),
+                    }
+                )
 
         if not rows:
             return pd.DataFrame()
