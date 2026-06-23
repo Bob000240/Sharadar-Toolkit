@@ -96,8 +96,11 @@ def load_insider(sh: SharadarData):
 
 def load_institutional(sh: SharadarData):
     print("Loading institutional holdings (SF3)...")
-    _batched(sh.institutional_holdings, institutional_repo.insert, "SF3",
-             start_date=START_DATE, end_date=END_DATE)
+    years = pd.date_range(START_DATE, END_DATE, freq="YS")
+    boundaries = [d.strftime("%Y-%m-%d") for d in years] + [END_DATE]
+    for i in range(len(boundaries) - 1):
+        _batched(sh.institutional_holdings, institutional_repo.insert, f"SF3 {boundaries[i][:4]}",
+                 start_date=boundaries[i], end_date=boundaries[i + 1])
 
 
 def load_events(sh: SharadarData):

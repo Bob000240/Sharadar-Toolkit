@@ -1,10 +1,9 @@
 from database.db_connection import get_connection
-from database.market.db_utils import _insert_ignore
 import numpy as np
 import pandas as pd
 from sqlalchemy import text
 
-INDICATOR_COLUMNS = [
+_COLUMNS = [
     "ticker", "date", "close",
     "return_1d", "return_5d", "return_20d", "return_60d", "return_252d",
     "sma_20", "sma_50", "sma_200",
@@ -19,6 +18,8 @@ INDICATOR_COLUMNS = [
     "rolling_20d_high", "drawdown_from_recent_high", "price_vs_20d_high",
     "momentum_accel_20_60", "momentum_accel_5_20",
 ]
+_COL_LIST = ", ".join(_COLUMNS)
+_BIND_LIST = ", ".join(f":{c}" for c in _COLUMNS)
 
 
 def create_table():
@@ -92,13 +93,13 @@ def drop_table():
 def insert(df: pd.DataFrame):
     if df.empty:
         return
-    missing = sorted(set(INDICATOR_COLUMNS) - set(df.columns))
-    if missing:
-        raise ValueError(f"Missing indicator columns: {missing}")
-    df = df[INDICATOR_COLUMNS].copy()
-    df = df.replace([np.inf, -np.inf], np.nan)
-    df = df.where(pd.notnull(df), None)
-    df.to_sql("indicators", get_connection(), if_exists="append", index=False, method=_insert_ignore)
+    df = df[_COLUMNS].replace([np.inf, -np.inf], np.nan)
+    records = df.where(pd.notnull(df), None).to_dict(orient="records")
+    with get_connection().begin() as conn:
+        conn.execute(
+            text(f"INSERT INTO indicators ({_COL_LIST}) VALUES ({_BIND_LIST}) ON CONFLICT DO NOTHING"),
+            records,
+        )
 
 
 def get(

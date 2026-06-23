@@ -1,7 +1,10 @@
 from database.db_connection import get_connection
-from database.market.db_utils import _insert_ignore
 import pandas as pd
 from sqlalchemy import text
+
+_COLUMNS = ["ticker", "date", "eventcodes"]
+_COL_LIST = ", ".join(_COLUMNS)
+_BIND_LIST = ", ".join(f":{c}" for c in _COLUMNS)
 
 
 def create_table():
@@ -23,7 +26,15 @@ def drop_table():
 
 
 def insert(df: pd.DataFrame):
-    df.to_sql("events", get_connection(), if_exists="append", index=False, method=_insert_ignore)
+    if df.empty:
+        return
+    records = df[_COLUMNS].where(pd.notnull(df[_COLUMNS]), None).to_dict(orient="records")
+    records = [{k: None if v is pd.NaT else v for k, v in r.items()} for r in records]
+    with get_connection().begin() as conn:
+        conn.execute(
+            text(f"INSERT INTO events ({_COL_LIST}) VALUES ({_BIND_LIST}) ON CONFLICT DO NOTHING"),
+            records,
+        )
     
 
 def get(

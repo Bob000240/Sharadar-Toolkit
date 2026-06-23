@@ -19,16 +19,15 @@ def main():
     elif cmd == "load":
         from set_up import load_data
         sh = load_data.SharadarData()
-        load_data.load_tickers(sh)
-        load_data.load_equity_prices(sh)
-        load_data.load_fund_prices(sh)
-        load_data.load_indicators()
-        load_data.load_fundamentals(sh)
-        load_data.load_insider(sh)
-        load_data.load_events(sh)
-        load_data.load_macro()
-
-        # load_data.load_institutional(sh)
+        # load_data.load_tickers(sh)
+        # load_data.load_equity_prices(sh)
+        # load_data.load_fund_prices(sh)
+        # load_data.load_indicators()
+        # load_data.load_fundamentals(sh)
+        # load_data.load_insider(sh)
+        load_data.load_institutional(sh)
+        # load_data.load_events(sh)
+        # load_data.load_macro()
 
     elif cmd == "update":
         from set_up import daily_update

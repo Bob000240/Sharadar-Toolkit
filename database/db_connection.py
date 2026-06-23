@@ -16,7 +16,7 @@ def get_connection():
         dbname = os.getenv("DB_NAME", "quorum_nexus")
         _engine = create_engine(
             f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{dbname}",
-            pool_size=5,
-            max_overflow=10,
+            pool_size=1,
+            max_overflow=5,
         )
     return _engine
