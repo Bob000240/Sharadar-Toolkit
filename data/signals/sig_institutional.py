@@ -27,9 +27,10 @@ class InstitutionalSnapshot:
     closed_positions: int  # institutions that fully exited
 
     def accumulation(self) -> dict[str, bool]:
+        ucp = self.units_change_pct
         return {
-            "units_increasing": self.units_change_pct > 0,
-            "units_growing_fast": self.units_change_pct > 0.05,
+            "units_increasing": not pd.isna(ucp) and ucp > 0,
+            "units_growing_fast": not pd.isna(ucp) and ucp > 0.05,
             "holders_increasing": self.holders_change > 0,
             "new_entrants": self.new_holders > 0,
             "net_opening": self.new_holders > self.closed_positions,
@@ -43,9 +44,11 @@ class InstitutionalSnapshot:
         }
 
     def risk_flags(self) -> dict[str, bool]:
+        ucp = self.units_change_pct
+        vcp = self.value_change_pct
         return {
-            "units_declining": self.units_change_pct < -0.05,
-            "large_value_decline": self.value_change_pct < -0.10,
+            "units_declining": not pd.isna(ucp) and ucp < -0.05,
+            "large_value_decline": not pd.isna(vcp) and vcp < -0.10,
             "holders_fleeing": self.holders_change < -10,
             "mass_exit": self.closed_positions > self.new_holders * 2
             and self.closed_positions > 5,
@@ -96,7 +99,7 @@ class InstitutionalModel:
         _empty = dict(
             quarter_date=None,
             total_holders=0,
-            total_value_m=0.0,
+            total_value_b=0.0,
             total_units=0.0,
             holders_change=0,
             value_change_pct=float("nan"),

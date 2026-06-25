@@ -226,7 +226,8 @@ class FundamentalsModel:
             return result
 
         df["interest_coverage"] = safe_div(df["ebit"], df["intexp"])
-        df["capex_to_ocf"] = safe_div(df["capex"].abs(), df["ncfo"])
+        # Only meaningful when OCF is positive; negative OCF makes ratio negative/misleading
+        df["capex_to_ocf"] = safe_div(df["capex"].abs(), df["ncfo"].where(df["ncfo"] > 0))
         df["rnd_intensity"] = safe_div(df["rnd"], df["revenue"])
         return df
 
@@ -236,12 +237,22 @@ class FundamentalsModel:
         art = self._compute_derived(art)
         growth = self._compute_growth(arq)
         self.data = art.join(growth, how="left")
-        self.data["roe_percentile"] = self.data["roe"].rank(pct=True) * 100
+
+        # Percentiles against full ART universe for cross-sectional validity
+        universe = fundamentals_repo.get_latest(None, "ART", self.signal_day)
+        universe = universe.set_index("ticker")
+        universe = self._compute_derived(universe)
+        for col, field in [
+            ("roe", "roe_percentile"),
+            ("evebitda", "evebitda_percentile"),
+            ("fcf", "fcf_percentile"),
+        ]:
+            ranks = universe[col].rank(pct=True) * 100
+            self.data[field] = ranks.reindex(self.data.index)
+        # revenue_growth_yoy requires ARQ; rank within batch only
         self.data["revenue_growth_percentile"] = (
             self.data["revenue_growth_yoy"].rank(pct=True) * 100
         )
-        self.data["evebitda_percentile"] = self.data["evebitda"].rank(pct=True) * 100
-        self.data["fcf_percentile"] = self.data["fcf"].rank(pct=True) * 100
 
     def get(self, ticker: str, col: str):
         if ticker not in self.data.index:

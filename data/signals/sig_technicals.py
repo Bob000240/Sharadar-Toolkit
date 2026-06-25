@@ -8,7 +8,7 @@ import database.market.indicators_repo as indicators_repo
 import database.market.tickers_repo as tickers_repo
 from data.live_equity import MarketData
 from data.indicators import compute_indicators
-from set_up.config import BENCHMARK_SYMBOLS, ETF_SECTOR_MAP
+from set_up.config import ETF_SECTOR_MAP
 
 
 def _python_scalar(value):
@@ -311,24 +311,12 @@ class TechnicalsModel:
                 for col in fresh.columns:
                     if col in self.stock_data.columns:
                         self.stock_data.at[tkr, col] = fresh.at[tkr, col]
-                self.stock_data.at[tkr, "above_sma_50"] = (
-                    fresh.at[tkr, "close"] > fresh.at[tkr, "sma_50"]
-                )
-                self.stock_data.at[tkr, "above_sma_200"] = (
-                    fresh.at[tkr, "close"] > fresh.at[tkr, "sma_200"]
-                )
         else:
             all_indicators = self._from_db()
             sector_map = tickers_repo.get(tickers=self.stock_tickers)[
                 ["ticker", "sector"]
             ].set_index("ticker")["sector"]
             all_indicators["sector"] = sector_map.reindex(all_indicators.index)
-            all_indicators["above_sma_50"] = (
-                all_indicators["close"] > all_indicators["sma_50"]
-            )
-            all_indicators["above_sma_200"] = (
-                all_indicators["close"] > all_indicators["sma_200"]
-            )
             self.stock_data = all_indicators.loc[self.stock_tickers].copy()
 
             fund_data = self._fund_returns([self.benchmark_ticker] + self.etf_tickers)
@@ -439,7 +427,7 @@ if __name__ == "__main__":
     signal_day = pd.Timestamp("2024-06-30")
     stock_tickers = ["AAPL", "MSFT", "GOOGL"]
     benchmark_ticker = "SPY"
-    etf_tickers = [ticker for ticker in BENCHMARK_SYMBOLS if ticker != benchmark_ticker]
+    etf_tickers = list(ETF_SECTOR_MAP.keys())
 
     model = TechnicalsModel(signal_day, stock_tickers, benchmark_ticker, etf_tickers)
     for ticker in stock_tickers:

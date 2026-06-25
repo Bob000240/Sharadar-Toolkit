@@ -298,17 +298,21 @@ def get(
 
 
 def get_latest(
-    tickers: str | list[str], dimension: str, signal_day: pd.Timestamp
+    tickers: str | list[str] | None, dimension: str, signal_day: pd.Timestamp
 ) -> pd.DataFrame:
     params = {
-        "tickers": [tickers] if isinstance(tickers, str) else tickers,
         "dim": dimension,
         "signal_day": signal_day.date() if hasattr(signal_day, "date") else signal_day,
     }
-    q = text("""
+    ticker_clause = ""
+    if tickers is not None:
+        params["tickers"] = [tickers] if isinstance(tickers, str) else tickers
+        ticker_clause = "AND ticker = ANY(:tickers)"
+    q = text(f"""
         SELECT DISTINCT ON (ticker) *
         FROM fundamentals
-        WHERE ticker = ANY(:tickers)
+        WHERE TRUE
+          {ticker_clause}
           AND dimension = :dim
           AND datekey <= :signal_day
         ORDER BY ticker, datekey DESC

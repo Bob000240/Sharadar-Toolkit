@@ -61,22 +61,3 @@ def get(
         q += " AND date <= :end"
     q += " ORDER BY ticker, date"
     return pd.read_sql_query(text(q), get_connection(), params=params)
-
-
-def get_upcoming_earnings(
-    tickers: str | list[str], days_ahead: int = 7
-) -> pd.DataFrame:
-    """Returns tickers with an earnings event (code 22) within the next N days."""
-    params = {
-        "tickers": [tickers] if isinstance(tickers, str) else tickers,
-        "days": days_ahead,
-    }
-    q = text("""
-        SELECT ticker, date, eventcodes
-        FROM events
-        WHERE ticker = ANY(:tickers)
-          AND date BETWEEN CURRENT_DATE AND CURRENT_DATE + :days
-          AND eventcodes ~ '(^|\|)22(\||$)'
-        ORDER BY date
-    """)
-    return pd.read_sql_query(q, get_connection(), params=params)
