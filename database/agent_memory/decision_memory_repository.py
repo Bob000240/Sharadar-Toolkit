@@ -24,8 +24,8 @@ CREATE TABLE IF NOT EXISTS decision_memory (
     selected_stop_id    VARCHAR(32),
     selected_target_id  VARCHAR(32),
     selected_timeline_id VARCHAR(32),
-    profit_likelihood   NUMERIC(5,4),   -- 0.0–1.0
-    confidence          NUMERIC(5,4),   -- 0.0–1.0
+    profit_likelihood   NUMERIC(5,4),
+    confidence          NUMERIC(5,4),
     rationale           TEXT,
 
     -- Evidence / tool calls

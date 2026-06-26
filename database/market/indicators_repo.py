@@ -114,6 +114,7 @@ def insert(df: pd.DataFrame):
         return
     df = df[_COLUMNS].replace([np.inf, -np.inf], np.nan)
     records = df.where(pd.notnull(df), None).to_dict(orient="records")
+    records = [{k: None if v is pd.NaT else v for k, v in r.items()} for r in records]
     with get_connection().begin() as conn:
         conn.execute(
             text(

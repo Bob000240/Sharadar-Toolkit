@@ -13,18 +13,20 @@ BENCHMARK_SYMBOLS = [
     "XLP",
 ]
 
+# Sector names MUST match the `sector` values stored in the tickers table
+# (Sharadar/Zacks taxonomy), otherwise sector joins/lookups silently produce NaN.
 ETF_SECTOR_MAP = {
     "XLK": "Technology",
-    "XLY": "Consumer Discretionary",
+    "XLY": "Consumer Cyclical",
     "XLC": "Communication Services",
-    "XLF": "Financials",
-    "XLV": "Health Care",
+    "XLF": "Financial Services",
+    "XLV": "Healthcare",
     "XLI": "Industrials",
     "XLE": "Energy",
-    "XLB": "Materials",
+    "XLB": "Basic Materials",
     "XLRE": "Real Estate",
     "XLU": "Utilities",
-    "XLP": "Consumer Staples",
+    "XLP": "Consumer Defensive",
 }
 
 SP500_SYMBOLS = [

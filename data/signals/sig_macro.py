@@ -119,9 +119,9 @@ class MacroModel:
     def __init__(self, signal_day: pd.Timestamp):
         self.signal_day = signal_day
         self._row: pd.Series | None = None
-        self._load_data()
+        self.load_data()
 
-    def _load_data(self) -> None:
+    def load_data(self) -> None:
         df = macro_repo.get(end_date=str(self.signal_day.date()))
         if df.empty:
             raise ValueError(f"No macro data as of {self.signal_day.date()}")

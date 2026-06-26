@@ -1,3 +1,15 @@
+"""
+QuorumNexus pipeline entrypoint.
+
+Usage:
+    uv run python -m set_up.main <command>
+
+Commands:
+    setup    Enable pgvector and create all tables
+    load     Run the initial full data load
+    update   Run the daily incremental update
+"""
+
 import sys
 from pathlib import Path
 

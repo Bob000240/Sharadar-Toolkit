@@ -76,9 +76,9 @@ class InstitutionalModel:
         self.signal_day = signal_day
         self.tickers = tickers
         self.data: dict[str, pd.DataFrame] = {}
-        self._load_data()
+        self.load_data()
 
-    def _load_data(self) -> None:
+    def load_data(self) -> None:
         # 45-day filing delay: latest visible quarter end is signal_day - 45d
         cutoff = self.signal_day - pd.Timedelta(days=_FILING_DELAY_DAYS)
         # Fetch ~2 quarters of history to compute QoQ changes

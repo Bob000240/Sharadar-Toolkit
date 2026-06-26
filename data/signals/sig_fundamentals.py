@@ -10,6 +10,12 @@ def _python_scalar(value):
     return value
 
 
+def _safe_growth(now, then) -> float:
+    if pd.isna(now) or pd.isna(then) or then == 0:
+        return float("nan")
+    return (now - then) / abs(then)
+
+
 @dataclass
 class FundamentalsSnapshot:
     ticker: str
@@ -163,7 +169,7 @@ class FundamentalsModel:
         self.signal_day = signal_day
         self.tickers = tickers
         self.data = None
-        self._load_data()
+        self.load_data()
 
     def _from_db(self) -> tuple[pd.DataFrame, pd.DataFrame]:
         art = fundamentals_repo.get_latest(self.tickers, "ART", self.signal_day)
@@ -195,25 +201,20 @@ class FundamentalsModel:
             latest = grp.iloc[-1]
             prior = grp.iloc[-5]
 
-            def safe_growth(now, then):
-                if pd.isna(now) or pd.isna(then) or then == 0:
-                    return float("nan")
-                return (now - then) / abs(then)
-
             rows.append(
                 {
                     "ticker": tkr,
-                    "revenue_growth_yoy": safe_growth(
+                    "revenue_growth_yoy": _safe_growth(
                         latest["revenue"], prior["revenue"]
                     ),
-                    "eps_growth_yoy": safe_growth(latest["eps"], prior["eps"]),
+                    "eps_growth_yoy": _safe_growth(latest["eps"], prior["eps"]),
                     "grossmargin_change_yoy": (
                         latest["grossmargin"] - prior["grossmargin"]
                         if pd.notna(latest["grossmargin"])
                         and pd.notna(prior["grossmargin"])
                         else float("nan")
                     ),
-                    "opinc_growth_yoy": safe_growth(latest["opinc"], prior["opinc"]),
+                    "opinc_growth_yoy": _safe_growth(latest["opinc"], prior["opinc"]),
                 }
             )
         return pd.DataFrame(rows).set_index("ticker")
@@ -231,7 +232,7 @@ class FundamentalsModel:
         df["rnd_intensity"] = safe_div(df["rnd"], df["revenue"])
         return df
 
-    def _load_data(self) -> None:
+    def load_data(self) -> None:
         art, arq = self._from_db()
         art = art.set_index("ticker")
         art = self._compute_derived(art)

@@ -119,7 +119,6 @@ def create_table():
 
                 -- Commodities
                 oil_wti             DOUBLE PRECISION,
-                gold                DOUBLE PRECISION,
 
                 -- Dollar
                 dxy                 DOUBLE PRECISION,
@@ -148,6 +147,7 @@ def insert(df: pd.DataFrame):
     records = (
         df[_COLUMNS].where(pd.notnull(df[_COLUMNS]), None).to_dict(orient="records")
     )
+    records = [{k: None if v is pd.NaT else v for k, v in r.items()} for r in records]
     with get_connection().begin() as conn:
         conn.execute(
             text(

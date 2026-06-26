@@ -65,7 +65,7 @@ class MarketData:
     def get_live_snapshot(self, symbols: list[str] | str) -> pd.DataFrame:
         """
         Fetches today's in-progress daily bar for each symbol.
-        Returns a DataFrame indexed by symbol with columns: price, volume.
+        Returns a DataFrame indexed by symbol with columns: open, high, low, close, volume.
         Falls back to empty DataFrame if market is closed or data unavailable.
         """
         symbols = [symbols] if isinstance(symbols, str) else symbols

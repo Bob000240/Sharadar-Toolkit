@@ -27,7 +27,6 @@ def create_table():
                 units           DOUBLE PRECISION,
                 price           DOUBLE PRECISION,
                 securitytype    TEXT,
-                infoaccuracy    TEXT,
                 lastupdated     DATE,
                 PRIMARY KEY (ticker, investorname, calendardate, securitytype)
             );

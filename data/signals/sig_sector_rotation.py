@@ -7,16 +7,17 @@ from set_up.config import ETF_SECTOR_MAP
 
 _ETF_TICKERS = list(ETF_SECTOR_MAP.keys())
 
+# Sector names follow the Sharadar/Zacks taxonomy (must match ETF_SECTOR_MAP values).
 _CYCLICAL_SECTORS = {
     "Technology",
-    "Consumer Discretionary",
+    "Consumer Cyclical",
     "Communication Services",
-    "Financials",
+    "Financial Services",
     "Industrials",
     "Energy",
-    "Materials",
+    "Basic Materials",
 }
-_DEFENSIVE_SECTORS = {"Consumer Staples", "Utilities", "Health Care", "Real Estate"}
+_DEFENSIVE_SECTORS = {"Consumer Defensive", "Utilities", "Healthcare", "Real Estate"}
 
 
 @dataclass
@@ -77,9 +78,9 @@ class SectorRotationModel:
         self._bottom_3: list[str] = []
         self._cyclicals_leading = False
         self._spread = 0.0
-        self._load_data()
+        self.load_data()
 
-    def _load_data(self) -> None:
+    def load_data(self) -> None:
         lookback = self.signal_day - pd.Timedelta(days=90)
         prices = fund_repo.get(
             tickers=_ETF_TICKERS,
@@ -185,7 +186,7 @@ if __name__ == "__main__":
     model = SectorRotationModel(signal_day=signal_day)
     for ticker, sector in [
         ("AAPL", "Technology"),
-        ("JPM", "Financials"),
+        ("JPM", "Financial Services"),
         ("XOM", "Energy"),
     ]:
         print_snapshot_report(model.build_snapshot(ticker, sector))

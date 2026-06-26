@@ -92,9 +92,9 @@ class InsiderModel:
         self.tickers = tickers
         self.lookback_days = lookback_days
         self.data: dict[str, pd.DataFrame] = {}
-        self._load_data()
+        self.load_data()
 
-    def _load_data(self) -> None:
+    def load_data(self) -> None:
         start = self.signal_day - pd.Timedelta(days=self.lookback_days)
         df = insider_repo.get(
             tickers=self.tickers,

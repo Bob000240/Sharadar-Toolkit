@@ -5,7 +5,11 @@ import database.market.event_repo as event_repo
 
 
 def _has_code(series: pd.Series, code: str) -> pd.Series:
-    return series.apply(lambda x: code in str(x).split("|") if pd.notna(x) else False)
+    return series.apply(
+        lambda x: code in [c.strip() for c in str(x).split("|")]
+        if pd.notna(x)
+        else False
+    )
 
 # Sharadar EVENTS table — 8-K item codes (separated by | in eventcodes column)
 _EARNINGS_CODE = "22"  # Results of Operations and Financial Condition
@@ -66,9 +70,9 @@ class EventsModel:
         self.tickers = tickers
         self.lookback_days = lookback_days
         self.data: dict[str, pd.DataFrame] = {}
-        self._load_data()
+        self.load_data()
 
-    def _load_data(self) -> None:
+    def load_data(self) -> None:
         start = self.signal_day - pd.Timedelta(days=self.lookback_days)
         df = event_repo.get(
             tickers=self.tickers,

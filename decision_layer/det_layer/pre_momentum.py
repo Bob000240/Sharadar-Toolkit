@@ -11,3 +11,7 @@ from data.signals.sig_events import EventsModel, EventsSnapshot
 import database.market.tickers_repo as tickers_repo
 import database.operational.screened_candidates_repository as candidates_repo
 import database.operational.prefilter_profiles_repository as profiles_repo
+
+class PreMomentum(PreFilter):
+    def __init__():
+        

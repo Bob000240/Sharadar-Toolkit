@@ -66,7 +66,7 @@ class TechnicalsSnapshot:
 
     ema_9: float
     ema_21: float
-    ema_crossover_days_ago: int
+    ema_crossover_days_ago: float  # days since last EMA cross; NaN until first cross
 
     rsi_14: float
     macd: float
@@ -249,7 +249,7 @@ class TechnicalsModel:
         self.stock_data = None
         self.benchmark_data = None
         self.etf_data = None
-        self._load_data()
+        self.load_data()
 
     def _compute_live(self, tickers: list[str]) -> pd.DataFrame:
         lookback_start = self.signal_day - pd.Timedelta(days=400)
@@ -302,7 +302,7 @@ class TechnicalsModel:
             )
         return pd.DataFrame(rows).set_index("ticker")
 
-    def _load_data(self, live: bool = False, tickers: list[str] | None = None) -> None:
+    def load_data(self, live: bool = False, tickers: list[str] | None = None) -> None:
         if live and tickers:
             fresh = self._compute_live(tickers)
             for tkr in fresh.index:
@@ -317,11 +317,14 @@ class TechnicalsModel:
                 ["ticker", "sector"]
             ].set_index("ticker")["sector"]
             all_indicators["sector"] = sector_map.reindex(all_indicators.index)
-            self.stock_data = all_indicators.loc[self.stock_tickers].copy()
+            present = [t for t in self.stock_tickers if t in all_indicators.index]
+            self.stock_data = all_indicators.loc[present].copy()
 
             fund_data = self._fund_returns([self.benchmark_ticker] + self.etf_tickers)
             self.benchmark_data = fund_data.loc[[self.benchmark_ticker]]
-            self.etf_data = fund_data.loc[self.etf_tickers]
+            self.etf_data = fund_data.reindex(
+                [t for t in self.etf_tickers if t in fund_data.index]
+            )
 
         bench_5d = self.benchmark_data.loc[self.benchmark_ticker, "return_5d"]
         bench_20d = self.benchmark_data.loc[self.benchmark_ticker, "return_20d"]
