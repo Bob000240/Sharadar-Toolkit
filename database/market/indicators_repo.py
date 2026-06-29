@@ -154,16 +154,21 @@ def get_latest_date(tickers: str | list[str] | None = None) -> pd.DataFrame:
     return pd.read_sql_query(text(q), get_connection(), params=params)
 
 
-def get_latest(tickers: str | list[str], signal_day: pd.Timestamp) -> pd.DataFrame:
+def get_latest(
+    tickers: str | list[str] | None, signal_day: pd.Timestamp
+) -> pd.DataFrame:
     params = {
-        "tickers": [tickers] if isinstance(tickers, str) else tickers,
         "signal_day": signal_day.date() if hasattr(signal_day, "date") else signal_day,
     }
-    q = text("""
+    ticker_clause = ""
+    if tickers is not None:
+        params["tickers"] = [tickers] if isinstance(tickers, str) else tickers
+        ticker_clause = "AND ticker = ANY(:tickers)"
+    q = text(f"""
         SELECT DISTINCT ON (ticker) *
         FROM indicators
-        WHERE ticker = ANY(:tickers)
-          AND date <= :signal_day
+        WHERE date <= :signal_day
+          {ticker_clause}
         ORDER BY ticker, date DESC
     """)
     return pd.read_sql_query(q, get_connection(), params=params)

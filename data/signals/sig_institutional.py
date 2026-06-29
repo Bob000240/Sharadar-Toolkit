@@ -12,9 +12,12 @@ _SHARE_TYPE = "SHR"
 class InstitutionalSnapshot:
     ticker: str
     signal_day: pd.Timestamp
-    quarter_date: pd.Timestamp | None  # most recent available quarter
+    quarter_end: pd.Timestamp | None
+    assumed_available_from: pd.Timestamp | None
+    stale_days: int | None
+    availability_is_estimated: bool
 
-    # Current quarter (most recent filed as of signal_day)
+    # Most recent conservatively available reported quarter
     total_holders: int
     total_value_b: float  # USD billions
     total_units: float  # shares held
@@ -25,46 +28,6 @@ class InstitutionalSnapshot:
     units_change_pct: float  # NaN if no prior quarter
     new_holders: int  # institutions that opened new positions
     closed_positions: int  # institutions that fully exited
-
-    def accumulation(self) -> dict[str, bool]:
-        ucp = self.units_change_pct
-        return {
-            "units_increasing": not pd.isna(ucp) and ucp > 0,
-            "units_growing_fast": not pd.isna(ucp) and ucp > 0.05,
-            "holders_increasing": self.holders_change > 0,
-            "new_entrants": self.new_holders > 0,
-            "net_opening": self.new_holders > self.closed_positions,
-        }
-
-    def ownership_quality(self) -> dict[str, bool]:
-        return {
-            "well_held": self.total_holders >= 100,
-            "heavily_held": self.total_holders >= 500,
-            "high_inst_value": self.total_value_b >= 1.0,
-        }
-
-    def risk_flags(self) -> dict[str, bool]:
-        ucp = self.units_change_pct
-        vcp = self.value_change_pct
-        return {
-            "units_declining": not pd.isna(ucp) and ucp < -0.05,
-            "large_value_decline": not pd.isna(vcp) and vcp < -0.10,
-            "holders_fleeing": self.holders_change < -10,
-            "mass_exit": self.closed_positions > self.new_holders * 2
-            and self.closed_positions > 5,
-        }
-
-    def institutional_score(self) -> float:
-        score = 0.5
-        if not pd.isna(self.units_change_pct):
-            score += min(max(self.units_change_pct * 2, -0.20), 0.20)
-        score += (
-            0.10
-            if self.holders_change > 5
-            else (-0.10 if self.holders_change < -10 else 0.0)
-        )
-        score += 0.05 if self.new_holders > self.closed_positions else 0.0
-        return max(0.0, min(1.0, score))
 
 
 class InstitutionalModel:
@@ -97,7 +60,10 @@ class InstitutionalModel:
 
     def _agg(self, tkr: str) -> dict:
         _empty = dict(
-            quarter_date=None,
+            quarter_end=None,
+            assumed_available_from=None,
+            stale_days=None,
+            availability_is_estimated=True,
             total_holders=0,
             total_value_b=0.0,
             total_units=0.0,
@@ -115,7 +81,9 @@ class InstitutionalModel:
         if len(quarters) == 0:
             return _empty
 
-        latest_q = quarters[-1]
+        latest_q = pd.Timestamp(quarters[-1])
+        available_from = latest_q + pd.Timedelta(days=_FILING_DELAY_DAYS)
+        stale_days = int((self.signal_day.normalize() - latest_q).days)
         curr = grp[grp["calendardate"] == latest_q]
 
         curr_holders = curr["investorname"].nunique()
@@ -134,7 +102,10 @@ class InstitutionalModel:
             prev_names = set(prev["investorname"])
 
             return dict(
-                quarter_date=latest_q,
+                quarter_end=latest_q,
+                assumed_available_from=available_from,
+                stale_days=stale_days,
+                availability_is_estimated=True,
                 total_holders=curr_holders,
                 total_value_b=curr_value / 1e9,
                 total_units=curr_units,
@@ -150,7 +121,10 @@ class InstitutionalModel:
             )
 
         return dict(
-            quarter_date=latest_q,
+            quarter_end=latest_q,
+            assumed_available_from=available_from,
+            stale_days=stale_days,
+            availability_is_estimated=True,
             total_holders=curr_holders,
             total_value_b=curr_value / 1e9,
             total_units=curr_units,
@@ -167,14 +141,23 @@ class InstitutionalModel:
 
 
 def print_snapshot_report(snap: InstitutionalSnapshot) -> None:
-    qd = str(snap.quarter_date.date()) if snap.quarter_date is not None else "n/a"
+    quarter_end = str(snap.quarter_end.date()) if snap.quarter_end is not None else "n/a"
+    available_from = (
+        str(snap.assumed_available_from.date())
+        if snap.assumed_available_from is not None
+        else "n/a"
+    )
     vpc = (
         f"{snap.value_change_pct:+.1%}" if not pd.isna(snap.value_change_pct) else "n/a"
     )
     upc = (
         f"{snap.units_change_pct:+.1%}" if not pd.isna(snap.units_change_pct) else "n/a"
     )
-    print(f"\n=== {snap.ticker} | {snap.signal_day.date()} (quarter: {qd}) ===")
+    print(f"\n=== {snap.ticker} | {snap.signal_day.date()} ===")
+    print(
+        f"  Reported quarter: {quarter_end}  |  assumed available: {available_from}"
+        f"  |  stale: {snap.stale_days if snap.stale_days is not None else 'n/a'}d"
+    )
     print(f"  Holders: {snap.total_holders}  (Δ {snap.holders_change:+d})")
     print(
         f"  Value: ${snap.total_value_b:,.1f}B  (QoQ {vpc})  |  Units: {snap.total_units:,.0f}  (QoQ {upc})"
@@ -182,10 +165,6 @@ def print_snapshot_report(snap: InstitutionalSnapshot) -> None:
     print(
         f"  New entrants: {snap.new_holders}  |  Closed positions: {snap.closed_positions}"
     )
-    print(f"  Institutional Score: {snap.institutional_score():.3f}")
-    print(f"  Accumulation:  {snap.accumulation()}")
-    print(f"  Ownership:     {snap.ownership_quality()}")
-    print(f"  Risk Flags:    {snap.risk_flags()}")
 
 
 if __name__ == "__main__":

@@ -4,6 +4,7 @@ Each row describes one versioned prefilter; the runner loads only active rows.
 """
 
 from __future__ import annotations
+import json
 from sqlalchemy import text
 from database.db_connection import get_connection
 
@@ -15,22 +16,37 @@ CREATE TABLE IF NOT EXISTS prefilter_profiles (
     description         TEXT,
     is_active           BOOLEAN      NOT NULL DEFAULT TRUE,
 
+    -- Universe the runner feeds this prefilter (named universe resolved in code)
+    universe            VARCHAR(32),
+
     -- Risk envelope written into every candidate packet emitted by this prefilter
-    default_holding_days    INT,
+    default_holding_days    INT,            -- resolved days for default_timeline_id
     max_position_pct        NUMERIC(6,4),   -- fraction of portfolio (e.g. 0.05 = 5 %)
     max_loss_pct            NUMERIC(6,4),   -- max drawdown allowed per trade
-    allowed_stop_ids        TEXT[],         -- list of stop-choice IDs this prefilter permits
+
+    -- Catalog of choice IDs this prefilter may emit; candidates resolve IDs -> prices.
+    allowed_stop_ids        TEXT[],
     allowed_target_ids      TEXT[],
     allowed_timeline_ids    TEXT[],
+    default_stop_id         VARCHAR(32),    -- canonical default; must be in allowed_stop_ids
+    default_target_id       VARCHAR(32),
+    default_timeline_id     VARCHAR(32),    -- canonical timeline source of truth
+
+    -- Conviction tier -> size multiplier,
+    -- e.g. {"HIGH_CONVICTION": 1.0, "CONVICTION": 0.6, "LOW_CONVICTION": 0.3}
+    conviction_size_multipliers JSONB,
 
     -- Backtest / walk-forward summary (refreshed periodically)
     backtest_win_rate       NUMERIC(6,4),
     backtest_expectancy     NUMERIC(10,4),
     backtest_sharpe         NUMERIC(8,4),
-    wf_win_rate             NUMERIC(6,4),
-    wf_expectancy           NUMERIC(10,4),
     backtest_start_date     DATE,
     backtest_end_date       DATE,
+    wf_win_rate             NUMERIC(6,4),
+    wf_expectancy           NUMERIC(10,4),
+    wf_sharpe               NUMERIC(8,4),
+    wf_start_date           DATE,
+    wf_end_date             DATE,
 
     created_at          TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
     updated_at          TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
@@ -54,36 +70,56 @@ def drop_table() -> None:
 
 def upsert_profile(row: dict) -> int:
     """Insert or update a prefilter profile. Returns profile_id."""
+    row = dict(row)
+    if isinstance(row.get("conviction_size_multipliers"), (dict, list)):
+        row["conviction_size_multipliers"] = json.dumps(
+            row["conviction_size_multipliers"]
+        )
+
     sql = text("""
         INSERT INTO prefilter_profiles
-            (name, version, description, is_active,
+            (name, version, description, is_active, universe,
              default_holding_days, max_position_pct, max_loss_pct,
              allowed_stop_ids, allowed_target_ids, allowed_timeline_ids,
+             default_stop_id, default_target_id, default_timeline_id,
+             conviction_size_multipliers,
              backtest_win_rate, backtest_expectancy, backtest_sharpe,
-             wf_win_rate, wf_expectancy, backtest_start_date, backtest_end_date)
+             backtest_start_date, backtest_end_date,
+             wf_win_rate, wf_expectancy, wf_sharpe, wf_start_date, wf_end_date)
         VALUES
-            (:name, :version, :description, :is_active,
+            (:name, :version, :description, :is_active, :universe,
              :default_holding_days, :max_position_pct, :max_loss_pct,
              :allowed_stop_ids, :allowed_target_ids, :allowed_timeline_ids,
+             :default_stop_id, :default_target_id, :default_timeline_id,
+             CAST(:conviction_size_multipliers AS jsonb),
              :backtest_win_rate, :backtest_expectancy, :backtest_sharpe,
-             :wf_win_rate, :wf_expectancy, :backtest_start_date, :backtest_end_date)
+             :backtest_start_date, :backtest_end_date,
+             :wf_win_rate, :wf_expectancy, :wf_sharpe, :wf_start_date, :wf_end_date)
         ON CONFLICT (name, version) DO UPDATE SET
-            description         = EXCLUDED.description,
-            is_active           = EXCLUDED.is_active,
-            default_holding_days= EXCLUDED.default_holding_days,
-            max_position_pct    = EXCLUDED.max_position_pct,
-            max_loss_pct        = EXCLUDED.max_loss_pct,
-            allowed_stop_ids    = EXCLUDED.allowed_stop_ids,
-            allowed_target_ids  = EXCLUDED.allowed_target_ids,
-            allowed_timeline_ids= EXCLUDED.allowed_timeline_ids,
-            backtest_win_rate   = EXCLUDED.backtest_win_rate,
-            backtest_expectancy = EXCLUDED.backtest_expectancy,
-            backtest_sharpe     = EXCLUDED.backtest_sharpe,
-            wf_win_rate         = EXCLUDED.wf_win_rate,
-            wf_expectancy       = EXCLUDED.wf_expectancy,
-            backtest_start_date = EXCLUDED.backtest_start_date,
-            backtest_end_date   = EXCLUDED.backtest_end_date,
-            updated_at          = NOW()
+            description                 = EXCLUDED.description,
+            is_active                   = EXCLUDED.is_active,
+            universe                    = EXCLUDED.universe,
+            default_holding_days        = EXCLUDED.default_holding_days,
+            max_position_pct            = EXCLUDED.max_position_pct,
+            max_loss_pct                = EXCLUDED.max_loss_pct,
+            allowed_stop_ids            = EXCLUDED.allowed_stop_ids,
+            allowed_target_ids          = EXCLUDED.allowed_target_ids,
+            allowed_timeline_ids        = EXCLUDED.allowed_timeline_ids,
+            default_stop_id             = EXCLUDED.default_stop_id,
+            default_target_id           = EXCLUDED.default_target_id,
+            default_timeline_id         = EXCLUDED.default_timeline_id,
+            conviction_size_multipliers = EXCLUDED.conviction_size_multipliers,
+            backtest_win_rate           = EXCLUDED.backtest_win_rate,
+            backtest_expectancy         = EXCLUDED.backtest_expectancy,
+            backtest_sharpe             = EXCLUDED.backtest_sharpe,
+            backtest_start_date         = EXCLUDED.backtest_start_date,
+            backtest_end_date           = EXCLUDED.backtest_end_date,
+            wf_win_rate                 = EXCLUDED.wf_win_rate,
+            wf_expectancy               = EXCLUDED.wf_expectancy,
+            wf_sharpe                   = EXCLUDED.wf_sharpe,
+            wf_start_date               = EXCLUDED.wf_start_date,
+            wf_end_date                 = EXCLUDED.wf_end_date,
+            updated_at                  = NOW()
         RETURNING profile_id
     """)
     with get_connection().connect() as conn:

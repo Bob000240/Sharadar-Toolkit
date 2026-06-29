@@ -10,7 +10,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import pandas as pd
-from set_up.config import STOCK_SYMBOLS, BENCHMARK_SYMBOLS
+from set_up.config import get_stock_symbols, BENCHMARK_SYMBOLS
 from data.sharadar_data import SharadarData
 from data.macro_data import MacroData
 from data.indicators import compute_indicators
@@ -31,7 +31,7 @@ TODAY = pd.Timestamp.today().strftime("%Y-%m-%d")
 def _batched(
     sh_fn, repo_insert, label: str, symbols: list = None, batch_size: int = 50, **kwargs
 ):
-    symbols = symbols or STOCK_SYMBOLS
+    symbols = symbols if symbols is not None else get_stock_symbols()
     total = 0
     for i in range(0, len(symbols), batch_size):
         batch = symbols[i : i + batch_size]
@@ -82,9 +82,10 @@ def update_indicators():
         return
     latest_date = latest["latest_date"].min()
     lookback = pd.Timestamp(latest_date) - pd.Timedelta(days=400)
+    symbols = get_stock_symbols()
     total = 0
-    for i in range(0, len(STOCK_SYMBOLS), 50):
-        batch = STOCK_SYMBOLS[i : i + 50]
+    for i in range(0, len(symbols), 50):
+        batch = symbols[i : i + 50]
         df = equity_repo.get(tickers=batch, start_date=str(lookback.date()))
         if df.empty:
             continue

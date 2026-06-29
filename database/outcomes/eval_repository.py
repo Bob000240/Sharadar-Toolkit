@@ -98,7 +98,7 @@ def insert_eval(row: dict) -> int:
              :lift_win_rate, :lift_expectancy, :lift_sharpe,
              :stop_match_rate, :target_match_rate, :timeline_match_rate,
              :avg_profit_likelihood, :calibration_error,
-             :metrics_json::jsonb, :notes)
+             CAST(:metrics_json AS jsonb), :notes)
         RETURNING eval_id
     """)
     with get_connection().connect() as conn:

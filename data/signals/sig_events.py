@@ -6,15 +6,16 @@ import database.market.event_repo as event_repo
 
 def _has_code(series: pd.Series, code: str) -> pd.Series:
     return series.apply(
-        lambda x: code in [c.strip() for c in str(x).split("|")]
-        if pd.notna(x)
-        else False
+        lambda x: (
+            code in [c.strip() for c in str(x).split("|")] if pd.notna(x) else False
+        )
     )
 
-# Sharadar EVENTS table — 8-K item codes (separated by | in eventcodes column)
+
+# Sharadar EVENTS codes (separated by | in eventcodes)
 _EARNINGS_CODE = "22"  # Results of Operations and Financial Condition
 _ACTIVIST_CODE = "35"  # Schedule 13D (activist investor ≥5%)
-_INSTIT_CODE = "34"  # Schedule 13G (institutional passive ≥5%)
+_PASSIVE_OWNERSHIP_CODE = "34"  # Schedule 13G (passive investor ≥5%)
 _MA_CODE = "21"  # Completion of Acquisition or Disposition of Assets
 _TENDER_CODE = "37"  # Tender Offer Statement
 _CONTROL_CODE = "51"  # Changes in Control of Registrant
@@ -31,6 +32,7 @@ class EventsSnapshot:
     signal_day: pd.Timestamp
 
     days_since_last_earnings: int | None
+    days_since_last_activist_13d: int | None
 
     recent_event_codes: list[str]
 
@@ -49,13 +51,26 @@ class EventsSnapshot:
 
     def catalyst_flags(self) -> dict[str, bool]:
         all_codes = set(self.recent_event_codes)
+        activist_days = self.days_since_last_activist_13d
         return {
-            "activist_filing": _ACTIVIST_CODE in all_codes,
-            "institutional_filing": _INSTIT_CODE in all_codes,
+            "activist_13d_filing": _ACTIVIST_CODE in all_codes,
+            "fresh_13d_code": activist_days is not None and activist_days <= 7,
             "ma_event": _MA_CODE in all_codes,
             "tender_offer": _TENDER_CODE in all_codes,
             "change_of_control": _CONTROL_CODE in all_codes,
             "recent_events": len(self.recent_event_codes) > 0,
+        }
+
+    def ownership_context(self) -> dict[str, bool]:
+        all_codes = set(self.recent_event_codes)
+        return {
+            "passive_13g_filing": _PASSIVE_OWNERSHIP_CODE in all_codes,
+        }
+
+    def source_flags(self) -> dict[str, bool]:
+        all_codes = set(self.recent_event_codes)
+        return {
+            "13d_amendment_status_unknown": _ACTIVIST_CODE in all_codes,
         }
 
 
@@ -83,13 +98,12 @@ class EventsModel:
         for tkr, grp in df.groupby("ticker"):
             self.data[tkr] = grp.reset_index(drop=True)
 
-    def _days_since_last_earnings(self, tkr: str) -> int | None:
+    def _days_since_code(self, tkr: str, code: str) -> int | None:
         grp = self.data.get(tkr)
         if grp is None:
             return None
         past = grp[
-            (grp["date"] <= self.signal_day) &
-            _has_code(grp["eventcodes"], _EARNINGS_CODE)
+            (grp["date"] <= self.signal_day) & _has_code(grp["eventcodes"], code)
         ]
         if past.empty:
             return None
@@ -113,7 +127,8 @@ class EventsModel:
         return EventsSnapshot(
             ticker=ticker,
             signal_day=self.signal_day,
-            days_since_last_earnings=self._days_since_last_earnings(ticker),
+            days_since_last_earnings=self._days_since_code(ticker, _EARNINGS_CODE),
+            days_since_last_activist_13d=self._days_since_code(ticker, _ACTIVIST_CODE),
             recent_event_codes=self._event_codes_in_window(
                 ticker, recent_start, self.signal_day
             ),
@@ -131,6 +146,8 @@ def print_snapshot_report(snap: EventsSnapshot) -> None:
     print(f"  Recent codes:   {snap.recent_event_codes}")
     print(f"  Risk Flags:     {snap.risk_flags()}")
     print(f"  Catalyst Flags: {snap.catalyst_flags()}")
+    print(f"  Ownership Context: {snap.ownership_context()}")
+    print(f"  Source Flags: {snap.source_flags()}")
 
 
 if __name__ == "__main__":

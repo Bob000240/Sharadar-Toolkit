@@ -66,7 +66,8 @@ class MarketData:
         """
         Fetches today's in-progress daily bar for each symbol.
         Returns a DataFrame indexed by symbol with columns: open, high, low, close, volume.
-        Falls back to empty DataFrame if market is closed or data unavailable.
+        Returns an empty DataFrame only when there are no bars yet (e.g. market
+        closed); API/transport errors propagate.
         """
         symbols = [symbols] if isinstance(symbols, str) else symbols
         alpaca_symbols = [_to_alpaca(s) for s in symbols]
@@ -82,10 +83,7 @@ class MarketData:
             timeframe=TimeFrame.Minute,
             feed="iex",
         )
-        try:
-            raw = self.MarketDataClient.get_stock_bars(req)
-        except Exception:
-            return pd.DataFrame()
+        raw = self.MarketDataClient.get_stock_bars(req)
 
         rows = []
         for asym, bars in raw.data.items():

@@ -10,7 +10,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import pandas as pd
-from set_up.config import STOCK_SYMBOLS, BENCHMARK_SYMBOLS
+from set_up.config import get_stock_symbols, BENCHMARK_SYMBOLS
 from data.sharadar_data import SharadarData
 from data.macro_data import MacroData
 from data.indicators import compute_indicators
@@ -41,7 +41,7 @@ def load_tickers(sh: SharadarData):
 def _batched(
     sh_fn, repo_insert, label: str, symbols: list = None, batch_size: int = 50, **kwargs
 ):
-    symbols = symbols or STOCK_SYMBOLS
+    symbols = symbols if symbols is not None else get_stock_symbols()
     total = 0
     n_batches = -(-len(symbols) // batch_size)
     for i in range(0, len(symbols), batch_size):
@@ -79,9 +79,10 @@ def load_fund_prices(sh: SharadarData):
 
 def load_indicators():
     print("Computing indicators from equity prices...")
+    symbols = get_stock_symbols()
     total = 0
-    for i in range(0, len(STOCK_SYMBOLS), 50):
-        batch = STOCK_SYMBOLS[i : i + 50]
+    for i in range(0, len(symbols), 50):
+        batch = symbols[i : i + 50]
         df = equity_repo.get(tickers=batch, start_date=START_DATE)
         if df.empty:
             continue
@@ -92,9 +93,7 @@ def load_indicators():
         ind_df = pd.concat(parts, ignore_index=True)
         indicators_repo.insert(ind_df)
         total += len(ind_df)
-        print(
-            f"  batch {i // 50 + 1}/{-(-len(STOCK_SYMBOLS) // 50)}: {len(ind_df):,} rows"
-        )
+        print(f"  batch {i // 50 + 1}/{-(-len(symbols) // 50)}: {len(ind_df):,} rows")
     print(f"  total: {total:,} rows")
 
 
@@ -152,12 +151,14 @@ def load_macro():
 
 if __name__ == "__main__":
     print(f"=== QuorumNexus initial data load ===")
-    print(f"Date range: {START_DATE} → {END_DATE}")
-    print(f"Universe: {len(STOCK_SYMBOLS)} stocks, {len(BENCHMARK_SYMBOLS)} ETFs\n")
+    print(f"Date range: {START_DATE} → {END_DATE}\n")
 
     sh = SharadarData()
 
     load_tickers(sh)
+    print(
+        f"Universe: {len(get_stock_symbols())} stocks, {len(BENCHMARK_SYMBOLS)} ETFs\n"
+    )
     load_equity_prices(sh)
     load_fund_prices(sh)
     load_indicators()

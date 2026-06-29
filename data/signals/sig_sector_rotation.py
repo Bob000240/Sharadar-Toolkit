@@ -88,14 +88,14 @@ class SectorRotationModel:
             end_date=str(self.signal_day.date()),
         )
         if prices.empty:
-            return
+            raise ValueError(
+                f"No sector ETF price data as of {self.signal_day.date()}"
+            )
 
         prices["date"] = pd.to_datetime(prices["date"])
         rows = []
         for etf, grp in prices.groupby("ticker"):
-            sector = ETF_SECTOR_MAP.get(etf)
-            if not sector:
-                continue
+            sector = ETF_SECTOR_MAP[etf]
             c = grp.sort_values("date")["close"].values
             rows.append(
                 {

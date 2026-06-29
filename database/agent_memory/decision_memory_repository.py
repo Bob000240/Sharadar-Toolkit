@@ -80,8 +80,11 @@ def drop_table() -> None:
 
 
 def insert_decision(row: dict) -> int:
-    if "tool_call_log" in row and isinstance(row["tool_call_log"], (dict, list)):
-        row = {**row, "tool_call_log": json.dumps(row["tool_call_log"])}
+    row = dict(row)
+    if isinstance(row.get("tool_call_log"), (dict, list)):
+        row["tool_call_log"] = json.dumps(row["tool_call_log"])
+    if isinstance(row.get("feature_vector"), (list, tuple)):
+        row["feature_vector"] = str(list(row["feature_vector"]))
 
     sql = text("""
         INSERT INTO decision_memory
@@ -96,8 +99,8 @@ def insert_decision(row: dict) -> int:
              :decision, :conviction_tier,
              :selected_stop_id, :selected_target_id, :selected_timeline_id,
              :profit_likelihood, :confidence, :rationale,
-             :tools_called, :evidence_ids, :tool_call_log::jsonb,
-             :feature_vector)
+             :tools_called, :evidence_ids, CAST(:tool_call_log AS jsonb),
+             CAST(:feature_vector AS vector))
         RETURNING memory_id
     """)
     with get_connection().connect() as conn:
@@ -157,12 +160,12 @@ def search_similar(
 ) -> list[dict]:
     """Cosine similarity search over feature vectors (requires pgvector)."""
     sql = text("""
-        SELECT *, 1 - (feature_vector <=> :vec::vector) AS similarity
+        SELECT *, 1 - (feature_vector <=> CAST(:vec AS vector)) AS similarity
         FROM decision_memory
         WHERE resolved = TRUE
           AND resolution_date < :d
           AND feature_vector IS NOT NULL
-        ORDER BY feature_vector <=> :vec::vector
+        ORDER BY feature_vector <=> CAST(:vec AS vector)
         LIMIT :lim
     """)
     with get_connection().connect() as conn:

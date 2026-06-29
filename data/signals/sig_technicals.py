@@ -11,6 +11,9 @@ from data.indicators import compute_indicators
 from set_up.config import ETF_SECTOR_MAP
 
 
+_RETURN_COLS = ["return_5d", "return_20d", "return_60d", "return_252d"]
+
+
 def _python_scalar(value):
     if isinstance(value, np.generic):
         return value.item()
@@ -249,6 +252,7 @@ class TechnicalsModel:
         self.stock_data = None
         self.benchmark_data = None
         self.etf_data = None
+        self._universe_returns = None
         self.load_data()
 
     def _compute_live(self, tickers: list[str]) -> pd.DataFrame:
@@ -278,10 +282,6 @@ class TechnicalsModel:
                 rows.append(last)
         return pd.DataFrame(rows).set_index("ticker")
 
-    def _from_db(self) -> pd.DataFrame:
-        df = indicators_repo.get_latest(self.stock_tickers, self.signal_day)
-        return df.set_index("ticker")
-
     def _fund_returns(self, tickers: list[str]) -> pd.DataFrame:
         lookback = self.signal_day - pd.Timedelta(days=300)
         prices = fund_repo.get(
@@ -296,8 +296,8 @@ class TechnicalsModel:
             rows.append(
                 {
                     "ticker": tkr,
-                    "return_5d": (c[-1] / c[-6] - 1) if len(c) >= 6 else 0.0,
-                    "return_20d": (c[-1] / c[-21] - 1) if len(c) >= 21 else 0.0,
+                    "return_5d": (c[-1] / c[-6] - 1) if len(c) >= 6 else float("nan"),
+                    "return_20d": (c[-1] / c[-21] - 1) if len(c) >= 21 else float("nan"),
                 }
             )
         return pd.DataFrame(rows).set_index("ticker")
@@ -312,19 +312,32 @@ class TechnicalsModel:
                     if col in self.stock_data.columns:
                         self.stock_data.at[tkr, col] = fresh.at[tkr, col]
         else:
-            all_indicators = self._from_db()
+            # Load the full indicators universe so return percentiles are ranked
+            # market-wide (independent of the request batch), then take the batch.
+            universe = indicators_repo.get_latest(None, self.signal_day).set_index(
+                "ticker"
+            )
+            self._universe_returns = universe[_RETURN_COLS].copy()
+
+            missing = [t for t in self.stock_tickers if t not in universe.index]
+            if missing:
+                raise ValueError(
+                    f"No indicator data as of {self.signal_day.date()} for: {missing}"
+                )
+            self.stock_data = universe.loc[self.stock_tickers].copy()
             sector_map = tickers_repo.get(tickers=self.stock_tickers)[
                 ["ticker", "sector"]
             ].set_index("ticker")["sector"]
-            all_indicators["sector"] = sector_map.reindex(all_indicators.index)
-            present = [t for t in self.stock_tickers if t in all_indicators.index]
-            self.stock_data = all_indicators.loc[present].copy()
+            self.stock_data["sector"] = sector_map.reindex(self.stock_data.index)
 
             fund_data = self._fund_returns([self.benchmark_ticker] + self.etf_tickers)
             self.benchmark_data = fund_data.loc[[self.benchmark_ticker]]
-            self.etf_data = fund_data.reindex(
-                [t for t in self.etf_tickers if t in fund_data.index]
-            )
+            missing_etfs = [t for t in self.etf_tickers if t not in fund_data.index]
+            if missing_etfs:
+                raise ValueError(
+                    f"No fund price data as of {self.signal_day.date()} for ETFs: {missing_etfs}"
+                )
+            self.etf_data = fund_data.loc[self.etf_tickers]
 
         bench_5d = self.benchmark_data.loc[self.benchmark_ticker, "return_5d"]
         bench_20d = self.benchmark_data.loc[self.benchmark_ticker, "return_20d"]
@@ -340,10 +353,18 @@ class TechnicalsModel:
             "return_20d"
         ] - self.stock_data["sector"].map(etf_returns["return_20d"])
 
-        for col in ["return_5d", "return_20d", "return_60d", "return_252d"]:
-            self.stock_data[f"{col}_percentile"] = (
-                self.stock_data[col].rank(pct=True) * 100
-            )
+        self._assign_return_percentiles()
+
+    def _assign_return_percentiles(self) -> None:
+        # Rank each return horizon across the full indicators universe, overlaying
+        # the batch's current (possibly live-updated) values first.
+        universe = self._universe_returns.copy()
+        universe.loc[self.stock_data.index, _RETURN_COLS] = self.stock_data[
+            _RETURN_COLS
+        ]
+        for col in _RETURN_COLS:
+            ranks = universe[col].rank(pct=True) * 100
+            self.stock_data[f"{col}_percentile"] = ranks.reindex(self.stock_data.index)
 
     def get(self, ticker: str, col: str):
         if ticker not in self.stock_data.index:

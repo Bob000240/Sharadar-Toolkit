@@ -24,7 +24,6 @@ _COLUMNS = [
     "spread_ig",
     "yield_hy",
     "yield_ig",
-    "ted_spread",
     "cpi",
     "cpi_core",
     "pce",
@@ -48,9 +47,18 @@ _COLUMNS = [
     "vix",
     "yield_curve_2_10",
     "yield_curve_3m_10",
+    "rates_as_of",
+    "credit_as_of",
+    "inflation_as_of",
+    "unemployment_as_of",
+    "claims_as_of",
+    "volatility_as_of",
 ]
 _COL_LIST = ", ".join(_COLUMNS)
 _BIND_LIST = ", ".join(f":{c}" for c in _COLUMNS)
+_UPDATE_LIST = ", ".join(
+    f"{c} = COALESCE(EXCLUDED.{c}, macro.{c})" for c in _COLUMNS if c != "date"
+)
 
 
 def create_table():
@@ -89,7 +97,6 @@ def create_table():
                 spread_ig           DOUBLE PRECISION,
                 yield_hy            DOUBLE PRECISION,
                 yield_ig            DOUBLE PRECISION,
-                ted_spread          DOUBLE PRECISION,
 
                 -- Inflation
                 cpi                 DOUBLE PRECISION,
@@ -130,10 +137,29 @@ def create_table():
 
                 -- Derived
                 yield_curve_2_10    DOUBLE PRECISION,
-                yield_curve_3m_10   DOUBLE PRECISION
+                yield_curve_3m_10   DOUBLE PRECISION,
+
+                -- Point-in-time availability
+                rates_as_of         DATE,
+                credit_as_of        DATE,
+                inflation_as_of     DATE,
+                unemployment_as_of  DATE,
+                claims_as_of        DATE,
+                volatility_as_of    DATE
             );
         """)
         )
+        for column in (
+            "rates_as_of",
+            "credit_as_of",
+            "inflation_as_of",
+            "unemployment_as_of",
+            "claims_as_of",
+            "volatility_as_of",
+        ):
+            conn.execute(
+                text(f"ALTER TABLE macro ADD COLUMN IF NOT EXISTS {column} DATE")
+            )
 
 
 def drop_table():
@@ -151,7 +177,11 @@ def insert(df: pd.DataFrame):
     with get_connection().begin() as conn:
         conn.execute(
             text(
-                f"INSERT INTO macro ({_COL_LIST}) VALUES ({_BIND_LIST}) ON CONFLICT DO NOTHING"
+                f"""
+                INSERT INTO macro ({_COL_LIST})
+                VALUES ({_BIND_LIST})
+                ON CONFLICT (date) DO UPDATE SET {_UPDATE_LIST}
+                """
             ),
             records,
         )

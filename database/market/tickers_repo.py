@@ -116,3 +116,33 @@ def get(
         q += " AND isdelisted = :delisted"
     q += " ORDER BY ticker"
     return pd.read_sql_query(text(q), get_connection(), params=params)
+
+
+def get_universe(include_delisted: bool = False) -> pd.DataFrame:
+    """Tradeable equity universe from the tickers table.
+
+    USD-denominated domestic common stock (primary class only) on the major US
+    exchanges, excluding nano/micro caps. By default returns only live names;
+    set include_delisted=True for a survivorship-free backtest universe — note
+    that requires delisted tickers to have been loaded (see load_data.load_tickers,
+    which currently ingests is_delisted=False only).
+    """
+    delisted_clause = "" if include_delisted else "AND isdelisted = 'N'"
+    q = text(f"""
+        SELECT ticker, name, exchange, sector, industry, scalemarketcap
+        FROM tickers
+        WHERE table_code = 'SEP'                              -- equities only (not SFP ETFs)
+          AND currency = 'USD'                                -- USD-denominated lines only
+          AND exchange IN ('NYSE', 'NASDAQ', 'NYSEMKT')       -- listed; drops OTC/pink + NULL
+          AND category LIKE 'Domestic Common Stock%'          -- common stock only (no ADR/pref/CEF)
+          AND category NOT LIKE '%Secondary%'                 -- primary class only -> kills GOOG/GOOGL dupes
+          AND scalemarketcap NOT IN ('1 - Nano', '2 - Micro') -- tradeable size; tighten per strategy
+          {delisted_clause}
+        ORDER BY ticker
+    """)
+    return pd.read_sql_query(q, get_connection())
+
+
+def get_universe_tickers(include_delisted: bool = False) -> list[str]:
+    """Ticker symbols of the tradeable universe (see get_universe)."""
+    return get_universe(include_delisted)["ticker"].tolist()
