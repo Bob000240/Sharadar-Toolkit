@@ -8,9 +8,9 @@ load_dotenv()
 
 class SharadarData:
     def __init__(self):
-        self.key = os.getenv("SHARADAR_KEY")
+        self.key = os.getenv("NDL_APIKEY")
         if not self.key:
-            raise ValueError("SHARADAR_KEY not set")
+            raise ValueError("NDL_APIKEY not set")
         nasdaqdatalink.ApiConfig.api_key = self.key
 
     def _params(self, **kwargs) -> dict:

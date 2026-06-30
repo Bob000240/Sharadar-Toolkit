@@ -3,6 +3,14 @@ from dataclasses import dataclass, fields
 import numpy as np
 import database.market.fundamentals_repo as fundamentals_repo
 import database.market.tickers_repo as tickers_repo
+from data.signals._common import (
+    python_scalar as _python_scalar,
+    safe_div,
+    safe_growth as _safe_growth,
+    positive_inverse as _positive_inverse,
+    positive_ratio as _positive_ratio,
+    rank_within_sector as _rank_within_sector,
+)
 
 
 VALUE_YIELD_COLUMNS = (
@@ -68,53 +76,8 @@ MIN_QUALITY_HISTORY_YEARS = 4.75
 MIN_QUALITY_HISTORY_OBSERVATIONS = 6
 
 
-def _python_scalar(value):
-    if isinstance(value, np.generic):
-        return value.item()
-    return value
-
-
-def _safe_growth(now, then) -> float:
-    if pd.isna(now) or pd.isna(then) or then == 0:
-        return float("nan")
-    return (now - then) / abs(then)
-
-
-def _positive_inverse(values: pd.Series) -> pd.Series:
-    values = pd.to_numeric(values, errors="coerce")
-    result = pd.Series(np.nan, index=values.index, dtype=float)
-    valid = values.notna() & np.isfinite(values) & (values > 0)
-    result.loc[valid] = 1.0 / values.loc[valid]
-    return result
-
-
-def _positive_ratio(numerator: pd.Series, denominator: pd.Series) -> pd.Series:
-    numerator = pd.to_numeric(numerator, errors="coerce")
-    denominator = pd.to_numeric(denominator, errors="coerce")
-    result = pd.Series(np.nan, index=numerator.index, dtype=float)
-    valid = (
-        numerator.notna()
-        & denominator.notna()
-        & np.isfinite(numerator)
-        & np.isfinite(denominator)
-        & (numerator > 0)
-        & (denominator > 0)
-    )
-    result.loc[valid] = numerator.loc[valid] / denominator.loc[valid]
-    return result
-
-
-def _rank_within_sector(
-    values: pd.Series,
-    sectors: pd.Series,
-    min_sector_size: int = MIN_SECTOR_RANK_SIZE,
-) -> pd.Series:
-    values = pd.to_numeric(values, errors="coerce").replace([np.inf, -np.inf], np.nan)
-    sectors = sectors.fillna("Unknown")
-    sector_rank = values.groupby(sectors).rank(pct=True, method="average") * 100
-    sector_count = values.notna().groupby(sectors).transform("sum")
-    market_rank = values.rank(pct=True, method="average") * 100
-    return sector_rank.where(sector_count >= min_sector_size, market_rank)
+# Pure column helpers (python_scalar, safe_div, safe_growth, positive_inverse,
+# positive_ratio, rank_within_sector) live in data.signals._common, imported above.
 
 
 def _mean_with_minimum(
@@ -125,6 +88,254 @@ def _mean_with_minimum(
     valid_count = frame[columns].notna().sum(axis=1)
     score = frame[columns].mean(axis=1, skipna=True)
     return score.where(valid_count >= minimum), valid_count
+
+
+# ── Column-derivation helpers (all feature creation lives here) ──────────────
+
+
+def _compute_growth(arq: pd.DataFrame) -> pd.DataFrame:
+    rows = []
+    for tkr, grp in arq.groupby("ticker"):
+        grp = grp.sort_values("datekey")
+        if len(grp) < 5:
+            rows.append(
+                {
+                    "ticker": tkr,
+                    "revenue_growth_yoy": float("nan"),
+                    "eps_growth_yoy": float("nan"),
+                    "grossmargin_change_yoy": float("nan"),
+                    "opinc_growth_yoy": float("nan"),
+                }
+            )
+            continue
+        latest = grp.iloc[-1]
+        prior = grp.iloc[-5]
+
+        rows.append(
+            {
+                "ticker": tkr,
+                "revenue_growth_yoy": _safe_growth(latest["revenue"], prior["revenue"]),
+                "eps_growth_yoy": _safe_growth(latest["eps"], prior["eps"]),
+                "grossmargin_change_yoy": (
+                    latest["grossmargin"] - prior["grossmargin"]
+                    if pd.notna(latest["grossmargin"]) and pd.notna(prior["grossmargin"])
+                    else float("nan")
+                ),
+                "opinc_growth_yoy": _safe_growth(latest["opinc"], prior["opinc"]),
+            }
+        )
+    if not rows:
+        return pd.DataFrame(
+            columns=[
+                "revenue_growth_yoy",
+                "eps_growth_yoy",
+                "grossmargin_change_yoy",
+                "opinc_growth_yoy",
+            ]
+        )
+    return pd.DataFrame(rows).set_index("ticker")
+
+
+def _compute_derived(df: pd.DataFrame) -> pd.DataFrame:
+    df["interest_coverage"] = safe_div(df["ebit"], df["intexp"])
+    # Only meaningful when OCF is positive; negative OCF makes ratio negative/misleading
+    df["capex_to_ocf"] = safe_div(df["capex"].abs(), df["ncfo"].where(df["ncfo"] > 0))
+    df["rnd_intensity"] = safe_div(df["rnd"], df["revenue"])
+    df["gross_profitability"] = safe_div(df["gp"], df["assets"])
+    df["cfo_to_assets"] = safe_div(df["ncfo"], df["assets"])
+    df["accrual_quality"] = safe_div(df["ncfo"] - df["netinc"], df["assets"])
+    payout = df[["ncfcommon", "ncfdiv"]].sum(axis=1, min_count=1)
+    df["net_payout_yield"] = safe_div(-payout, df["marketcap"].where(df["marketcap"] > 0))
+    df["earnings_yield"] = _positive_inverse(df["pe"])
+    df["fcf_yield"] = _positive_ratio(df["fcf"], df["marketcap"])
+    df["ebitda_yield"] = _positive_inverse(df["evebitda"])
+    df["book_yield"] = _positive_inverse(df["pb"])
+    df["sales_yield"] = _positive_inverse(df["ps"])
+    return df
+
+
+def _history_change(latest, prior, complete_history, column) -> float:
+    if prior is None or not complete_history:
+        return float("nan")
+    now, then = latest[column], prior[column]
+    if pd.isna(now) or pd.isna(then):
+        return float("nan")
+    return now - then
+
+
+def _history_volatility(window, complete_history, column) -> float:
+    if not complete_history:
+        return float("nan")
+    values = pd.to_numeric(window[column], errors="coerce").dropna()
+    if len(values) < 3:
+        return float("nan")
+    return values.std(ddof=0)
+
+
+def _compute_quality_history(art: pd.DataFrame) -> pd.DataFrame:
+    if art.empty:
+        return pd.DataFrame(columns=list(QUALITY_HISTORY_COLUMNS))
+
+    art = _compute_derived(art.copy())
+    art["calendardate"] = pd.to_datetime(art["calendardate"])
+    art["datekey"] = pd.to_datetime(art["datekey"])
+    rows = []
+
+    for ticker, group in art.groupby("ticker"):
+        group = (
+            group.dropna(subset=["calendardate"])
+            .sort_values(["calendardate", "datekey"])
+            .drop_duplicates("calendardate", keep="last")
+        )
+        if group.empty:
+            continue
+
+        latest = group.iloc[-1]
+        target_dates = [
+            latest["calendardate"] - pd.DateOffset(years=years_ago)
+            for years_ago in range(QUALITY_HISTORY_TARGET_YEARS + 1)
+        ]
+        sampled_indices = []
+        for target_date in target_dates:
+            distance = (group["calendardate"] - target_date).abs()
+            closest_index = distance.idxmin()
+            if distance.loc[closest_index].days <= MAX_HISTORY_OBSERVATION_DISTANCE_DAYS:
+                sampled_indices.append(closest_index)
+
+        window = (
+            group.loc[list(dict.fromkeys(sampled_indices))]
+            .sort_values("calendardate")
+            .copy()
+        )
+        prior = window.iloc[0] if not window.empty else None
+
+        history_years = float("nan")
+        observations = len(window)
+        if prior is not None:
+            history_years = (
+                latest["calendardate"] - prior["calendardate"]
+            ).days / 365.25
+
+        complete_history = (
+            history_years >= MIN_QUALITY_HISTORY_YEARS
+            and observations >= MIN_QUALITY_HISTORY_OBSERVATIONS
+        )
+
+        rows.append(
+            {
+                "ticker": ticker,
+                "gross_profitability_change_5y": _history_change(
+                    latest, prior, complete_history, "gross_profitability"
+                ),
+                "roa_change_5y": _history_change(latest, prior, complete_history, "roa"),
+                "roic_change_5y": _history_change(latest, prior, complete_history, "roic"),
+                "cfo_to_assets_change_5y": _history_change(
+                    latest, prior, complete_history, "cfo_to_assets"
+                ),
+                "grossmargin_change_5y": _history_change(
+                    latest, prior, complete_history, "grossmargin"
+                ),
+                "share_dilution_5y": (
+                    _safe_growth(latest["shareswa"], prior["shareswa"])
+                    if prior is not None and complete_history
+                    else float("nan")
+                ),
+                "de_change_5y": _history_change(latest, prior, complete_history, "de"),
+                "roe_volatility_5y": _history_volatility(window, complete_history, "roe"),
+                "grossmargin_volatility_5y": _history_volatility(
+                    window, complete_history, "grossmargin"
+                ),
+                "quality_history_years": history_years,
+                "quality_history_observations": observations,
+                "complete_multi_year_history": complete_history,
+            }
+        )
+
+    if not rows:
+        return pd.DataFrame(columns=list(QUALITY_HISTORY_COLUMNS))
+    return pd.DataFrame(rows).set_index("ticker")
+
+
+def _attach_sectors(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        df["sector"] = pd.Series(dtype="object")
+        return df
+
+    metadata = tickers_repo.get(
+        tickers=df.index.astype(str).tolist(),
+        table_code="SEP",
+    )
+    sectors = metadata.drop_duplicates("ticker", keep="last").set_index("ticker")[
+        "sector"
+    ]
+    df["sector"] = sectors.reindex(df.index).fillna("Unknown")
+    return df
+
+
+def _compute_cross_section(universe: pd.DataFrame) -> pd.DataFrame:
+    universe = _attach_sectors(universe)
+
+    universe["roe_percentile"] = universe["roe"].rank(pct=True, method="average") * 100
+    universe["de_percentile"] = _rank_within_sector(universe["de"], universe["sector"])
+    universe["currentratio_percentile"] = _rank_within_sector(
+        universe["currentratio"], universe["sector"]
+    )
+
+    percentile_columns = []
+    for value_column in VALUE_YIELD_COLUMNS:
+        percentile_column = f"{value_column}_percentile"
+        universe[percentile_column] = _rank_within_sector(
+            universe[value_column], universe["sector"]
+        )
+        percentile_columns.append(percentile_column)
+
+    universe["valid_value_metrics"] = (
+        universe[list(VALUE_YIELD_COLUMNS)].notna().sum(axis=1)
+    )
+    universe["value_composite_score"] = universe[percentile_columns].mean(
+        axis=1, skipna=True
+    )
+    universe.loc[universe["valid_value_metrics"] < 2, "value_composite_score"] = np.nan
+    universe["value_composite_percentile"] = _rank_within_sector(
+        universe["value_composite_score"], universe["sector"]
+    )
+
+    pillar_columns = []
+    for pillar, metrics in QUALITY_PILLAR_METRICS.items():
+        metric_percentiles = []
+        for metric, direction in metrics.items():
+            percentile_column = f"_quality_{metric}_percentile"
+            values = universe.get(
+                metric, pd.Series(np.nan, index=universe.index, dtype=float)
+            )
+            universe[percentile_column] = _rank_within_sector(
+                values * direction, universe["sector"]
+            )
+            metric_percentiles.append(percentile_column)
+
+        score_column = f"quality_{pillar}_score"
+        count_column = f"_valid_quality_{pillar}_metrics"
+        universe[score_column], universe[count_column] = _mean_with_minimum(
+            universe, metric_percentiles, QUALITY_PILLAR_MINIMUMS[pillar]
+        )
+        pillar_columns.append(score_column)
+
+    universe["valid_quality_pillars"] = universe[pillar_columns].notna().sum(axis=1)
+    universe["quality_composite_score"] = universe[pillar_columns].mean(
+        axis=1, skipna=True
+    )
+    required_pillars = [
+        "quality_profitability_score",
+        "quality_growth_score",
+        "quality_safety_score",
+    ]
+    universe.loc[
+        universe[required_pillars].isna().any(axis=1), "quality_composite_score"
+    ] = np.nan
+    universe["quality_composite_percentile"] = _rank_within_sector(
+        universe["quality_composite_score"], universe["sector"]
+    )
+    return universe
 
 
 @dataclass
@@ -447,285 +658,25 @@ class FundamentalsModel:
         )
         return art[pd.to_datetime(art["datekey"]) <= self.signal_day]
 
-    def _compute_growth(self, arq: pd.DataFrame) -> pd.DataFrame:
-        rows = []
-        for tkr, grp in arq.groupby("ticker"):
-            grp = grp.sort_values("datekey")
-            if len(grp) < 5:
-                rows.append(
-                    {
-                        "ticker": tkr,
-                        "revenue_growth_yoy": float("nan"),
-                        "eps_growth_yoy": float("nan"),
-                        "grossmargin_change_yoy": float("nan"),
-                        "opinc_growth_yoy": float("nan"),
-                    }
-                )
-                continue
-            latest = grp.iloc[-1]
-            prior = grp.iloc[-5]
-
-            rows.append(
-                {
-                    "ticker": tkr,
-                    "revenue_growth_yoy": _safe_growth(
-                        latest["revenue"], prior["revenue"]
-                    ),
-                    "eps_growth_yoy": _safe_growth(latest["eps"], prior["eps"]),
-                    "grossmargin_change_yoy": (
-                        latest["grossmargin"] - prior["grossmargin"]
-                        if pd.notna(latest["grossmargin"])
-                        and pd.notna(prior["grossmargin"])
-                        else float("nan")
-                    ),
-                    "opinc_growth_yoy": _safe_growth(latest["opinc"], prior["opinc"]),
-                }
-            )
-        if not rows:
-            return pd.DataFrame(
-                columns=[
-                    "revenue_growth_yoy",
-                    "eps_growth_yoy",
-                    "grossmargin_change_yoy",
-                    "opinc_growth_yoy",
-                ]
-            )
-        return pd.DataFrame(rows).set_index("ticker")
-
-    def _compute_derived(self, df: pd.DataFrame) -> pd.DataFrame:
-        def safe_div(a, b, fallback=float("nan")):
-            mask = pd.notna(a) & pd.notna(b) & (b != 0)
-            result = pd.Series(fallback, index=a.index, dtype=float)
-            result[mask] = a[mask] / b[mask]
-            return result
-
-        df["interest_coverage"] = safe_div(df["ebit"], df["intexp"])
-        # Only meaningful when OCF is positive; negative OCF makes ratio negative/misleading
-        df["capex_to_ocf"] = safe_div(
-            df["capex"].abs(), df["ncfo"].where(df["ncfo"] > 0)
-        )
-        df["rnd_intensity"] = safe_div(df["rnd"], df["revenue"])
-        df["gross_profitability"] = safe_div(df["gp"], df["assets"])
-        df["cfo_to_assets"] = safe_div(df["ncfo"], df["assets"])
-        df["accrual_quality"] = safe_div(df["ncfo"] - df["netinc"], df["assets"])
-        payout = df[["ncfcommon", "ncfdiv"]].sum(axis=1, min_count=1)
-        df["net_payout_yield"] = safe_div(
-            -payout,
-            df["marketcap"].where(df["marketcap"] > 0),
-        )
-        df["earnings_yield"] = _positive_inverse(df["pe"])
-        df["fcf_yield"] = _positive_ratio(df["fcf"], df["marketcap"])
-        df["ebitda_yield"] = _positive_inverse(df["evebitda"])
-        df["book_yield"] = _positive_inverse(df["pb"])
-        df["sales_yield"] = _positive_inverse(df["ps"])
-        return df
-
-    def _compute_quality_history(self, art: pd.DataFrame) -> pd.DataFrame:
-        if art.empty:
-            return pd.DataFrame(columns=list(QUALITY_HISTORY_COLUMNS))
-
-        art = self._compute_derived(art.copy())
-        art["calendardate"] = pd.to_datetime(art["calendardate"])
-        art["datekey"] = pd.to_datetime(art["datekey"])
-        rows = []
-
-        for ticker, group in art.groupby("ticker"):
-            group = (
-                group.dropna(subset=["calendardate"])
-                .sort_values(["calendardate", "datekey"])
-                .drop_duplicates("calendardate", keep="last")
-            )
-            if group.empty:
-                continue
-
-            latest = group.iloc[-1]
-            target_dates = [
-                latest["calendardate"] - pd.DateOffset(years=years_ago)
-                for years_ago in range(QUALITY_HISTORY_TARGET_YEARS + 1)
-            ]
-            sampled_indices = []
-            for target_date in target_dates:
-                distance = (group["calendardate"] - target_date).abs()
-                closest_index = distance.idxmin()
-                if (
-                    distance.loc[closest_index].days
-                    <= MAX_HISTORY_OBSERVATION_DISTANCE_DAYS
-                ):
-                    sampled_indices.append(closest_index)
-
-            window = (
-                group.loc[list(dict.fromkeys(sampled_indices))]
-                .sort_values("calendardate")
-                .copy()
-            )
-            prior = window.iloc[0] if not window.empty else None
-
-            history_years = float("nan")
-            observations = len(window)
-            if prior is not None:
-                history_years = (
-                    latest["calendardate"] - prior["calendardate"]
-                ).days / 365.25
-
-            complete_history = (
-                history_years >= MIN_QUALITY_HISTORY_YEARS
-                and observations >= MIN_QUALITY_HISTORY_OBSERVATIONS
-            )
-
-            def change(column: str) -> float:
-                if prior is None or not complete_history:
-                    return float("nan")
-                now = latest[column]
-                then = prior[column]
-                if pd.isna(now) or pd.isna(then):
-                    return float("nan")
-                return now - then
-
-            def volatility(column: str) -> float:
-                if not complete_history:
-                    return float("nan")
-                values = pd.to_numeric(window[column], errors="coerce").dropna()
-                if len(values) < 3:
-                    return float("nan")
-                return values.std(ddof=0)
-
-            rows.append(
-                {
-                    "ticker": ticker,
-                    "gross_profitability_change_5y": change("gross_profitability"),
-                    "roa_change_5y": change("roa"),
-                    "roic_change_5y": change("roic"),
-                    "cfo_to_assets_change_5y": change("cfo_to_assets"),
-                    "grossmargin_change_5y": change("grossmargin"),
-                    "share_dilution_5y": (
-                        _safe_growth(latest["shareswa"], prior["shareswa"])
-                        if prior is not None and complete_history
-                        else float("nan")
-                    ),
-                    "de_change_5y": change("de"),
-                    "roe_volatility_5y": volatility("roe"),
-                    "grossmargin_volatility_5y": volatility("grossmargin"),
-                    "quality_history_years": history_years,
-                    "quality_history_observations": observations,
-                    "complete_multi_year_history": complete_history,
-                }
-            )
-
-        if not rows:
-            return pd.DataFrame(columns=list(QUALITY_HISTORY_COLUMNS))
-        return pd.DataFrame(rows).set_index("ticker")
-
-    def _attach_sectors(self, df: pd.DataFrame) -> pd.DataFrame:
-        if df.empty:
-            df["sector"] = pd.Series(dtype="object")
-            return df
-
-        metadata = tickers_repo.get(
-            tickers=df.index.astype(str).tolist(),
-            table_code="SEP",
-        )
-        sectors = metadata.drop_duplicates("ticker", keep="last").set_index("ticker")[
-            "sector"
-        ]
-        df["sector"] = sectors.reindex(df.index).fillna("Unknown")
-        return df
-
-    def _compute_cross_section(self, universe: pd.DataFrame) -> pd.DataFrame:
-        universe = self._attach_sectors(universe)
-
-        universe["roe_percentile"] = (
-            universe["roe"].rank(pct=True, method="average") * 100
-        )
-        universe["de_percentile"] = _rank_within_sector(
-            universe["de"], universe["sector"]
-        )
-        universe["currentratio_percentile"] = _rank_within_sector(
-            universe["currentratio"], universe["sector"]
-        )
-
-        percentile_columns = []
-        for value_column in VALUE_YIELD_COLUMNS:
-            percentile_column = f"{value_column}_percentile"
-            universe[percentile_column] = _rank_within_sector(
-                universe[value_column], universe["sector"]
-            )
-            percentile_columns.append(percentile_column)
-
-        universe["valid_value_metrics"] = (
-            universe[list(VALUE_YIELD_COLUMNS)].notna().sum(axis=1)
-        )
-        universe["value_composite_score"] = universe[percentile_columns].mean(
-            axis=1, skipna=True
-        )
-        universe.loc[universe["valid_value_metrics"] < 2, "value_composite_score"] = (
-            np.nan
-        )
-        universe["value_composite_percentile"] = _rank_within_sector(
-            universe["value_composite_score"], universe["sector"]
-        )
-
-        pillar_columns = []
-        for pillar, metrics in QUALITY_PILLAR_METRICS.items():
-            metric_percentiles = []
-            for metric, direction in metrics.items():
-                percentile_column = f"_quality_{metric}_percentile"
-                values = universe.get(
-                    metric,
-                    pd.Series(np.nan, index=universe.index, dtype=float),
-                )
-                universe[percentile_column] = _rank_within_sector(
-                    values * direction,
-                    universe["sector"],
-                )
-                metric_percentiles.append(percentile_column)
-
-            score_column = f"quality_{pillar}_score"
-            count_column = f"_valid_quality_{pillar}_metrics"
-            universe[score_column], universe[count_column] = _mean_with_minimum(
-                universe,
-                metric_percentiles,
-                QUALITY_PILLAR_MINIMUMS[pillar],
-            )
-            pillar_columns.append(score_column)
-
-        universe["valid_quality_pillars"] = universe[pillar_columns].notna().sum(axis=1)
-        universe["quality_composite_score"] = universe[pillar_columns].mean(
-            axis=1, skipna=True
-        )
-        required_pillars = [
-            "quality_profitability_score",
-            "quality_growth_score",
-            "quality_safety_score",
-        ]
-        universe.loc[
-            universe[required_pillars].isna().any(axis=1),
-            "quality_composite_score",
-        ] = np.nan
-        universe["quality_composite_percentile"] = _rank_within_sector(
-            universe["quality_composite_score"],
-            universe["sector"],
-        )
-        return universe
-
     def load_data(self) -> None:
         art = fundamentals_repo.get_latest(self.tickers, "ART", self.signal_day)
         art = art.set_index("ticker")
-        art = self._compute_derived(art)
+        art = _compute_derived(art)
 
         # Cross-sectional ranks use the full ART universe (point-in-time). TICKERS
         # currently stores only current sector classifications; historical sector
         # versioning remains a separate data-model requirement.
         universe = fundamentals_repo.get_latest(None, "ART", self.signal_day)
         universe = universe.set_index("ticker")
-        universe = self._compute_derived(universe)
-        quality_history = self._compute_quality_history(self._load_art_history())
+        universe = _compute_derived(universe)
+        quality_history = _compute_quality_history(self._load_art_history())
         universe = universe.join(quality_history, how="left")
-        universe = self._compute_cross_section(universe)
+        universe = _compute_cross_section(universe)
 
         # YoY growth (and its percentile) are computed across the full universe so
         # the percentile is independent of the request batch; the batch's own
         # growth values are a subset of this same computation.
-        growth = self._compute_growth(self._load_arq(universe.index.tolist()))
+        growth = _compute_growth(self._load_arq(universe.index.tolist()))
         growth["revenue_growth_percentile"] = (
             growth["revenue_growth_yoy"].rank(pct=True) * 100
         )

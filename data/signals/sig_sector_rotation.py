@@ -70,6 +70,42 @@ class SectorRotationSnapshot:
         return 1.0 - (self.sector_rank_20d - 1) / 10
 
 
+def _compute_sector_table(prices: pd.DataFrame) -> dict:
+    """Per-sector trailing returns, 20d rank, leaders/laggards, and the
+    cyclical-minus-defensive spread, from sector-ETF prices."""
+    prices = prices.copy()
+    prices["date"] = pd.to_datetime(prices["date"])
+    rows = []
+    for etf, grp in prices.groupby("ticker"):
+        sector = ETF_SECTOR_MAP[etf]
+        c = grp.sort_values("date")["close"].values
+        rows.append(
+            {
+                "sector": sector,
+                "return_5d": (c[-1] / c[-6] - 1) if len(c) >= 6 else float("nan"),
+                "return_20d": (c[-1] / c[-21] - 1) if len(c) >= 21 else float("nan"),
+                "return_60d": (c[-1] / c[-61] - 1) if len(c) >= 61 else float("nan"),
+            }
+        )
+
+    df = pd.DataFrame(rows).set_index("sector")
+    df["rank_20d"] = df["return_20d"].rank(ascending=False, method="min")
+
+    sorted_df = df.sort_values("return_20d", ascending=False)
+    cyc_ret = df[df.index.isin(_CYCLICAL_SECTORS)]["return_20d"].mean()
+    def_ret = df[df.index.isin(_DEFENSIVE_SECTORS)]["return_20d"].mean()
+    spread = (
+        float(cyc_ret - def_ret) if pd.notna(cyc_ret) and pd.notna(def_ret) else 0.0
+    )
+    return {
+        "table": df,
+        "top_3": sorted_df.index[:3].tolist(),
+        "bottom_3": sorted_df.index[-3:].tolist(),
+        "spread": spread,
+        "cyclicals_leading": spread > 0,
+    }
+
+
 class SectorRotationModel:
     def __init__(self, signal_day: pd.Timestamp):
         self.signal_day = signal_day
@@ -92,37 +128,12 @@ class SectorRotationModel:
                 f"No sector ETF price data as of {self.signal_day.date()}"
             )
 
-        prices["date"] = pd.to_datetime(prices["date"])
-        rows = []
-        for etf, grp in prices.groupby("ticker"):
-            sector = ETF_SECTOR_MAP[etf]
-            c = grp.sort_values("date")["close"].values
-            rows.append(
-                {
-                    "sector": sector,
-                    "return_5d": (c[-1] / c[-6] - 1) if len(c) >= 6 else float("nan"),
-                    "return_20d": (c[-1] / c[-21] - 1)
-                    if len(c) >= 21
-                    else float("nan"),
-                    "return_60d": (c[-1] / c[-61] - 1)
-                    if len(c) >= 61
-                    else float("nan"),
-                }
-            )
-
-        df = pd.DataFrame(rows).set_index("sector")
-        df["rank_20d"] = df["return_20d"].rank(ascending=False, method="min")
-
-        sorted_df = df.sort_values("return_20d", ascending=False)
-        self._top_3 = sorted_df.index[:3].tolist()
-        self._bottom_3 = sorted_df.index[-3:].tolist()
-
-        cyc_ret = df[df.index.isin(_CYCLICAL_SECTORS)]["return_20d"].mean()
-        def_ret = df[df.index.isin(_DEFENSIVE_SECTORS)]["return_20d"].mean()
-        if pd.notna(cyc_ret) and pd.notna(def_ret):
-            self._spread = float(cyc_ret - def_ret)
-        self._cyclicals_leading = self._spread > 0
-        self._sector_data = df
+        table = _compute_sector_table(prices)
+        self._sector_data = table["table"]
+        self._top_3 = table["top_3"]
+        self._bottom_3 = table["bottom_3"]
+        self._spread = table["spread"]
+        self._cyclicals_leading = table["cyclicals_leading"]
 
     def build_snapshot(self, ticker: str, sector: str | None) -> SectorRotationSnapshot:
         df = self._sector_data

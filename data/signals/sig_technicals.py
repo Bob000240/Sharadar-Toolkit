@@ -1,4 +1,3 @@
-import numpy as np
 import pandas as pd
 from dataclasses import dataclass, fields
 
@@ -9,15 +8,38 @@ import database.market.tickers_repo as tickers_repo
 from data.live_equity import MarketData
 from data.indicators import compute_indicators
 from set_up.config import ETF_SECTOR_MAP
+from data.signals._common import python_scalar as _python_scalar, rank_pct
 
 
 _RETURN_COLS = ["return_5d", "return_20d", "return_60d", "return_252d"]
 
 
-def _python_scalar(value):
-    if isinstance(value, np.generic):
-        return value.item()
-    return value
+def _derive_relative_returns(stock_data, benchmark_data, etf_data, benchmark_ticker):
+    """Add benchmark excess returns and sector-relative returns (vs sector ETF)."""
+    bench_5d = benchmark_data.loc[benchmark_ticker, "return_5d"]
+    bench_20d = benchmark_data.loc[benchmark_ticker, "return_20d"]
+    stock_data["excess_return_5d"] = stock_data["return_5d"] - bench_5d
+    stock_data["excess_return_20d"] = stock_data["return_20d"] - bench_20d
+    etf_returns = etf_data[["return_5d", "return_20d"]].copy()
+    etf_returns.index = etf_returns.index.map(ETF_SECTOR_MAP)
+    stock_data["sector_relative_5d"] = stock_data["return_5d"] - stock_data[
+        "sector"
+    ].map(etf_returns["return_5d"])
+    stock_data["sector_relative_20d"] = stock_data["return_20d"] - stock_data[
+        "sector"
+    ].map(etf_returns["return_20d"])
+    return stock_data
+
+
+def _derive_return_percentiles(stock_data, universe_returns):
+    """Rank each return horizon across the full universe (batch values overlaid)."""
+    universe = universe_returns.copy()
+    universe.loc[stock_data.index, _RETURN_COLS] = stock_data[_RETURN_COLS]
+    for col in _RETURN_COLS:
+        stock_data[f"{col}_percentile"] = rank_pct(universe[col]).reindex(
+            stock_data.index
+        )
+    return stock_data
 
 
 @dataclass
@@ -339,32 +361,12 @@ class TechnicalsModel:
                 )
             self.etf_data = fund_data.loc[self.etf_tickers]
 
-        bench_5d = self.benchmark_data.loc[self.benchmark_ticker, "return_5d"]
-        bench_20d = self.benchmark_data.loc[self.benchmark_ticker, "return_20d"]
-        self.stock_data["excess_return_5d"] = self.stock_data["return_5d"] - bench_5d
-        self.stock_data["excess_return_20d"] = self.stock_data["return_20d"] - bench_20d
-
-        etf_returns = self.etf_data[["return_5d", "return_20d"]].copy()
-        etf_returns.index = etf_returns.index.map(ETF_SECTOR_MAP)
-        self.stock_data["sector_relative_5d"] = self.stock_data[
-            "return_5d"
-        ] - self.stock_data["sector"].map(etf_returns["return_5d"])
-        self.stock_data["sector_relative_20d"] = self.stock_data[
-            "return_20d"
-        ] - self.stock_data["sector"].map(etf_returns["return_20d"])
-
-        self._assign_return_percentiles()
-
-    def _assign_return_percentiles(self) -> None:
-        # Rank each return horizon across the full indicators universe, overlaying
-        # the batch's current (possibly live-updated) values first.
-        universe = self._universe_returns.copy()
-        universe.loc[self.stock_data.index, _RETURN_COLS] = self.stock_data[
-            _RETURN_COLS
-        ]
-        for col in _RETURN_COLS:
-            ranks = universe[col].rank(pct=True) * 100
-            self.stock_data[f"{col}_percentile"] = ranks.reindex(self.stock_data.index)
+        self.stock_data = _derive_relative_returns(
+            self.stock_data, self.benchmark_data, self.etf_data, self.benchmark_ticker
+        )
+        self.stock_data = _derive_return_percentiles(
+            self.stock_data, self._universe_returns
+        )
 
     def get(self, ticker: str, col: str):
         if ticker not in self.stock_data.index:

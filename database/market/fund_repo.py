@@ -29,7 +29,7 @@ def create_table():
                 high            DOUBLE PRECISION,
                 low             DOUBLE PRECISION,
                 close           DOUBLE PRECISION,
-                volume          BIGINT,
+                volume          DOUBLE PRECISION,
                 closeadj        DOUBLE PRECISION,
                 closeunadj      DOUBLE PRECISION,
                 lastupdated     DATE,
