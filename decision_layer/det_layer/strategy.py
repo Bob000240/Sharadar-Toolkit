@@ -80,11 +80,15 @@ class Strategy(ABC):
     def _resolve_universe(self, tickers: list[str] | None) -> list[str]:
         if tickers is not None:
             return tickers
-        from set_up.config import SP500_SYMBOLS, get_stock_symbols
+        from set_up.config import get_stock_symbols
 
-        if self.profile.get("universe") == "SP500":
-            return list(dict.fromkeys(SP500_SYMBOLS))
         return get_stock_symbols()
+
+    def _rank_key(self, packet: dict):
+        """Ranking key for top_n selection (higher = better). Default is the
+        setup_score; a strategy whose score saturates can override to add a
+        tiebreaker."""
+        return packet["setup_score"]
 
     def _macro_context(self, signal_day: date) -> tuple[MacroOverlay, float]:
         overlay = MacroModel(pd.Timestamp(signal_day)).build_snapshot().overlay()
@@ -139,9 +143,18 @@ class Strategy(ABC):
         }
 
     def run(
-        self, signal_day: date, tickers: list[str] | None = None, persist: bool = True
+        self,
+        signal_day: date,
+        tickers: list[str] | None = None,
+        persist: bool = True,
+        top_n: int | None = None,
     ) -> list[dict]:
-        """Orchestrate: resolve universe -> macro -> screen -> price -> emit packets."""
+        """Orchestrate: resolve universe -> macro -> screen -> price -> emit packets.
+
+        `top_n` selects the highest-ranked packets (by `_rank_key`) for the returned
+        shortlist. It is a portfolio-selection convenience, not a screen: the full
+        passing set is still persisted for audit; only the returned list is trimmed.
+        """
         tickers = self._resolve_universe(tickers)
         overlay, macro_score = self._macro_context(signal_day)
         results = self.screen(signal_day, tickers)
@@ -166,6 +179,9 @@ class Strategy(ABC):
             if persist:
                 packet["candidate_id"] = candidates_repo.insert_candidate(packet)
             packets.append(packet)
+
+        if top_n is not None:
+            packets = sorted(packets, key=self._rank_key, reverse=True)[:top_n]
         return packets
 
     # ── Strategy-owned ────────────────────────────────────────────────────

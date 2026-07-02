@@ -49,6 +49,9 @@ QUALITY_PILLAR_METRICS = {
         "share_dilution_5y": -1,
     },
 }
+# Minimum valid metrics per pillar to score it (out of 6/5/6/2 metrics respectively
+# — see QUALITY_PILLAR_METRICS above). CALIBRATION: counts are not independently
+# justified beyond "a majority of the pillar's metrics must be present."
 QUALITY_PILLAR_MINIMUMS = {
     "profitability": 3,
     "growth": 2,
@@ -69,9 +72,16 @@ QUALITY_HISTORY_COLUMNS = (
     "quality_history_observations",
     "complete_multi_year_history",
 )
-MIN_SECTOR_RANK_SIZE = 5
+# 5-year lookback for quality's growth pillar (Piotroski 2000 uses 1-year changes;
+# this is a deliberate deviation toward durable multi-year improvement, not a
+# reproduction of Piotroski's exact window). CALIBRATION: 5y vs. e.g. 3y is a
+# modeling choice, not independently derived.
 QUALITY_HISTORY_TARGET_YEARS = 5
+# Tolerance for matching a "N years ago" target date to an actual filing date.
+# CALIBRATION: uncited, picked as roughly half a year of slack.
 MAX_HISTORY_OBSERVATION_DISTANCE_DAYS = 183
+# Minimum span/count of annual observations to trust a 5y-change measurement.
+# CALIBRATION: uncited magnitude bands.
 MIN_QUALITY_HISTORY_YEARS = 4.75
 MIN_QUALITY_HISTORY_OBSERVATIONS = 6
 
@@ -340,6 +350,12 @@ def _compute_cross_section(universe: pd.DataFrame) -> pd.DataFrame:
 
 @dataclass
 class FundamentalsSnapshot:
+    """Per-ticker view onto the fundamentals pipeline. Only carries fields read
+    by valuation()/profitability()/balance_sheet_health()/risk_flags() or by a
+    strategy directly — the underlying compute pipeline (_compute_derived,
+    _compute_cross_section, _compute_quality_history) still computes and uses
+    many more intermediate columns; this snapshot just doesn't re-expose them."""
+
     ticker: str
     signal_day: pd.Timestamp
     datekey: pd.Timestamp
@@ -357,35 +373,20 @@ class FundamentalsSnapshot:
     # Comparable valuation yields; invalid or non-positive bases are NaN.
     earnings_yield: float
     fcf_yield: float
-    ebitda_yield: float
-    book_yield: float
-    sales_yield: float
 
     # Profitability (ART)
     roe: float
     roa: float
     roic: float
     grossmargin: float
-    ebitdamargin: float
     netmargin: float
     fcf: float
     opinc: float
-    gross_profitability: float
-    cfo_to_assets: float
     accrual_quality: float
 
     # Earnings quality (ART)
     ncfo: float
-    capex: float
-    ebit: float
-    intexp: float
     interest_coverage: float  # ebit / intexp
-    capex_to_ocf: float  # abs(capex) / ncfo
-
-    # Efficiency (ART)
-    assetturnover: float
-    rnd: float  # absolute R&D spend
-    rnd_intensity: float  # rnd / revenue
 
     # Balance sheet (ART)
     de: float
@@ -393,11 +394,6 @@ class FundamentalsSnapshot:
     cashneq: float
     workingcapital: float
     payoutratio: float
-    net_payout_yield: float
-
-    # Reference levels (ART)
-    revenue: float
-    eps: float
 
     # Growth (YoY from ARQ: most recent quarter vs same quarter 1 year prior)
     revenue_growth_yoy: float
@@ -405,37 +401,14 @@ class FundamentalsSnapshot:
     grossmargin_change_yoy: float
     opinc_growth_yoy: float
 
-    # Multi-year quality evidence from annual ART observations
-    gross_profitability_change_5y: float
-    roa_change_5y: float
-    roic_change_5y: float
-    cfo_to_assets_change_5y: float
-    grossmargin_change_5y: float
-    share_dilution_5y: float
-    de_change_5y: float
-    roe_volatility_5y: float
-    grossmargin_volatility_5y: float
-    quality_history_years: float
-    quality_history_observations: int
-    complete_multi_year_history: bool
-
-    # Cross-sectional percentiles
+    # Cross-sectional percentiles / composites
     roe_percentile: float
-    revenue_growth_percentile: float
-    earnings_yield_percentile: float
-    fcf_yield_percentile: float
-    ebitda_yield_percentile: float
-    book_yield_percentile: float
-    sales_yield_percentile: float
-    value_composite_score: float
     value_composite_percentile: float
     valid_value_metrics: int
     de_percentile: float
     currentratio_percentile: float
     quality_profitability_score: float
-    quality_growth_score: float
     quality_safety_score: float
-    quality_capital_discipline_score: float
     quality_composite_score: float
     quality_composite_percentile: float
     valid_quality_pillars: int
@@ -457,25 +430,6 @@ class FundamentalsSnapshot:
             "sector_deep_value": self.value_composite_percentile >= 70,
         }
 
-    def value_metrics(self) -> dict[str, float]:
-        return {
-            "earnings_yield": self.earnings_yield,
-            "fcf_yield": self.fcf_yield,
-            "ebitda_yield": self.ebitda_yield,
-            "book_yield": self.book_yield,
-            "sales_yield": self.sales_yield,
-        }
-
-    def value_percentiles(self) -> dict[str, float]:
-        return {
-            "earnings_yield": self.earnings_yield_percentile,
-            "fcf_yield": self.fcf_yield_percentile,
-            "ebitda_yield": self.ebitda_yield_percentile,
-            "book_yield": self.book_yield_percentile,
-            "sales_yield": self.sales_yield_percentile,
-            "composite": self.value_composite_percentile,
-        }
-
     def profitability(self) -> dict[str, bool]:
         return {
             "roe_positive": self.roe > 0,
@@ -488,22 +442,6 @@ class FundamentalsSnapshot:
             "opinc_positive": self.opinc > 0,
         }
 
-    def earnings_quality(self) -> dict[str, bool]:
-        no_interest = pd.isna(self.interest_coverage)
-        return {
-            "interest_covered": no_interest or self.interest_coverage > 3.0,
-            "strong_coverage": no_interest or self.interest_coverage > 10.0,
-            "low_capex_intensity": self.capex_to_ocf < 0.5,
-            "ocf_positive": self.ncfo > 0,
-        }
-
-    def efficiency(self) -> dict[str, bool]:
-        return {
-            "asset_turnover_ok": self.assetturnover > 0.5,
-            "investing_in_rnd": self.rnd_intensity > 0.05,
-            "high_rnd": self.rnd_intensity > 0.15,
-        }
-
     def balance_sheet_health(self) -> dict[str, bool]:
         return {
             "low_leverage": self.de < 1.0,
@@ -512,100 +450,6 @@ class FundamentalsSnapshot:
             "positive_working_cap": self.workingcapital > 0,
             "sustainable_payout": 0 <= self.payoutratio < 0.75,
         }
-
-    def growth_momentum(self) -> dict[str, bool]:
-        return {
-            "revenue_growing": self.revenue_growth_yoy > 0,
-            "revenue_strong": self.revenue_growth_yoy > 0.10,
-            "eps_growing": self.eps_growth_yoy > 0,
-            "eps_strong": self.eps_growth_yoy > 0.10,
-            "margin_expanding": self.grossmargin_change_yoy > 0,
-            "opinc_growing": self.opinc_growth_yoy > 0,
-        }
-
-    def quality_pillars(self) -> dict[str, float]:
-        return {
-            "profitability": self.quality_profitability_score,
-            "growth": self.quality_growth_score,
-            "safety": self.quality_safety_score,
-            "capital_discipline": self.quality_capital_discipline_score,
-            "composite": self.quality_composite_score,
-            "sector_percentile": self.quality_composite_percentile,
-        }
-
-    def quality_screen(self) -> dict[str, bool]:
-        hard_distress = (
-            self.ncfo < 0
-            or (self.fcf < 0 and self.netmargin < 0)
-            or 0 < self.interest_coverage < 1.5
-            or self.de_percentile >= 95
-        )
-        return {
-            "complete_multi_year_history": bool(self.complete_multi_year_history),
-            "quality_top_30pct": self.quality_composite_percentile >= 70,
-            "profitability_strong": self.quality_profitability_score >= 60,
-            "safety_not_weak": self.quality_safety_score >= 30,
-            "operating_cash_flow_positive": self.ncfo > 0,
-            "no_hard_distress": not hard_distress,
-        }
-
-    def quality_score(self) -> float:
-        if pd.isna(self.quality_composite_score):
-            return float("nan")
-        return self.quality_composite_score / 100
-
-    def financial_health(self) -> dict[str, bool | None]:
-        def check(value: float, predicate) -> bool | None:
-            if pd.isna(value):
-                return None
-            return bool(predicate(value))
-
-        direction_known = pd.notna(self.grossmargin_change_yoy) or pd.notna(
-            self.opinc_growth_yoy
-        )
-        operating_direction_ok = None
-        if direction_known:
-            operating_direction_ok = bool(
-                (
-                    pd.notna(self.grossmargin_change_yoy)
-                    and self.grossmargin_change_yoy >= 0
-                )
-                or (pd.notna(self.opinc_growth_yoy) and self.opinc_growth_yoy >= 0)
-            )
-
-        if pd.isna(self.intexp):
-            interest_covered = None
-        elif self.intexp <= 0:
-            interest_covered = True
-        else:
-            interest_covered = check(self.interest_coverage, lambda value: value >= 1.5)
-
-        return {
-            "roa_positive": check(self.roa, lambda value: value > 0),
-            "roic_positive": check(self.roic, lambda value: value > 0),
-            "gross_profitability_positive": check(
-                self.gross_profitability, lambda value: value > 0
-            ),
-            "operating_cash_flow_positive": check(self.ncfo, lambda value: value > 0),
-            "free_cash_flow_positive": check(self.fcf, lambda value: value > 0),
-            "interest_covered": interest_covered,
-            "leverage_not_extreme": check(self.de_percentile, lambda value: value < 90),
-            "liquidity_not_extreme": check(
-                self.currentratio_percentile, lambda value: value >= 10
-            ),
-            "revenue_not_collapsing": check(
-                self.revenue_growth_yoy, lambda value: value > -0.20
-            ),
-            "operating_direction_ok": operating_direction_ok,
-        }
-
-    def financial_health_score(self) -> float:
-        known = [
-            value for value in self.financial_health().values() if value is not None
-        ]
-        if not known:
-            return float("nan")
-        return sum(known) / len(known)
 
     def risk_flags(self) -> dict[str, bool]:
         return {
@@ -732,69 +576,32 @@ class FundamentalsModel:
             marketcap=g("marketcap"),
             earnings_yield=g("earnings_yield"),
             fcf_yield=g("fcf_yield"),
-            ebitda_yield=g("ebitda_yield"),
-            book_yield=g("book_yield"),
-            sales_yield=g("sales_yield"),
             roe=g("roe"),
             roa=g("roa"),
             roic=g("roic"),
             grossmargin=g("grossmargin"),
-            ebitdamargin=g("ebitdamargin"),
             netmargin=g("netmargin"),
             fcf=g("fcf"),
             opinc=g("opinc"),
-            gross_profitability=g("gross_profitability"),
-            cfo_to_assets=g("cfo_to_assets"),
             accrual_quality=g("accrual_quality"),
             ncfo=g("ncfo"),
-            capex=g("capex"),
-            ebit=g("ebit"),
-            intexp=g("intexp"),
             interest_coverage=g("interest_coverage"),
-            capex_to_ocf=g("capex_to_ocf"),
-            assetturnover=g("assetturnover"),
-            rnd=g("rnd"),
-            rnd_intensity=g("rnd_intensity"),
             de=g("de"),
             currentratio=g("currentratio"),
             cashneq=g("cashneq"),
             workingcapital=g("workingcapital"),
             payoutratio=g("payoutratio"),
-            net_payout_yield=g("net_payout_yield"),
-            revenue=g("revenue"),
-            eps=g("eps"),
             revenue_growth_yoy=g("revenue_growth_yoy"),
             eps_growth_yoy=g("eps_growth_yoy"),
             grossmargin_change_yoy=g("grossmargin_change_yoy"),
             opinc_growth_yoy=g("opinc_growth_yoy"),
-            gross_profitability_change_5y=g("gross_profitability_change_5y"),
-            roa_change_5y=g("roa_change_5y"),
-            roic_change_5y=g("roic_change_5y"),
-            cfo_to_assets_change_5y=g("cfo_to_assets_change_5y"),
-            grossmargin_change_5y=g("grossmargin_change_5y"),
-            share_dilution_5y=g("share_dilution_5y"),
-            de_change_5y=g("de_change_5y"),
-            roe_volatility_5y=g("roe_volatility_5y"),
-            grossmargin_volatility_5y=g("grossmargin_volatility_5y"),
-            quality_history_years=g("quality_history_years"),
-            quality_history_observations=g("quality_history_observations"),
-            complete_multi_year_history=g("complete_multi_year_history"),
             roe_percentile=g("roe_percentile"),
-            revenue_growth_percentile=g("revenue_growth_percentile"),
-            earnings_yield_percentile=g("earnings_yield_percentile"),
-            fcf_yield_percentile=g("fcf_yield_percentile"),
-            ebitda_yield_percentile=g("ebitda_yield_percentile"),
-            book_yield_percentile=g("book_yield_percentile"),
-            sales_yield_percentile=g("sales_yield_percentile"),
-            value_composite_score=g("value_composite_score"),
             value_composite_percentile=g("value_composite_percentile"),
             valid_value_metrics=g("valid_value_metrics"),
             de_percentile=g("de_percentile"),
             currentratio_percentile=g("currentratio_percentile"),
             quality_profitability_score=g("quality_profitability_score"),
-            quality_growth_score=g("quality_growth_score"),
             quality_safety_score=g("quality_safety_score"),
-            quality_capital_discipline_score=g("quality_capital_discipline_score"),
             quality_composite_score=g("quality_composite_score"),
             quality_composite_percentile=g("quality_composite_percentile"),
             valid_quality_pillars=g("valid_quality_pillars"),
@@ -804,24 +611,18 @@ class FundamentalsModel:
 def print_snapshot_report(snap: FundamentalsSnapshot) -> None:
     sections = {
         "Valuation": snap.valuation(),
-        "Value Metrics": snap.value_metrics(),
-        "Value Percentiles": snap.value_percentiles(),
         "Profitability": snap.profitability(),
-        "Earnings Quality": snap.earnings_quality(),
-        "Financial Health": snap.financial_health(),
-        "Quality Pillars": snap.quality_pillars(),
-        "Quality Screen": snap.quality_screen(),
-        "Efficiency": snap.efficiency(),
         "Balance Sheet": snap.balance_sheet_health(),
-        "Growth": snap.growth_momentum(),
         "Risk Flags": snap.risk_flags(),
     }
     print(
         f"\n=== {snap.ticker} | {snap.signal_day.date()} (period {snap.calendardate.date()}, filed {snap.datekey.date()}) ==="
     )
-    # print(snap)
-    print(f"Quality Score: {snap.quality_score():.3f}")
-    print(f"Financial Health Score: {snap.financial_health_score():.3f}")
+    print(
+        f"value_pctile={snap.value_composite_percentile:.1f}  "
+        f"quality_pctile={snap.quality_composite_percentile:.1f}  "
+        f"valid_pillars={snap.valid_quality_pillars}"
+    )
     for title, values in sections.items():
         print(f"{title}: {values}")
 

@@ -32,6 +32,26 @@ ETF_SECTOR_MAP = {
 }
 
 
+# Market-cap buckets (USD), classified on a point-in-time market cap. Boundaries
+# mirror the bands used in sig_fundamentals.valuation() (mid 1B–10B, large ≥10B);
+# the 300M floor drops nano/micro caps, which every strategy's universe excludes.
+_MICRO_CAP_CEILING = 300_000_000
+_MID_CAP_FLOOR = 1_000_000_000
+_LARGE_CAP_FLOOR = 10_000_000_000
+
+
+def cap_bucket(marketcap) -> str | None:
+    """small / mid / large for a point-in-time market cap; None for nano/micro or
+    missing (which the strategies exclude)."""
+    if marketcap is None or marketcap != marketcap or marketcap < _MICRO_CAP_CEILING:
+        return None
+    if marketcap >= _LARGE_CAP_FLOOR:
+        return "large"
+    if marketcap >= _MID_CAP_FLOOR:
+        return "mid"
+    return "small"
+
+
 @lru_cache(maxsize=2)
 def get_stock_symbols(include_delisted: bool = False) -> list[str]:
     """Return the database-backed tradeable stock universe for the current run."""

@@ -30,8 +30,7 @@ The deterministic suite consists of:
 - `strat_momentum`
 - `strat_value`
 - `strat_quality`
-- `strat_smartmoney`
-- `strat_reversal`
+- `strat_reversal` (planned; not yet specified)
 
 Each passing strategy emits a candidate packet with:
 
@@ -150,7 +149,7 @@ The remaining Phase 0 work is cleanup rather than architecture discovery:
 | Phase | Layer | Progress | Notes |
 |---|---|---|---|
 | Phase 0 | Foundation | Mostly complete | Data access, repositories, setup, signals, candidate storage, decision memory, outcomes, and eval storage exist. |
-| Phase 1 | Deterministic | In progress | `strat_momentum`, `strat_value`, `strat_quality`, and `strat_informed_activity` screens, entry modes, and exit policies are defined. `strat_reversal` remains to be specified. |
+| Phase 1 | Deterministic | In progress | `strat_momentum`, `strat_value`, and `strat_quality` screens, entry modes, and exit policies are defined and research-backed. `strat_informed_activity` was removed; `strat_reversal` remains unspecified. |
 | Phase 2 | Deterministic | Partial | The profile registry and `screened_candidates` exist; the active-strategy runner and pre-agent gates still need to be built. |
 | Phase 3 | Deterministic | Partial | Execution/PM code exists; deterministic verdict validation and no-order debug path need tightening. |
 | Phase 4 | Agentic | Not started | Typed agent-data tools need schemas, implementations, and audit logging. |
@@ -223,6 +222,36 @@ Point-in-time requirements:
 - agent memory only retrieves trades resolved before `decision_date`
 - current signal context is treated as transient unless attached to a recorded decision
 
+Known point-in-time biases (open):
+
+These are look-ahead leaks currently accepted with mitigation. Each breaks strict
+point-in-time correctness until the data model is extended.
+
+- **Current-state sector labels — highest impact.** `tickers` is a flat current snapshot
+  (one sector per name, no history: 21,896 rows = 21,896 tickers), so `sig_fundamentals`
+  ranks a company's *entire* history under its *present* sector. Because value and quality
+  gate on sector-relative percentiles, this is a look-ahead leak in their core mechanism.
+  Measured magnitude: low-single-digit % of names on average, but **systematic and
+  concentrated**, not random noise. The largest contributor is the 2018-19 recomposition of
+  "Communication Services" (Google/Meta/Netflix/Disney leaving Technology / Consumer
+  Cyclical) — 297 currently-Comm-Services names have fundamentals predating the change, and
+  the affected names skew mega-cap and highly liquid, so they dominate what the screens
+  surface. The ART history (2016→2026) straddles the event. A direct count of all historical
+  reclassifications is impossible from this DB — there is no temporal sector data at all,
+  which is the root problem. **Mitigation until versioned sector data exists: restrict
+  walk-forward calibration to ~2020-onward, where current labels are approximately valid,
+  and treat any pre-2019 value/quality backtest number as sector-biased.**
+- **Institutional 45-day filing delay** (`sig_institutional`). Actual 13F filing dates are
+  absent, so a universal 45-day-after-quarter-end offset is assumed; holder identity,
+  amendments, splits, and manager coverage can distort quarter-over-quarter changes.
+  Contained because institutional data was removed from all deterministic gates (optional
+  agent evidence only) — it influences no trade decision today. Quarantine stands until
+  precise filing dates are sourced; do not wire it back into a gate before then.
+- **Revised filings — secondary.** Fundamentals are filtered on `datekey <= decision_date`,
+  correct *if* Sharadar rows are as-first-reported. If a restatement overwrote an earlier
+  period rather than appending a row, revised numbers could leak. Needs a spot-check of
+  Sharadar's revision-storage semantics, not assumed either way.
+
 Phase 0 output:
 
 - documented data-source map: mostly complete
@@ -246,10 +275,9 @@ the strategy's screen and at least one of its entry modes; it does not need to p
 
 | Strategy | Universe | Best macro regime | Key flaws | Signal files | Screen | Entry modes |
 |---|---|---|---|---|---|---|
-| `strat_momentum` | Primarily liquid mid-cap and established small-cap US equities; qualifying large caps remain eligible; exclude nano, micro, and illiquid securities | Preferred, not required: persistent broad trends; broad market and sector participation; benign credit and liquidity; stable or falling volatility. Avoid high-volatility rebounds following broad market declines. Cycle labels are context, not gates | Momentum crashes during sharp regime reversals; whipsaw in range-bound markets; high turnover and trading costs; crowded or overextended leaders; sector concentration; negatively skewed crash risk | `sig_technicals`<br>`sig_sector_rotation`<br>`sig_macro` | Sector leadership; liquid stock in a primary uptrend; positive volatility-adjusted momentum; at least two positive return horizons; benchmark or sector relative strength; no hard volatility, liquidity, drawdown, or structural risk failure.<br><br>**Qualifying large caps:** top-quartile momentum; positive 20-, 60-, and preferably 252-day returns; benchmark and sector outperformance; price above the 50-day and 200-day averages with the 50-day above the 200-day; strong trend quality; sector leadership; acceptable volatility and extension; and at least one valid entry mode | **Momentum reacceleration:** renewed momentum after consolidation<br>**52-week-high breakout:** prior 52-week high breaks with volume, bullish MA structure, and acceptable extension<br>**Pullback reclaim:** controlled 2-10% pullback with trend intact, followed by a 20-day or 50-day support/reclaim trigger<br><br>A candidate may qualify for more than one mode. |
-| `strat_value` | Liquid small-, mid-, and large-cap US common stocks; exclude nano, micro, and illiquid securities. Financials and REITs are excluded only in v1 until dedicated sector metrics exist | Preferred, not required: broadening recovery or early expansion; improving growth and credit; rising inflation expectations; wide value-growth valuation dispersion. Interest rates and curve slope are context, not gates | Value traps and distress; peak-cycle earnings creating false cheapness; sector concentration; accounting and intangible-asset bias; long convergence and prolonged underperformance; specialized sectors require dedicated metrics | `sig_fundamentals`<br>`sig_technicals`<br>`sig_events`<br>`sig_sector_rotation`<br>`sig_macro` | Rank valuation within sector rather than against the full market. Require at least two valid valuation measures from earnings yield, FCF yield, EBITDA yield, book yield, and sales yield as a fallback; require the composite to rank in the cheapest 30% of its sector. Require positive operating cash flow and an acceptable aggregate financial-health score. Reject severe interest-coverage risk, extreme sector-relative leverage, or combined deterioration in revenue, margins, and cash flow. Negative or missing denominators cannot count as cheap. Macro is context and exposure guidance, not a normal company-level pass condition. | **Scheduled rank admission:** enter an eligible top-ranked candidate at a monthly or quarterly rebalance; this is the pure deterministic value baseline.<br>**Fundamental inflection:** after a newly available filing, require improvement in at least two operating, profitability, cash-flow, leverage, or liquidity measures while the stock remains cheap and financially viable.<br>**Confirmed repricing:** require benchmark or sector outperformance plus a recent EMA cross or key moving-average reclaim without overbought extension; a positive post-earnings reaction with increased volume strengthens the setup.<br><br>Filing-driven and close-confirmed setups become eligible on the next trading session. A candidate may qualify for more than one mode. |
-| `strat_quality` | Primarily liquid mid- and large-cap US common stocks; established small caps remain eligible with complete multi-year fundamentals and sufficient liquidity. Exclude financials and REITs in v1 until dedicated quality metrics exist | Preferred, not required: slowing growth; tightening credit; elevated uncertainty or volatility; late-cycle/risk-off conditions. Quality remains eligible across regimes but may lag early-cycle speculative or low-quality rallies | Can become expensive or crowded; may lag high-beta and low-quality rallies; sector concentration and overlap with growth/low-volatility factors; ROE can be inflated by leverage or buybacks; backward-looking profitability may deteriorate; accounting and sector differences can create false quality signals | `sig_fundamentals`<br>`sig_technicals`<br>`sig_macro` | Require sufficient liquidity and approximately five years of point-in-time fundamentals. Rank within sector on four transparent pillars: current profitability and cash conversion; five-year profitability growth; balance-sheet and operating stability; and capital discipline through payout, dilution, and leverage direction. Require the composite in the sector's top 30%, profitability at or above the 60th percentile, safety at or above the 30th percentile, positive operating cash flow, and no hard distress. At least the profitability, growth, and safety pillars must be valid; capital discipline may be missing without inventing a neutral score. Use technical volatility as separate risk evidence, not inside the accounting composite. Valuation is context and a crowding warning, not a quality gate. | **Scheduled rank admission:** enter a newly eligible, top-ranked candidate at a monthly or quarterly rebalance; this is the pure deterministic quality baseline.<br>**Filing-driven quality upgrade:** after a newly available filing, require admission into the top 30% plus improvement in at least two quality pillars, positive operating cash flow, and no hard distress; enter on the next trading session.<br>**Controlled pullback reclaim:** while quality eligibility remains intact, require a controlled pullback toward the 20-day or 50-day average without breaking the primary trend, followed by a support reclaim with stable benchmark or sector relative strength.<br><br>A positive post-filing price reaction may strengthen the upgrade setup but is not treated as an earnings-surprise signal without analyst-estimate data. Filing-driven and close-confirmed setups become eligible on the next trading session. A candidate may qualify for more than one mode. |
-| `strat_informed_activity` | Liquid small-, mid-, and large-cap US common stocks across sectors; emphasize established small and mid caps, where informative insider activity may be more consequential, while excluding nano, micro, and illiquid securities. Apply stricter liquidity and position-size limits to smaller companies | No single preferred macro regime: company-specific information is primary. Insider buying may be most useful during broad fear or stock-specific dislocations, while 13D activism is event-driven across regimes. Severe market-liquidity or credit stress should reduce exposure and position size rather than serve as a normal company-level gate | Signals are sparse and episodic; routine or compensation-related insider transactions are not informative; insider sales have many non-informational motives; reporting delays and rapid repricing can leave little edge; raw purchase value is size-biased; small-cap results are vulnerable to spreads and market impact; passive 13G filings do not imply activism; the current EVENTS schema cannot distinguish an initial 13D from an amendment; 13D events can become crowded or already priced; insiders and activists can still be wrong | `sig_insider`<br>`sig_events`<br>`sig_fundamentals`<br>`sig_technicals`<br>`sig_macro` | Apply a shared gate: eligible liquid common stock; all evidence available by `decision_date`; no bankruptcy, delisting, restatement, or other hard event failure; and no combined cash burn, extreme leverage, and inadequate liquidity. Do not require an uptrend or favorable macro regime.<br><br>Then require at least one independent evidence lane:<br>**Opportunistic insider accumulation:** open-market/private purchase code `P` filed within 30 days; classify recurring same-month purchases after three prior years as routine; require either at least two distinct opportunistic buyers including an officer or director, or one materially large opportunistic purchase after normalization by market cap, size bucket, and change in the buyer's post-transaction holdings. Insider sales are warnings rather than automatic vetoes.<br>**Activist 13D:** a fresh Schedule 13D-coded event, provisionally within seven calendar days. Passive 13G filings do not qualify. Because the current EVENTS schema lacks filing identity and amendment status, the 13D lane must carry an unresolved-amendment flag and cannot authorize automatic entry until the source is enriched or the filing is verified. | **Opportunistic cluster disclosure:** enter after a newly filed purchase creates a qualifying cluster of at least two distinct opportunistic buyers, including an officer or director, within the 30-day evidence window; enter on the next trading session after the qualifying filing.<br>**Material senior-insider purchase:** enter after a newly filed opportunistic officer or director purchase independently clears the approved materiality threshold using market-cap/size-bucket rank and the purchase fraction of post-transaction holdings; enter on the next trading session.<br>**Verified activist 13D:** enter after a fresh initial Schedule 13D is verified and the shared safety gate passes. If the disclosure response remains within the approved extension limit, enter on the next trading session; otherwise wait for a controlled consolidation or pullback reclaim while the event remains eligible.<br><br>Use filing availability, not the earlier transaction date, and never fill at the filing-day close. Generic breakouts are not required. The 13D mode remains non-automatic until initial-versus-amended status can be verified. A candidate may qualify for more than one mode. |
+| `strat_momentum` | Primarily liquid mid-cap and established small-cap US equities; qualifying large caps remain eligible; exclude nano, micro, and illiquid securities | Preferred, not required: persistent broad trends; broad market and sector participation; benign credit and liquidity; stable or falling volatility. Avoid high-volatility rebounds following broad market declines. Cycle labels are context, not gates | Momentum crashes during sharp regime reversals; whipsaw in range-bound markets; high turnover and trading costs; crowded or overextended leaders; sector concentration; negatively skewed crash risk | `sig_technicals`<br>`sig_sector_rotation`<br>`sig_events` | **Momentum.** Screen = general momentum eligibility (all required):<br>• **Liquid** (dollar volume ≥ $5M).<br>• **Primary uptrend** (price > 200-day).<br>• **Trend confirmed** (slope × R² > 0).<br>The momentum *thesis* lives in the two entry modes, which key off different things and admit different names. Leading-sector tilt boosts the score (Moskowitz & Grinblatt 1999). | Two research-distinct entries; at least one required (they admit different names):<br>**Trend continuation** (Jegadeesh & Titman 1993): top-quintile 12-month momentum (`return_252d_percentile ≥ 80`) with intermediate corroboration (`return_60d_percentile ≥ 70`) — **skipping the recent month** (`return_20d`), whose ≤1-month component reverses (Novy-Marx 2012) — above the 50-day with broad multi-horizon strength. *[rank — cited; bands CALIBRATION]*<br>**52-week-high breakout** (George & Hwang 2004): a *confirmed* breakout — a fresh 52-week high (below→above transition, not proximity) on a volume surge with bullish MA structure; need not be top-quintile on trailing returns.<br><br>A candidate may qualify for both. |
+| `strat_value` | Liquid small-, mid-, and large-cap US common stocks; exclude nano, micro, and illiquid securities. Financials and REITs are excluded only in v1 until dedicated sector metrics exist | Preferred, not required: broadening recovery or early expansion; improving growth and credit; rising inflation expectations; wide value-growth valuation dispersion. Interest rates and curve slope are context, not gates | Value traps and distress; peak-cycle earnings creating false cheapness; sector concentration; accounting and intangible-asset bias; long convergence and prolonged underperformance; specialized sectors require dedicated metrics | `sig_fundamentals`<br>`sig_events` | **Value = sector-relative cheapness + Piotroski trap filter.** Cheapness is the sector-ranked value composite — earnings yield (E/P; Basu 1977), FCF yield, EV/EBITDA yield (Loughran & Wellman 2011), book yield (B/M; Fama & French 1992), sales yield — computed point-in-time in `sig_fundamentals`. All gates required:<br>• **Cheapest 30% in sector** (`value_composite_percentile ≥ 70`) with ≥2 valid yield measures; negative/missing denominators cannot count as cheap. *[rank — cited]*<br>• **Operating cash flow > 0** — not a distress trap (Piotroski 2000). *[sign — cited]*<br>• **Low accruals: CFO > net income** (`accrual_quality > 0`) — earnings backed by cash (Sloan 1996). *[sign — cited]*<br>• **Reject** broad deterioration, or cash burn under leverage. Macro is a base-layer overlay, not a company-level gate. | **Scheduled rank admission (single entry gate):** a passing name is admitted at the next monthly/quarterly rebalance. Value is a periodic cross-sectional rank sort, so one deterministic entry — no fundamental-inflection mode (the Piotroski health signal now lives in the screen) and no confirmed-repricing mode (a value+momentum timing overlay is optional and not yet enabled). |
+| `strat_quality` | Primarily liquid mid- and large-cap US common stocks; established small caps remain eligible with complete multi-year fundamentals and sufficient liquidity. Exclude financials and REITs in v1 until dedicated quality metrics exist | Preferred, not required: slowing growth; tightening credit; elevated uncertainty or volatility; late-cycle/risk-off conditions. Quality remains eligible across regimes but may lag early-cycle speculative or low-quality rallies | Can become expensive or crowded; may lag high-beta and low-quality rallies; sector concentration and overlap with growth/low-volatility factors; ROE can be inflated by leverage or buybacks; backward-looking profitability may deteriorate; accounting and sector differences can create false quality signals | `sig_fundamentals`<br>`sig_events` | **Quality = Quality-Minus-Junk composite** (Asness, Frazzini & Pedersen 2019): a point-in-time, sector-ranked blend of four pillars — profitability, growth, safety, payout — computed in `sig_fundamentals`. All gates required:<br>• **QMJ composite in sector top 30%** (`quality_composite_percentile ≥ 70`), with ≥3 of 4 pillars scorable; profitability pillar led by gross profits/assets (Novy-Marx 2013). *[rank — cited]*<br>• **Operating cash flow > 0** — earnings are real (Piotroski 2000). *[sign — cited]*<br>• **Low accruals: CFO > net income** (`accrual_quality > 0`) — earnings backed by cash (Sloan 1996). *[sign — cited]*<br>• **Not extreme leverage** (de ≤ 2). *[level — CALIBRATION, walk-forward]*<br>Valuation is crowding context, not a gate. Macro is applied as a portfolio overlay by the base layer, not a company-level gate. | **Scheduled rank admission (single entry gate):** a passing name is admitted at the next monthly/quarterly rebalance. QMJ is a periodic cross-sectional rank sort with no market-timing overlay, so quality has exactly one deterministic entry. No filing-upgrade mode (the improvement signal already lives in the QMJ growth pillar) and no pullback-reclaim mode (a technical timing overlay has no research basis for a quality factor). |
 
 ##### Universal exit policies
 
@@ -260,85 +288,51 @@ the strategy's screen and at least one of its entry modes; it does not need to p
 | Macro defense | Portfolio and new entries | Macro overlay becomes hostile or enters a high-volatility rebound regime | Daily and after material releases | Deterministic risk layer | Block new entries, reduce exposure, or tighten risk; do not force a healthy position exit by itself |
 | Judgment review | Ambiguous deterioration | Evidence weakens without crossing a deterministic exit threshold | Daily or event-driven | Agent | Hold, reduce, or exit within the allowed policy |
 
+> **A note on exits vs. entries.** The factor literature covers *entry and periodic
+> rebalancing*, not discretionary exits, so exits are less citeable than the screens.
+> Three honest categories appear below: **(a) rank decay** — symmetric with the entry
+> rank sort, with hysteresis to limit turnover; **(b) hard-failure sign reversals** —
+> the Piotroski/Sloan floors that gated entry turning false (cited); **(c) risk
+> structure** — stops, trails, and time/review horizons, all `[CALIBRATION]`. Momentum
+> is the exception with genuine exit research (Daniel & Moskowitz 2016, momentum
+> crashes). No strategy uses a fixed take-profit.
+
 ##### Momentum exit policies
 
 | Momentum exit policy | Trigger | Cadence | Owner | Action |
 |---|---|---|---|---|
-| Reacceleration invalidation | Price closes below the consolidation low that defined the setup | Daily after close | Deterministic position monitor | Exit |
-| Breakout invalidation | Price fails the breakout and closes back below the approved pivot or base | Daily after close | Deterministic position monitor | Exit |
-| Pullback-reclaim invalidation | Price closes below the pullback swing low or loses the reclaimed support level | Daily after close | Deterministic position monitor | Exit |
-| Trend and relative-strength failure | A confirmed close below the approved trend average occurs with deteriorating momentum or benchmark/sector relative strength | Daily after close | Deterministic position monitor | Exit |
-| No-follow-through time stop | The expected momentum move fails to develop within the approved initial window, provisionally 10-20 trading sessions | Daily | Deterministic position monitor | Exit |
+| Trend / relative-strength failure | Confirmed close below the trend average (e.g. 50-day) with momentum ranks rolling over — the Jegadeesh-Titman continuation is broken | Daily after close | Deterministic position monitor | Exit |
+| 52-week-high breakout failure | A 52-week-high entry closes back below the breakout pivot or loses the 20-/50-day structure (mirrors the George-Hwang entry) | Daily after close | Deterministic position monitor | Exit |
+| No-follow-through time stop | The move fails to develop within the formation-consistent window (Jegadeesh-Titman holding horizons; band `[CALIBRATION]`) | Daily | Deterministic position monitor | Exit |
+| Momentum-crash defense | A high-volatility market rebound follows a broad decline and the position shows adverse trend/RS — the momentum-crash regime (Daniel & Moskowitz 2016) | Daily and event-driven | Deterministic risk layer | Reduce exposure or tighten risk; macro alone does not force the exit |
 | Trailing winner protection | A profitable position breaches its approved ATR, price-structure, or moving-average trail | Live or daily, as encoded | Broker or deterministic risk monitor | Exit the protected remainder |
-| Momentum-crash defense | A high-volatility market rebound follows a broad decline and the position also shows adverse trend or relative-strength evidence | Daily and event-driven | Deterministic risk layer | Reduce exposure or tighten risk; macro conditions alone do not force the exit |
 
-Momentum does not use a fixed take-profit for the entire position; optional partial realization may
-be followed by a deterministic trail so large winners are not truncated.
+No fixed take-profit: momentum's edge lives in the positive-skew tail, so winners are trailed rather
+than truncated (optional partial realization may precede the trail).
 
 ##### Value exit policies
 
 | Value exit policy | Trigger | Cadence | Owner | Action |
 |---|---|---|---|---|
-| Valuation convergence | The sector-relative value composite falls below the exit band, initially the 50th percentile after entry at or above the 70th percentile | Monthly or quarterly rebalance | Deterministic position monitor | Exit and reallocate; do not use an arbitrary fixed profit target |
-| Fundamental thesis failure | Operating cash flow turns negative, the financial-health score falls below its floor, or severe interest-coverage, leverage, liquidity, or combined-deterioration flags appear | After each newly available filing | Deterministic position monitor | Exit on the next trading session for hard failures; reduce or review isolated soft deterioration |
-| Fundamental-inflection failure | The operating or financial improvements that justified entry reverse in a later filing while the discount remains unresolved | After each newly available filing | Deterministic position monitor | Exit on the next trading session |
-| Confirmed-repricing failure | Price loses the approved reclaim level and benchmark or sector relative strength also deteriorates | Daily after close | Deterministic position monitor | Exit or reduce according to the approved structure policy |
-| Stale thesis | After an initial 12-month review horizon, neither valuation convergence nor measurable fundamental improvement has occurred and stronger eligible value candidates exist | Monthly review after the horizon | Portfolio construction | Exit and reallocate |
+| Valuation convergence (rank decay) | The sector value composite falls below the exit band (~50th pctile) after entry ≥70th — hysteresis to limit turnover | Monthly/quarterly rebalance | Deterministic position monitor | Exit and reallocate; no fixed profit target *(Fama-French mean reversion; bands `[CALIBRATION]`)* |
+| Fundamental / trap failure | Operating cash flow turns negative, or accruals turn adverse (CFO < net income), or combined deterioration appears — the Piotroski/Sloan floor that gated entry is now false | After each new filing | Deterministic position monitor | Exit next session *(Piotroski 2000; Sloan 1996 — sign reversal)* |
+| Stale thesis | After a ~12-month review, neither valuation convergence nor fundamental improvement has occurred and stronger eligible value names exist | Monthly review after the horizon | Portfolio construction | Exit and reallocate |
 
-The entry and exit valuation bands intentionally use hysteresis to avoid turnover around one cutoff.
-Pure scheduled-rank and fundamental-inflection entries retain the universal maximum-loss protection
-but do not receive a tight chart-based stop by default. Confirmed-repricing entries may use their
-reclaim structure as an additional stop.
-
-Exact percentile bands, ATR multipliers, confirmation periods, and time-review horizons remain
-walk-forward parameters.
+Entry and exit bands use hysteresis. A rank-sort entry keeps the universal maximum-loss stop but no
+tight chart-based stop by default. Bands and review horizons remain `[CALIBRATION]`.
 
 ##### Quality exit policies
 
 | Quality exit policy | Trigger | Cadence | Owner | Action |
 |---|---|---|---|---|
-| Hard quality-thesis failure | Operating cash flow turns negative, a hard-distress flag appears, or newly available evidence shows severe profitability, solvency, or accounting-quality failure | After each newly available filing or material event | Deterministic position monitor | Exit on the next trading session |
-| Buffered quality-rank exit | The sector-relative quality composite falls below the exit band, initially the 50th percentile after entry at or above the 70th percentile | Monthly or quarterly rebalance | Deterministic position monitor | Exit and reallocate; an incumbent between the entry and exit bands may remain to limit turnover |
-| Confirmed multi-pillar deterioration | At least two core pillars materially deteriorate across newly available filings, without yet meeting a hard-failure condition | After each newly available filing | Deterministic position monitor and agent | Reduce or place under review; exit if deterioration persists or the rank exit band is crossed |
-| Filing-upgrade invalidation | The pillar improvements that justified a filing-driven entry reverse in a later filing, and the candidate no longer satisfies the upgrade thesis | After each newly available filing | Deterministic position monitor | Exit on the next trading session |
-| Pullback-reclaim invalidation | A pullback-reclaim entry closes below its approved swing low or loses the primary trend while benchmark or sector relative strength also deteriorates | Daily after close | Deterministic position monitor | Exit according to the approved structure policy |
-| Quality replacement | An incumbent is inside the retention buffer, portfolio capacity is constrained, and a materially stronger eligible quality candidate is available | Monthly or quarterly rebalance | Portfolio construction | Replace the weaker holding without treating the rotation as a thesis failure |
+| Quality-rank decay (buffered) | The QMJ composite falls below the exit band (~50th pctile) after entry ≥70th; an incumbent inside the buffer may stay to limit turnover | Monthly/quarterly rebalance | Deterministic position monitor | Exit and reallocate *(QMJ periodic rebalance; bands `[CALIBRATION]`)* |
+| Hard quality-thesis failure | Operating cash flow turns negative, or accruals turn adverse (CFO < net income), or a hard-distress flag appears — the Piotroski/Sloan floor is now false | After each new filing or material event | Deterministic position monitor | Exit next session *(Piotroski 2000; Sloan 1996)* |
+| Quality replacement | An incumbent is inside the retention buffer, capacity is constrained, and a materially stronger eligible quality name is available | Monthly/quarterly rebalance | Portfolio construction | Replace the weaker holding, not treated as a thesis failure |
 
-Quality does not use a fixed take-profit or a short no-follow-through time stop. Valuation expansion,
-macro deterioration, one soft filing, or loss of a moving average does not by itself invalidate a
-scheduled-rank quality holding. Those conditions may block additions, reduce sizing, or prompt agent
-review, but an exit requires the universal risk policy, quality-rank decay, corroborated fundamental
-deterioration, or invalidation of an entry-specific price structure.
-
-The entry and exit quality bands intentionally use hysteresis. Exact rank bands, definitions of
-material pillar deterioration, rebalance frequency, and technical confirmation periods remain
-walk-forward parameters.
-
-##### Informed-activity exit policies
-
-| Informed-activity exit policy | Applies to | Trigger | Cadence | Owner | Action |
-|---|---|---|---|---|---|
-| Hard company-thesis failure | All informed-activity positions | Bankruptcy, delisting, restatement, material impairment, severe financing stress, or newly available fundamentals showing that the shared safety gate has decisively failed | After each filing or material event | Deterministic position monitor | Exit on the next trading session |
-| Insider-thesis reversal | Insider-purchase entries | A qualifying buyer materially reverses the purchase, or broad insider selling appears together with corroborating fundamental deterioration. Ordinary or isolated insider sales do not qualify because sales have many non-informational motives | After each newly available insider filing | Deterministic position monitor | Exit for a same-buyer material reversal; reduce or review broader selling only when corroborated |
-| Insider-evidence expiry | Insider-purchase entries | At the initial six-month review, the position has produced neither meaningful fundamental or relative-price improvement nor renewed qualifying opportunistic buying | Monthly review beginning after six months | Portfolio construction and agent | Exit or replace with stronger evidence; renewed qualifying activity may start a new evidence window |
-| Stale insider thesis | Insider-purchase entries | Twelve months have elapsed without renewed qualifying activity or measurable thesis progress | Monthly review after twelve months | Portfolio construction | Exit; do not convert an expired information signal into an indefinite discretionary holding |
-| Activist campaign failure or withdrawal | Verified 13D entries | A later filing reports abandonment, a failed campaign, conversion to passive intent, or reduction below the reporting threshold for reasons inconsistent with successful thesis resolution | Event-driven | Deterministic position monitor | Exit on the next trading session |
-| Activist catalyst resolution | Verified 13D entries | The campaign reaches a completed acquisition, tender, asset sale, settlement, governance change, or other terminal outcome that resolves the original catalyst | Event-driven | Deterministic position monitor and portfolio construction | Exit at the encoded event/settlement policy or reassess under another strategy; do not retain the position under an expired activist label |
-| Delayed-entry structure failure | 13D entries that waited for consolidation or pullback | Price closes below the approved post-disclosure base or pullback low with deteriorating benchmark or sector relative strength | Daily after close | Deterministic position monitor | Exit according to the approved structure policy |
-
-Informed activity does not use a fixed profit target. Insider-purchase evidence is reviewed over a
-medium horizon because the documented return response can persist for several months; activist
-campaigns may require substantially longer and therefore do not receive the insider lane's automatic
-six- or twelve-month expiry. Universal protective stops still apply to both lanes.
-
-The current EVENTS schema cannot observe 13D amendment identity, stake reduction, passive
-conversion, or campaign resolution. Automated activist entry and exit policies therefore remain
-disabled until that source is enriched or a verified filing-retrieval path supplies those facts.
-Owner-linked insider reversal monitoring also requires retaining buyer identity in the position
-thesis rather than relying only on aggregate sell counts.
-
-Exact review horizons, material-sale thresholds, corroboration requirements, and event-resolution
-rules remain walk-forward parameters.
+No fixed take-profit and no short time stop — quality is a hold-and-compound factor. Valuation
+expansion, macro deterioration, or one soft filing do not by themselves invalidate a holding; they may
+block additions, reduce sizing, or prompt agent review. An exit requires the universal risk policy,
+rank decay, or a hard-failure sign reversal. Bands remain `[CALIBRATION]`.
 
 #### Phase 2 — Candidate runner, storage, and pre-agent gates
 

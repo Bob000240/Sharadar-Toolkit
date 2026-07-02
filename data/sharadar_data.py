@@ -2,8 +2,28 @@ import os
 import pandas as pd
 from dotenv import load_dotenv
 import nasdaqdatalink
+from nasdaqdatalink.connection import Connection as _NDLConnection
 
 load_dotenv()
+
+# nasdaqdatalink issues its HTTP requests with no timeout, so if a connection
+# stalls (socket stays open but data stops flowing) the whole job hangs forever
+# instead of erroring. The library already configures urllib3 retries (5x with
+# backoff), but those never fire without a timeout to turn a stall into an
+# exception. Inject a default (connect, read) timeout so a stalled request fails
+# fast and the existing retry machinery actually kicks in.
+_CONNECT_TIMEOUT = 10
+_READ_TIMEOUT = 30
+
+if not getattr(_NDLConnection, "_qn_timeout_patched", False):
+    _orig_execute_request = _NDLConnection.execute_request.__func__
+
+    def _execute_request_with_timeout(cls, http_verb, url, **options):
+        options.setdefault("timeout", (_CONNECT_TIMEOUT, _READ_TIMEOUT))
+        return _orig_execute_request(cls, http_verb, url, **options)
+
+    _NDLConnection.execute_request = classmethod(_execute_request_with_timeout)
+    _NDLConnection._qn_timeout_patched = True
 
 
 class SharadarData:

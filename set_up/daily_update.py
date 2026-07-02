@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import pandas as pd
 from set_up.config import get_stock_symbols, BENCHMARK_SYMBOLS
+from set_up.load_data import START_DATE
 from data.sharadar_data import SharadarData
 from data.macro_data import MacroData
 from data.indicators import compute_indicators
@@ -42,36 +43,74 @@ def _batched(
     print(f"{label}: {total:,} rows upserted")
 
 
-def update_equity_prices(sh: SharadarData):
-    latest = equity_repo.get_latest_date()
-    since = (
-        str(latest["latest_date"].min() + pd.Timedelta(days=1))
-        if not latest.empty
-        else "2021-01-01"
+def _update_prices_split(sh_fn, repo_insert, repo_get_latest, label: str, symbols: list):
+    """Fetch each ticker only from ITS OWN last-loaded date forward; tickers new to
+    the table get a full backfill. Tickers that share a last date are grouped into
+    the same API call.
+
+    This is the fix for the min()-pins-everyone problem: previously `since` was a
+    single date derived from the *earliest* last-date across the universe, so a
+    couple of laggard tickers forced a full-window re-fetch for all ~2,400 names
+    (most of which already had the data — silently discarded by ON CONFLICT DO
+    NOTHING, but still fetched over the network). Here, names already current fetch
+    nothing, and only genuine gaps are pulled — so the fetched row count is also
+    honest, since every fetched row is strictly newer than what's stored."""
+    latest = repo_get_latest(tickers=symbols)
+    last_by_ticker = (
+        dict(zip(latest["ticker"], latest["latest_date"])) if not latest.empty else {}
     )
-    _batched(
+
+    # New tickers (no rows yet) → full backfill from inception.
+    new = [t for t in symbols if t not in last_by_ticker]
+    if new:
+        _batched(
+            sh_fn,
+            repo_insert,
+            f"{label} (new, backfill {len(new)} tickers)",
+            symbols=new,
+            start_date=START_DATE,
+            end_date=TODAY,
+        )
+
+    # Known tickers → group by their own next-needed date; skip any already current.
+    by_since: dict[str, list[str]] = {}
+    for t in symbols:
+        last = last_by_ticker.get(t)
+        if last is None:
+            continue
+        since = str(last + pd.Timedelta(days=1))
+        if since > TODAY:
+            continue  # already up to date — fetch nothing
+        by_since.setdefault(since, []).append(t)
+
+    for since, group in sorted(by_since.items()):
+        _batched(
+            sh_fn,
+            repo_insert,
+            f"{label} (from {since}, {len(group)} tickers)",
+            symbols=group,
+            start_date=since,
+            end_date=TODAY,
+        )
+
+
+def update_equity_prices(sh: SharadarData):
+    _update_prices_split(
         sh.equity_prices,
         equity_repo.insert,
+        equity_repo.get_latest_date,
         "Equity prices",
-        start_date=since,
-        end_date=TODAY,
+        get_stock_symbols(),
     )
 
 
 def update_fund_prices(sh: SharadarData):
-    latest = fund_repo.get_latest_date()
-    since = (
-        str(latest["latest_date"].min() + pd.Timedelta(days=1))
-        if not latest.empty
-        else "2021-01-01"
-    )
-    _batched(
+    _update_prices_split(
         sh.fund_prices,
         fund_repo.insert,
+        fund_repo.get_latest_date,
         "Fund prices",
-        symbols=BENCHMARK_SYMBOLS,
-        start_date=since,
-        end_date=TODAY,
+        BENCHMARK_SYMBOLS,
     )
 
 
@@ -119,7 +158,7 @@ def update_insider(sh: SharadarData):
 
 
 def update_institutional(sh: SharadarData):
-    since = (pd.Timestamp.today() - pd.Timedelta(days=120)).strftime("%Y-%m-%d")
+    since = (pd.Timestamp.today() - pd.Timedelta(days=60)).strftime("%Y-%m-%d")
     _batched(
         sh.institutional_holdings,
         institutional_repo.insert,
