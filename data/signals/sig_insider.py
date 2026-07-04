@@ -100,33 +100,6 @@ class InsiderSnapshot:
     days_since_last_buy: int | None
     days_since_last_sell: int | None
 
-    def cluster_buying(self) -> dict[str, bool]:
-        return {
-            "any_buy_30d": self.buy_count_30d > 0,
-            "opportunistic_buy_30d": self.opportunistic_buy_count_30d > 0,
-            "opportunistic_cluster_30d": (self.unique_opportunistic_buyers_30d >= 2),
-            "opportunistic_cluster_strong": (self.unique_opportunistic_buyers_30d >= 3),
-        }
-
-    def officer_activity(self) -> dict[str, bool]:
-        return {
-            "opportunistic_officer_buying": (self.opportunistic_officer_buys_30d > 0),
-            "opportunistic_director_buying": (self.opportunistic_director_buys_30d > 0),
-            "opportunistic_senior_cluster": (
-                self.opportunistic_officer_buys_30d
-                + self.opportunistic_director_buys_30d
-            )
-            >= 2,
-        }
-
-    def net_sentiment(self) -> dict[str, bool]:
-        ratio = self.net_buy_ratio_90d
-        return {
-            "net_buyer_90d": self.buy_count_90d > self.sell_count_90d,
-            "no_selling_30d": self.sell_count_30d == 0,
-            "buy_dominant_90d": not pd.isna(ratio) and ratio > 0.5,
-        }
-
     def purchase_metrics(self, marketcap: float) -> dict[str, float]:
         normalized_value = float("nan")
         if pd.notna(marketcap) and marketcap > 0:
@@ -318,9 +291,6 @@ def print_snapshot_report(snap: InsiderSnapshot) -> None:
         if not pd.isna(snap.net_buy_ratio_90d)
         else "  Net buy ratio 90d: n/a"
     )
-    print(f"  Cluster Buying: {snap.cluster_buying()}")
-    print(f"  Officer Activity: {snap.officer_activity()}")
-    print(f"  Net Sentiment:  {snap.net_sentiment()}")
     print(f"  Risk Flags:     {snap.risk_flags()}")
 
 

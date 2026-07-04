@@ -35,8 +35,13 @@ from decision_layer.det_layer.strategy import Strategy, ScreenResult
 _BENCHMARK = "SPY"
 _ETFS = list(ETF_SECTOR_MAP.keys())
 
-# Momentum targets liquid mid-caps and established small-caps (large/mega excluded).
-_ALLOWED_CAPS = {"small", "mid"}
+# Momentum spans small/mid/large (nano/micro dropped by cap_bucket). Mega-cap
+# giants stay eligible but carry a crowding risk_flag rather than a universe cut:
+# the premium is thin and crash risk concentrates there, so surface it for the
+# risk layer instead of dropping the name outright.
+_ALLOWED_CAPS = {"small", "mid", "large"}
+# Mega-cap crowding line (~$200B). Eligible, but flagged for the risk layer.
+_MEGA_CAP_THRESHOLD = 200_000_000_000
 
 _MIN_DOLLAR_VOLUME = 5_000_000
 # 12-month momentum, top quintile within the ranked universe (Jegadeesh-Titman
@@ -44,6 +49,10 @@ _MIN_DOLLAR_VOLUME = 5_000_000
 _MIN_RETURN_252D_PCTILE = 80.0
 # Intermediate horizon must corroborate (Novy-Marx 2012). CALIBRATION band.
 _MIN_RETURN_60D_PCTILE = 70.0
+# 52-week-high breakout confirmation: volume-surge multiple over average. CALIBRATION.
+_VOLUME_SURGE = 1.5
+# Leading sector = top-3 of 11 sectors by 20d return (Moskowitz-Grinblatt tilt). CALIBRATION.
+_LEADING_SECTOR_RANK = 3
 
 # Event codes that disqualify a name outright.
 _EXCLUDING_EVENTS = {
@@ -94,9 +103,9 @@ class StratMomentum(Strategy):
             # base). Overbought is not filtered — a genuine breakout is expected to
             # be strong; it stays visible in risk_flags for the risk layer.
             "52w_high_breakout": (
-                t.breakout_context()["at_52w_high"]
-                and t.volume_signals()["volume_surge"]
-                and t.moving_average_structure()["sma20_above_sma50"]
+                t.new_52w_high
+                and t.volume_ratio > _VOLUME_SURGE
+                and t.sma_20 > t.sma_50
             ),
         }
 
@@ -130,7 +139,8 @@ class StratMomentum(Strategy):
             if any(ev_risks.get(code) for code in _EXCLUDING_EVENTS):
                 continue
 
-            cap = cap_bucket(mcaps.get(ticker))
+            mcap = mcaps.get(ticker)
+            cap = cap_bucket(mcap)
             if cap not in _ALLOWED_CAPS:
                 continue
 
@@ -139,7 +149,7 @@ class StratMomentum(Strategy):
             # modes below, so the two modes admit different names. ──
             liquid = t.dollar_volume_20d_avg >= _MIN_DOLLAR_VOLUME
             uptrend = t.above_sma_200
-            trend_confirmed = t.trend_linearity()["trend_confirmed"]
+            trend_confirmed = t.slope_x_r2 > 0
             if not (liquid and uptrend and trend_confirmed):
                 continue
 
@@ -152,8 +162,8 @@ class StratMomentum(Strategy):
 
             gates = ["liquid", "uptrend", "trend_confirmed", f"{cap}_cap"]
             gates += [f"mode_{name}" for name, passed in modes.items() if passed]
-            if sec.market_regime()["in_leading_sector"]:
-                gates.append("leading_sector")  # Moskowitz-Grinblatt 1999
+            if sec.sector_rank_20d is not None and sec.sector_rank_20d <= _LEADING_SECTOR_RANK:
+                gates.append("leading_sector")  # Moskowitz-Grinblatt 1999 (top-3 sector)
 
             # Score = intermediate/long momentum rank + leading-sector tilt.
             setup_score = min(
@@ -167,6 +177,8 @@ class StratMomentum(Strategy):
             risk_flags += [
                 k for k, v in ev_risks.items() if v and k in ("just_reported", "post_earnings")
             ]
+            if mcap is not None and mcap >= _MEGA_CAP_THRESHOLD:
+                risk_flags.append("mega_cap_crowding")  # eligible, but crowded (see note above)
 
             results.append(
                 ScreenResult(
@@ -194,14 +206,16 @@ class StratMomentum(Strategy):
                 )
             )
         return results
+    
+    def risk_controls(self, packet: dict) -> list[str]:
+        return packet.get("risk_flags", [])
 
 
 if __name__ == "__main__":
     strat = StratMomentum()
-    packets = strat.run(
-        date(2026, 7, 1), tickers=get_stock_symbols(), persist=False, top_n=5
-    )
-    print(f"{strat.NAME}: top {len(packets)} of the full passing set")
+    as_of = date.today()
+    packets = strat.run(as_of, tickers=get_stock_symbols(), persist=False, top_n=5)
+    print(f"{strat.NAME} ({as_of}): top {len(packets)} of the full passing set")
     for p in packets:
         print(
             f"  {p['symbol']:6s} score={p['setup_score']:.3f} "

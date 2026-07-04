@@ -94,68 +94,6 @@ class MacroSnapshot:
         for f in fields(self):
             setattr(self, f.name, _python_scalar(getattr(self, f.name)))
 
-    def rate_environment(self) -> dict[str, bool]:
-        return {
-            "curve_normal": self.yield_curve_2_10 > 0,
-            "curve_steep": self.yield_curve_2_10 > 1.0,
-            "curve_inverted": self.yield_curve_2_10 < 0,
-            "real_rates_high": self.real_yield_10y > 2.0,
-            "real_rates_neg": self.real_yield_10y < 0,
-            "rates_low": self.yield_10y < 3.0,
-            "rates_high": self.yield_10y > 5.0,
-            "curve_steepening": self.yield_curve_change_60d > 0.25,
-            "curve_flattening": self.yield_curve_change_60d < -0.25,
-            "real_rates_rising_fast": self.real_yield_change_20d > 0.50,
-            "real_rates_falling": self.real_yield_change_20d < -0.25,
-        }
-
-    def credit_conditions(self) -> dict[str, bool]:
-        return {
-            "credit_risk_on": self.spread_hy < 4.0,  # <400 bps
-            "credit_stress": self.spread_hy > 6.0,  # >600 bps
-            "ig_tight": self.spread_ig < 1.0,  # <100 bps
-            "credit_tightening": self.spread_hy_change_20d < -0.25,
-            "credit_widening_fast": self.spread_hy_change_20d > 0.75,
-            "ig_widening": self.spread_ig_change_20d > 0.20,
-        }
-
-    def inflation_regime(self) -> dict[str, bool]:
-        return {
-            "inflation_target": 1.5 < self.cpi_yoy < 3.0,
-            "inflation_elevated": self.cpi_yoy > 3.0,
-            "inflation_high": self.cpi_yoy > 5.0,
-            "inflation_low": self.cpi_yoy < 1.5,
-            "expectations_anchored": self.breakeven_10y < 2.5,
-            "expectations_high": self.breakeven_10y > 3.0,
-            "inflation_cooling": self.cpi_yoy_change_3m < -0.20,
-            "inflation_heating": self.cpi_yoy_change_3m > 0.20,
-        }
-
-    def risk_sentiment(self) -> dict[str, bool]:
-        return {
-            "low_vol": self.vix < 15,
-            "normal_vol": 15 <= self.vix < 25,
-            "elevated_fear": self.vix >= 25,
-            "high_fear": self.vix >= 30,
-            "extreme_fear": self.vix >= 40,
-            "volatility_falling": self.vix_change_20d < -3.0,
-            "volatility_spike": self.vix_change_20d > 7.5,
-        }
-
-    def labor_market(self) -> dict[str, bool]:
-        claims_level = (
-            self.claims_4w_avg
-            if _is_known(self.claims_4w_avg)
-            else self.jobless_claims
-        )
-        return {
-            "full_employment": self.unemployment_rate < 4.5,
-            "labor_weakening": self.unemployment_rate > 5.5,
-            "claims_elevated": claims_level > 250_000,
-            "claims_high": claims_level > 350_000,
-            "claims_accelerating": self.claims_change_13w_pct > 0.15,
-        }
-
     def as_of_dates(self) -> dict[str, str | None]:
         names = (
             "rates_as_of",
@@ -355,11 +293,6 @@ def print_snapshot_report(snap: MacroSnapshot) -> None:
         f"  Unemployment: {snap.unemployment_rate:.1f}%  |  Jobless claims: {snap.jobless_claims:,.0f}"
     )
     print(f"  VIX: {snap.vix:.1f}  |  DXY: {snap.dxy:.1f}  |  WTI: ${snap.oil_wti:.1f}")
-    print(f"  Rate Env:    {snap.rate_environment()}")
-    print(f"  Credit:      {snap.credit_conditions()}")
-    print(f"  Inflation:   {snap.inflation_regime()}")
-    print(f"  Risk:        {snap.risk_sentiment()}")
-    print(f"  Labor:       {snap.labor_market()}")
     print(f"  Overlay:     {snap.overlay().to_dict()}")
 
 

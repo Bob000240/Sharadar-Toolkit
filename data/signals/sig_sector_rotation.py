@@ -38,31 +38,6 @@ class SectorRotationSnapshot:
     cyclicals_leading: bool
     cyclical_vs_defensive_spread: float  # avg cyclical - avg defensive (20d)
 
-    def sector_strength(self) -> dict[str, bool]:
-        rank = self.sector_rank_20d
-        ret = self.sector_return_20d
-        return {
-            "sector_top_3": rank is not None and rank <= 3,
-            "sector_top_half": rank is not None and rank <= 5,
-            "sector_bottom_3": rank is not None and rank >= 9,
-            "sector_positive": ret is not None and ret > 0,
-            "sector_strong": ret is not None and ret > 0.03,
-            "sector_weak": ret is not None and ret < -0.03,
-        }
-
-    def market_regime(self) -> dict[str, bool]:
-        spread = self.cyclical_vs_defensive_spread
-        return {
-            "cyclicals_leading": self.cyclicals_leading,
-            "defensives_leading": not self.cyclicals_leading,
-            "strong_risk_on": spread > 0.03,
-            "strong_risk_off": spread < -0.03,
-            "in_leading_sector": self.sector_rank_20d is not None
-            and self.sector_rank_20d <= 3,
-            "in_lagging_sector": self.sector_rank_20d is not None
-            and self.sector_rank_20d >= 9,
-        }
-
     def sector_score(self) -> float:
         """0-1: higher = sector is leading."""
         if self.sector_rank_20d is None:
@@ -188,8 +163,6 @@ def print_snapshot_report(snap: SectorRotationSnapshot) -> None:
         f"({'cyclicals leading' if snap.cyclicals_leading else 'defensives leading'})"
     )
     print(f"  Sector Score:   {snap.sector_score():.3f}")
-    print(f"  Sector Strength: {snap.sector_strength()}")
-    print(f"  Market Regime:   {snap.market_regime()}")
 
 
 if __name__ == "__main__":

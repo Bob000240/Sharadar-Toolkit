@@ -417,40 +417,6 @@ class FundamentalsSnapshot:
         for field in fields(self):
             setattr(self, field.name, _python_scalar(getattr(self, field.name)))
 
-    def valuation(self) -> dict[str, bool]:
-        return {
-            "pe_reasonable": 0 < self.pe < 30,
-            "pb_reasonable": 0 < self.pb < 5,
-            "ps_reasonable": 0 < self.ps < 5,
-            "evebitda_reasonable": 0 < self.evebitda < 20,
-            "pays_dividend": self.divyield > 0,
-            "large_cap": self.marketcap >= 10_000_000_000,
-            "mid_cap": 1_000_000_000 <= self.marketcap < 10_000_000_000,
-            "enough_value_metrics": self.valid_value_metrics >= 2,
-            "sector_deep_value": self.value_composite_percentile >= 70,
-        }
-
-    def profitability(self) -> dict[str, bool]:
-        return {
-            "roe_positive": self.roe > 0,
-            "roe_strong": self.roe > 0.15,
-            "roa_positive": self.roa > 0,
-            "roic_positive": self.roic > 0,
-            "gross_margin_ok": self.grossmargin > 0.20,
-            "net_margin_pos": self.netmargin > 0,
-            "fcf_positive": self.fcf > 0,
-            "opinc_positive": self.opinc > 0,
-        }
-
-    def balance_sheet_health(self) -> dict[str, bool]:
-        return {
-            "low_leverage": self.de < 1.0,
-            "current_ratio_ok": self.currentratio > 1.5,
-            "has_cash": self.cashneq > 0,
-            "positive_working_cap": self.workingcapital > 0,
-            "sustainable_payout": 0 <= self.payoutratio < 0.75,
-        }
-
     def risk_flags(self) -> dict[str, bool]:
         return {
             "high_leverage": self.de > 2.0,
@@ -610,9 +576,6 @@ class FundamentalsModel:
 
 def print_snapshot_report(snap: FundamentalsSnapshot) -> None:
     sections = {
-        "Valuation": snap.valuation(),
-        "Profitability": snap.profitability(),
-        "Balance Sheet": snap.balance_sheet_health(),
         "Risk Flags": snap.risk_flags(),
     }
     print(

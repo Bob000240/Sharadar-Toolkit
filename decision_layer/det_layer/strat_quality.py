@@ -30,6 +30,9 @@ from set_up.config import cap_bucket, get_stock_symbols
 _MIN_QUALITY_PERCENTILE = 70.0
 # Require at least 3 of the 4 QMJ pillars to have enough data to score.
 _MIN_QUALITY_PILLARS = 3
+# Soft-gate context labels appended to passed_gates (not hard gates). CALIBRATION.
+_ROE_STRONG = 0.15       # strong profitability (QMJ / Novy-Marx context)
+_LOW_LEVERAGE_DE = 1.0   # conservative balance sheet; distinct from the de<=2 hard floor
 
 # Quality is a mid/large-cap factor (small/nano/micro excluded).
 _ALLOWED_CAPS = {"mid", "large"}
@@ -97,7 +100,6 @@ class StratQuality(Strategy):
             if any(ev.risk_flags().get(code) for code in _EXCLUDING_EVENTS):
                 continue
 
-            prof = f.profitability()
             f_risks = f.risk_flags()
 
             # ── Quality screen: QMJ composite + earnings-quality floors ──
@@ -108,7 +110,9 @@ class StratQuality(Strategy):
                 f.quality_composite_percentile >= _MIN_QUALITY_PERCENTILE
                 and f.valid_quality_pillars >= _MIN_QUALITY_PILLARS
                 # Piotroski 2000: operating cash flow positive (earnings are real).
-                and prof["fcf_positive"]
+                # CFO, not FCF — a capex-heavy compounder can have FCF<0 with
+                # strong operating cash flow; matches Value's identical floor.
+                and f.ncfo > 0
                 # Sloan 1996: CFO > net income => low accruals, earnings cash-backed.
                 and f.accrual_quality > 0
                 # Safety floor: exclude extreme leverage (de > 2). CALIBRATION.
@@ -121,9 +125,9 @@ class StratQuality(Strategy):
             # rebalance. QMJ is a periodic rank sort, so there is one entry gate.
             gates = ["quality_composite", "cash_earnings", "low_accruals",
                      "rebalance_admission", f"{cap}_cap"]
-            if prof["roe_strong"]:
+            if f.roe > _ROE_STRONG:
                 gates.append("roe_strong")
-            if f.balance_sheet_health()["low_leverage"]:
+            if f.de < _LOW_LEVERAGE_DE:
                 gates.append("low_leverage")
 
             # The QMJ composite rank IS the quality score (single source of truth).
@@ -161,12 +165,14 @@ class StratQuality(Strategy):
             )
         return results
 
+    def risk_controls(self, packet: dict) -> list[str]:
+        return packet.get("risk_flags", [])
+
 
 if __name__ == "__main__":
     strat = StratQuality()
-    packets = strat.run(
-        date(2026, 7, 1), tickers=get_stock_symbols(), persist=False, top_n=5
-    )
+    as_of = date.today()
+    packets = strat.run(as_of, tickers=get_stock_symbols(), persist=False, top_n=5)
     print(f"{strat.NAME}: top {len(packets)} of the full passing set")
     for p in packets:
         print(

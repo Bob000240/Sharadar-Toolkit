@@ -129,124 +129,6 @@ class TechnicalsSnapshot:
     def slope_x_r2(self) -> float:
         return self.trend_slope_60d * self.r_squared_60d
 
-    @property
-    def momentum_accel_20_60(self) -> float:
-        return self.return_20d - self.return_60d
-
-    @property
-    def momentum_accel_5_20(self) -> float:
-        return self.return_5d - self.return_20d
-
-    @property
-    def price_vs_20d_high(self) -> float:
-        return self.drawdown_from_recent_high
-
-    @property
-    def ema_9_above_21(self) -> bool:
-        return self.ema_9 > self.ema_21
-
-    def absolute_momentum(self) -> dict[str, bool]:
-        return {
-            "5d+": self.return_5d > 0,
-            "20d+": self.return_20d > 0,
-            "60d+": self.return_60d > 0,
-            "252d+": self.return_252d > 0,
-        }
-
-    def relative_strength(self) -> dict[str, bool]:
-        return {
-            "outperform_bench_5d": self.excess_return_5d > 0,
-            "outperform_bench_20d": self.excess_return_20d > 0,
-            "outperform_sector_5d": self.sector_relative_5d > 0,
-            "outperform_sector_20d": self.sector_relative_20d > 0,
-        }
-
-    def trend_quality(self) -> dict[str, bool]:
-        return {
-            "above_sma_200": self.above_sma_200,
-            "above_sma_50": self.above_sma_50,
-            "new_52w_high": self.new_52w_high,
-            "near_52w_high": self.pct_from_52w_high >= -0.05,
-        }
-
-    def trend_linearity(self) -> dict[str, bool]:
-        return {
-            "slope_up": self.trend_slope_60d > 0,
-            "high_r2": self.r_squared_60d > 0.7,
-            "trend_confirmed": self.slope_x_r2 > 0,
-        }
-
-    def momentum_structure(self) -> dict[str, bool]:
-        return {
-            "consistent_3of4": self.momentum_consistency >= 3,
-            "consistent_4of4": self.momentum_consistency == 4,
-            "accel_short": self.momentum_accel_5_20 > 0,
-            "accel_mid": self.momentum_accel_20_60 > 0,
-            "vol_adj_positive": self.vol_adjusted_momentum > 0,
-        }
-
-    def volume_signals(self) -> dict[str, bool]:
-        return {
-            "volume_surge": self.volume_ratio > 1.5,
-            "volume_spike": self.volume_ratio > 2.0,
-            "liquid": self.dollar_volume_20d_avg >= 5_000_000,
-        }
-
-    def volatility_signals(self) -> dict[str, bool]:
-        return {
-            "low_volatility": self.volatility_20 < 0.02,
-            "high_volatility": self.volatility_20 > 0.04,
-            "atr_elevated": self.atr_pct > 0.04,
-        }
-
-    def price_structure(self) -> dict[str, bool]:
-        return {
-            "near_20d_high": self.price_vs_20d_high >= -0.03,
-            "tight_base": self.consolidation_tightness < 0.7,
-            "healthy_above_sma20": 0 < self.pct_from_sma_20 < 0.10,
-            "healthy_above_sma50": 0 < self.pct_from_sma_50 < 0.15,
-        }
-
-    def moving_average_structure(self) -> dict[str, bool]:
-        return {
-            "price_above_sma20": self.price > self.sma_20,
-            "price_above_sma50": self.above_sma_50,
-            "price_above_sma200": self.above_sma_200,
-            "sma20_above_sma50": self.sma_20 > self.sma_50,
-            "sma50_above_sma200": self.sma_50 > self.sma_200,
-            "stacked_bullish": self.price > self.sma_20 > self.sma_50 > self.sma_200,
-        }
-
-    def breakout_context(self) -> dict[str, bool]:
-        return {
-            "within_3pct_20d_high": self.drawdown_from_recent_high >= -0.03,
-            "within_5pct_52w_high": self.pct_from_52w_high >= -0.05,
-            "at_52w_high": self.new_52w_high,
-        }
-
-    def macd_signals(self) -> dict[str, bool]:
-        return {
-            "macd_above_signal": self.macd > self.macd_signal,
-            "macd_positive": self.macd > 0,
-            "hist_positive": self.macd_hist > 0,
-        }
-
-    def oscillator_signals(self) -> dict[str, bool]:
-        return {
-            "rsi_bull": self.rsi_14 > 50,
-            "macd_bull": self.macd_hist > 0,
-            "ema_bull": self.ema_9_above_21,
-            "recent_ema_cross": 0 <= self.ema_crossover_days_ago <= 5,
-        }
-
-    def momentum_score(self) -> float:
-        return (
-            0.40 * self.return_20d_percentile
-            + 0.30 * self.return_60d_percentile
-            + 0.20 * self.return_252d_percentile
-            + 0.10 * self.return_5d_percentile
-        ) / 100
-
     def risk_flags(self) -> dict[str, bool]:
         return {
             "overbought": self.rsi_14 > 70,
@@ -427,24 +309,10 @@ class TechnicalsModel:
 
 def print_snapshot_report(snapshot: TechnicalsSnapshot) -> None:
     sections = {
-        "Absolute Momentum": snapshot.absolute_momentum(),
-        "Relative Strength": snapshot.relative_strength(),
-        "Trend Quality": snapshot.trend_quality(),
-        "Trend Linearity": snapshot.trend_linearity(),
-        "Moving Averages": snapshot.moving_average_structure(),
-        "Breakout Context": snapshot.breakout_context(),
-        "Momentum Structure": snapshot.momentum_structure(),
-        "MACD Signals": snapshot.macd_signals(),
-        "Volume Signals": snapshot.volume_signals(),
-        "Volatility Signals": snapshot.volatility_signals(),
-        "Price Structure": snapshot.price_structure(),
-        "Oscillators": snapshot.oscillator_signals(),
         "Risk Flags": snapshot.risk_flags(),
     }
 
     print(f"\n=== {snapshot.ticker} | {snapshot.signal_day.date()} ===")
-    # print(snapshot)
-    print(f"Momentum Score: {snapshot.momentum_score():.3f}")
     for title, values in sections.items():
         print(f"{title}: {values}")
 

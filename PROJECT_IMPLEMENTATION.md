@@ -9,6 +9,15 @@ management over deterministic defaults. The target is not an unconstrained tradi
 is an auditable system where every agent choice can be compared against the default stop, target,
 timeline, and pass/enter decision.
 
+## Governance
+
+AI coding sessions on this repository follow `docs/AI_EXECUTION_HANDBOOK.md` (evidence authority,
+decision records, layer-boundary rules, quality gates, self-review protocol). Current project state
+lives in `docs/WorkStatus.md`; point-in-time and architecture invariants live in
+`docs/invariants.md`. This document is the top of the evidence authority order — it changes only by
+deliberate edit, and schema/strategy/data-ownership changes require a Decision Record
+(`docs/decisions/`) before code.
+
 ## Chosen Architecture
 
 QuorumNexus follows a professional portfolio-management separation of duties:
@@ -30,7 +39,6 @@ The deterministic suite consists of:
 - `strat_momentum`
 - `strat_value`
 - `strat_quality`
-- `strat_reversal` (planned; not yet specified)
 
 Each passing strategy emits a candidate packet with:
 
@@ -149,7 +157,7 @@ The remaining Phase 0 work is cleanup rather than architecture discovery:
 | Phase | Layer | Progress | Notes |
 |---|---|---|---|
 | Phase 0 | Foundation | Mostly complete | Data access, repositories, setup, signals, candidate storage, decision memory, outcomes, and eval storage exist. |
-| Phase 1 | Deterministic | In progress | `strat_momentum`, `strat_value`, and `strat_quality` screens, entry modes, and exit policies are defined and research-backed. `strat_informed_activity` was removed; `strat_reversal` remains unspecified. |
+| Phase 1 | Deterministic | In progress | `strat_momentum`, `strat_value`, and `strat_quality` screens, entry modes, and exit policies are defined and research-backed; these three make up the complete deterministic suite. |
 | Phase 2 | Deterministic | Partial | The profile registry and `screened_candidates` exist; the active-strategy runner and pre-agent gates still need to be built. |
 | Phase 3 | Deterministic | Partial | Execution/PM code exists; deterministic verdict validation and no-order debug path need tightening. |
 | Phase 4 | Agentic | Not started | Typed agent-data tools need schemas, implementations, and audit logging. |
@@ -197,7 +205,7 @@ Signal feed modules:
 
 | Signal Module | Purpose | Likely Strategies |
 |---|---|---|
-| `sig_technicals` | price, volume, momentum, trend, ATR, volatility, breakouts, pullbacks, and indicators | `strat_momentum`, `strat_reversal` |
+| `sig_technicals` | price, volume, momentum, trend, ATR, volatility, breakouts, pullbacks, and indicators | `strat_momentum` |
 | `sig_fundamentals` | quality, value, growth, margins, balance sheet, valuation, and earnings growth | quality-growth, value, growth |
 | `sig_macro` | point-in-time rates, credit, VIX, inflation, and labor levels plus directional changes and an explainable regime overlay | regime filters, risk adjustment |
 | `sig_insider` | insider buys/sells and insider accumulation | insider accumulation |
@@ -270,14 +278,14 @@ options, but it cannot create candidates, expand the menu, increase risk, or sen
 
 #### Phase 1 — Deterministic strategy suite
 
-Define all five strategies explicitly before implementing their candidate packets. A stock must pass
+Define all three strategies explicitly before implementing their candidate packets. A stock must pass
 the strategy's screen and at least one of its entry modes; it does not need to pass every entry mode.
 
 | Strategy | Universe | Best macro regime | Key flaws | Signal files | Screen | Entry modes |
 |---|---|---|---|---|---|---|
 | `strat_momentum` | Primarily liquid mid-cap and established small-cap US equities; qualifying large caps remain eligible; exclude nano, micro, and illiquid securities | Preferred, not required: persistent broad trends; broad market and sector participation; benign credit and liquidity; stable or falling volatility. Avoid high-volatility rebounds following broad market declines. Cycle labels are context, not gates | Momentum crashes during sharp regime reversals; whipsaw in range-bound markets; high turnover and trading costs; crowded or overextended leaders; sector concentration; negatively skewed crash risk | `sig_technicals`<br>`sig_sector_rotation`<br>`sig_events` | **Momentum.** Screen = general momentum eligibility (all required):<br>• **Liquid** (dollar volume ≥ $5M).<br>• **Primary uptrend** (price > 200-day).<br>• **Trend confirmed** (slope × R² > 0).<br>The momentum *thesis* lives in the two entry modes, which key off different things and admit different names. Leading-sector tilt boosts the score (Moskowitz & Grinblatt 1999). | Two research-distinct entries; at least one required (they admit different names):<br>**Trend continuation** (Jegadeesh & Titman 1993): top-quintile 12-month momentum (`return_252d_percentile ≥ 80`) with intermediate corroboration (`return_60d_percentile ≥ 70`) — **skipping the recent month** (`return_20d`), whose ≤1-month component reverses (Novy-Marx 2012) — above the 50-day with broad multi-horizon strength. *[rank — cited; bands CALIBRATION]*<br>**52-week-high breakout** (George & Hwang 2004): a *confirmed* breakout — a fresh 52-week high (below→above transition, not proximity) on a volume surge with bullish MA structure; need not be top-quintile on trailing returns.<br><br>A candidate may qualify for both. |
 | `strat_value` | Liquid small-, mid-, and large-cap US common stocks; exclude nano, micro, and illiquid securities. Financials and REITs are excluded only in v1 until dedicated sector metrics exist | Preferred, not required: broadening recovery or early expansion; improving growth and credit; rising inflation expectations; wide value-growth valuation dispersion. Interest rates and curve slope are context, not gates | Value traps and distress; peak-cycle earnings creating false cheapness; sector concentration; accounting and intangible-asset bias; long convergence and prolonged underperformance; specialized sectors require dedicated metrics | `sig_fundamentals`<br>`sig_events` | **Value = sector-relative cheapness + Piotroski trap filter.** Cheapness is the sector-ranked value composite — earnings yield (E/P; Basu 1977), FCF yield, EV/EBITDA yield (Loughran & Wellman 2011), book yield (B/M; Fama & French 1992), sales yield — computed point-in-time in `sig_fundamentals`. All gates required:<br>• **Cheapest 30% in sector** (`value_composite_percentile ≥ 70`) with ≥2 valid yield measures; negative/missing denominators cannot count as cheap. *[rank — cited]*<br>• **Operating cash flow > 0** — not a distress trap (Piotroski 2000). *[sign — cited]*<br>• **Low accruals: CFO > net income** (`accrual_quality > 0`) — earnings backed by cash (Sloan 1996). *[sign — cited]*<br>• **Reject** broad deterioration, or cash burn under leverage. Macro is a base-layer overlay, not a company-level gate. | **Scheduled rank admission (single entry gate):** a passing name is admitted at the next monthly/quarterly rebalance. Value is a periodic cross-sectional rank sort, so one deterministic entry — no fundamental-inflection mode (the Piotroski health signal now lives in the screen) and no confirmed-repricing mode (a value+momentum timing overlay is optional and not yet enabled). |
-| `strat_quality` | Primarily liquid mid- and large-cap US common stocks; established small caps remain eligible with complete multi-year fundamentals and sufficient liquidity. Exclude financials and REITs in v1 until dedicated quality metrics exist | Preferred, not required: slowing growth; tightening credit; elevated uncertainty or volatility; late-cycle/risk-off conditions. Quality remains eligible across regimes but may lag early-cycle speculative or low-quality rallies | Can become expensive or crowded; may lag high-beta and low-quality rallies; sector concentration and overlap with growth/low-volatility factors; ROE can be inflated by leverage or buybacks; backward-looking profitability may deteriorate; accounting and sector differences can create false quality signals | `sig_fundamentals`<br>`sig_events` | **Quality = Quality-Minus-Junk composite** (Asness, Frazzini & Pedersen 2019): a point-in-time, sector-ranked blend of four pillars — profitability, growth, safety, payout — computed in `sig_fundamentals`. All gates required:<br>• **QMJ composite in sector top 30%** (`quality_composite_percentile ≥ 70`), with ≥3 of 4 pillars scorable; profitability pillar led by gross profits/assets (Novy-Marx 2013). *[rank — cited]*<br>• **Operating cash flow > 0** — earnings are real (Piotroski 2000). *[sign — cited]*<br>• **Low accruals: CFO > net income** (`accrual_quality > 0`) — earnings backed by cash (Sloan 1996). *[sign — cited]*<br>• **Not extreme leverage** (de ≤ 2). *[level — CALIBRATION, walk-forward]*<br>Valuation is crowding context, not a gate. Macro is applied as a portfolio overlay by the base layer, not a company-level gate. | **Scheduled rank admission (single entry gate):** a passing name is admitted at the next monthly/quarterly rebalance. QMJ is a periodic cross-sectional rank sort with no market-timing overlay, so quality has exactly one deterministic entry. No filing-upgrade mode (the improvement signal already lives in the QMJ growth pillar) and no pullback-reclaim mode (a technical timing overlay has no research basis for a quality factor). |
+| `strat_quality` | Liquid mid- and large-cap US common stocks in v1; small caps are deferred until a dollar-volume liquidity floor and a fundamental-completeness gate exist (the blanket mid/large cut stands in for them for now). Exclude financials and REITs in v1 until dedicated quality metrics exist | Preferred, not required: slowing growth; tightening credit; elevated uncertainty or volatility; late-cycle/risk-off conditions. Quality remains eligible across regimes but may lag early-cycle speculative or low-quality rallies | Can become expensive or crowded; may lag high-beta and low-quality rallies; sector concentration and overlap with growth/low-volatility factors; ROE can be inflated by leverage or buybacks; backward-looking profitability may deteriorate; accounting and sector differences can create false quality signals | `sig_fundamentals`<br>`sig_events` | **Quality = Quality-Minus-Junk composite** (Asness, Frazzini & Pedersen 2019): a point-in-time, sector-ranked blend of four pillars — profitability, growth, safety, payout — computed in `sig_fundamentals`. All gates required:<br>• **QMJ composite in sector top 30%** (`quality_composite_percentile ≥ 70`), with ≥3 of 4 pillars scorable; profitability pillar led by gross profits/assets (Novy-Marx 2013). *[rank — cited]*<br>• **Operating cash flow > 0** — earnings are real (Piotroski 2000). *[sign — cited]*<br>• **Low accruals: CFO > net income** (`accrual_quality > 0`) — earnings backed by cash (Sloan 1996). *[sign — cited]*<br>• **Not extreme leverage** (de ≤ 2). *[level — CALIBRATION, walk-forward]*<br>Valuation is crowding context, not a gate. Macro is applied as a portfolio overlay by the base layer, not a company-level gate. | **Scheduled rank admission (single entry gate):** a passing name is admitted at the next monthly/quarterly rebalance. QMJ is a periodic cross-sectional rank sort with no market-timing overlay, so quality has exactly one deterministic entry. No filing-upgrade mode (the improvement signal already lives in the QMJ growth pillar) and no pullback-reclaim mode (a technical timing overlay has no research basis for a quality factor). |
 
 ##### Universal exit policies
 
@@ -500,7 +508,7 @@ Modify:
 - `decision_layer/agentic_layer/llm_client.py`
 - `database/db_connection.py`
 - `database/market/fundamentals_repo.py`
-- `database/operational/strategy_profiles_repository.py`
+- `database/operational/prefilter_profiles_repository.py` (planned rename: `strategy_profiles_repository.py`)
 - `database/operational/screened_candidates_repository.py`
 - `database/agent_memory/decision_memory_repository.py`
 - `database/outcomes/trade_outcomes_repository.py`
@@ -513,7 +521,8 @@ Create:
 - `evals/`
 - typed tool modules for agent evidence access
 - risk validation module for agent verdicts
-- candidate/verdict schemas, preferably shared by strategies, tools, risk, and evals
+- `decision_layer/schemas/` — shared candidate-packet and verdict schemas used by strategies, tools,
+  risk, and evals (TASK-001 in `docs/tasks/`)
 
 ## Verification
 

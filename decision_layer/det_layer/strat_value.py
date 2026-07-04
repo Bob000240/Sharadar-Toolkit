@@ -91,13 +91,13 @@ class StratValue(Strategy):
                 continue
 
             f_risks = f.risk_flags()
-            valuation = f.valuation()
 
             # ── Value screen: cheap (rank) + Piotroski health filter (traps) ──
             if not (
                 # Cheapest 30% within sector on the value composite — earnings/FCF/
                 # EV-EBITDA/book/sales yields (Fama-French 1992; Loughran-Wellman 2011).
-                valuation["enough_value_metrics"]
+                # Need >= 2 valid yield measures to trust the composite.
+                f.valid_value_metrics >= _MIN_VALUE_METRICS
                 and f.value_composite_percentile >= _MIN_VALUE_PERCENTILE
                 # Piotroski 2000: operating cash flow positive (not a distress trap).
                 and f.ncfo > 0
@@ -116,7 +116,7 @@ class StratValue(Strategy):
             # rebalance. Value is a periodic rank sort, so one deterministic entry.
             gates = ["deep_value", "value_metrics", "cash_earnings", "low_accruals",
                      "rebalance_admission", f"{cap}_cap"]
-            if valuation["pays_dividend"]:
+            if f.divyield > 0:
                 gates.append("dividend_payer")
 
             # The value composite rank IS the value score (single source of truth).
@@ -150,14 +150,17 @@ class StratValue(Strategy):
                 )
             )
         return results
+    
+
+    def risk_controls(self, packet: dict) -> list[str]:
+        return packet.get("risk_flags", [])
 
 
 if __name__ == "__main__":
     strat = StratValue()
-    packets = strat.run(
-        date(2026, 7, 1), tickers=get_stock_symbols(), persist=False, top_n=5
-    )
-    print(f"{strat.NAME}: top {len(packets)} of the full passing set")
+    as_of = date.today()
+    packets = strat.run(as_of, tickers=get_stock_symbols(), persist=False, top_n=5)
+    print(f"{strat.NAME} ({as_of}): top {len(packets)} of the full passing set")
     for p in packets:
         print(
             f"  {p['symbol']:6s} score={p['setup_score']:.3f} entry={p['entry_price']} "
