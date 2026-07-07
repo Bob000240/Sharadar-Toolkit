@@ -447,8 +447,6 @@
 #             print("No candidates — skipping buy")
 #             return
 
-#         analyst._mom_model._load_data(live=True, symbols=candidates)
-
 #         held = {p.symbol for p in self.alpaca.get_all_positions()}
 #         verdicts = [analyst.run(s) for s in candidates]
 

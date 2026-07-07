@@ -36,32 +36,31 @@ def create_table():
         conn.execute(
             text("""
             CREATE TABLE IF NOT EXISTS insider_transactions (
-                ticker                          TEXT            NOT NULL,
-                filingdate                      DATE,
-                formtype                        TEXT,
-                issuername                      TEXT,
-                ownername                       TEXT,
-                officertitle                    TEXT,
-                isdirector                      TEXT,
-                isofficer                       TEXT,
-                istenpercentowner               TEXT,
-                transactiondate                 DATE,
-                transactioncode                 TEXT,
-                transactionshares               DOUBLE PRECISION,
-                transactionpricepershare        DOUBLE PRECISION,
-                transactionvalue                DOUBLE PRECISION,
-                sharesownedbeforetransaction    DOUBLE PRECISION,
+                ticker TEXT NOT NULL,
+                filingdate DATE,
+                formtype TEXT,
+                issuername TEXT,
+                ownername TEXT,
+                officertitle TEXT,
+                isdirector TEXT,
+                isofficer TEXT,
+                istenpercentowner TEXT,
+                transactiondate DATE,
+                transactioncode TEXT,
+                transactionshares DOUBLE PRECISION,
+                transactionpricepershare DOUBLE PRECISION,
+                transactionvalue DOUBLE PRECISION,
+                sharesownedbeforetransaction DOUBLE PRECISION,
                 sharesownedfollowingtransaction DOUBLE PRECISION,
-                securitytitle                   TEXT,
-                securityadcode                  TEXT,
-                directorindirect                TEXT,
-                natureofownership               TEXT,
-                dateexercisable                 DATE,
-                expirationdate                  DATE,
-                priceexercisable                DOUBLE PRECISION,
+                securitytitle TEXT,
+                securityadcode TEXT,
+                directorindirect TEXT,
+                natureofownership TEXT,
+                dateexercisable DATE,
+                expirationdate DATE,
+                priceexercisable DOUBLE PRECISION,
                 UNIQUE (ticker, filingdate, ownername, transactiondate, transactioncode)
             );
-            CREATE INDEX IF NOT EXISTS idx_insider_ticker ON insider_transactions (ticker);
             CREATE INDEX IF NOT EXISTS idx_insider_filingdate ON insider_transactions (filingdate);
         """)
         )
@@ -75,10 +74,8 @@ def drop_table():
 def insert(df: pd.DataFrame):
     if df.empty:
         return
-    records = (
-        df[_COLUMNS].where(pd.notnull(df[_COLUMNS]), None).to_dict(orient="records")
-    )
-    records = [{k: None if v is pd.NaT else v for k, v in r.items()} for r in records]
+    frame = df[_COLUMNS].astype(object)
+    records = frame.where(frame.notna(), None).to_dict(orient="records")
     with get_connection().begin() as conn:
         conn.execute(
             text(

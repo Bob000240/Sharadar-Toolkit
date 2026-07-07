@@ -1,12 +1,9 @@
 import pandas as pd
 from dataclasses import dataclass, fields
 
-import database.market.equity_repo as equity_repo
 import database.market.fund_repo as fund_repo
 import database.market.indicators_repo as indicators_repo
 import database.market.tickers_repo as tickers_repo
-from data.live_equity import MarketData
-from data.indicators import compute_indicators
 from set_up.config import ETF_SECTOR_MAP
 from data.signals._common import python_scalar as _python_scalar, rank_pct
 
@@ -152,39 +149,11 @@ class TechnicalsModel:
         self.stock_tickers = stock_tickers
         self.benchmark_ticker = benchmark_ticker
         self.etf_tickers = etf_tickers
-        self.all_tickers = stock_tickers + [benchmark_ticker] + etf_tickers
         self.stock_data = None
         self.benchmark_data = None
         self.etf_data = None
         self._universe_returns = None
         self.load_data()
-
-    def _compute_live(self, tickers: list[str]) -> pd.DataFrame:
-        lookback_start = self.signal_day - pd.Timedelta(days=400)
-        yesterday = self.signal_day - pd.Timedelta(days=1)
-        ohlcv = equity_repo.get(
-            tickers=tickers,
-            start_date=str(lookback_start.date()),
-            end_date=str(yesterday.date()),
-        )
-        ohlcv["date"] = pd.to_datetime(ohlcv["date"])
-
-        live = MarketData().get_live_snapshot(tickers)
-        if not live.empty:
-            today = pd.Timestamp(self.signal_day.date())
-            live_rows = live.reset_index().rename(columns={"symbol": "ticker"})
-            live_rows["date"] = today
-            ohlcv = pd.concat([ohlcv, live_rows], ignore_index=True)
-
-        ohlcv = ohlcv.sort_values(["ticker", "date"])
-        rows = []
-        for tkr, group in ohlcv.groupby("ticker", sort=False):
-            ind = compute_indicators(group.reset_index(drop=True))
-            if not ind.empty:
-                last = ind.iloc[-1].to_dict()
-                last["ticker"] = tkr
-                rows.append(last)
-        return pd.DataFrame(rows).set_index("ticker")
 
     def _fund_returns(self, tickers: list[str]) -> pd.DataFrame:
         lookback = self.signal_day - pd.Timedelta(days=300)
@@ -201,47 +170,42 @@ class TechnicalsModel:
                 {
                     "ticker": tkr,
                     "return_5d": (c[-1] / c[-6] - 1) if len(c) >= 6 else float("nan"),
-                    "return_20d": (c[-1] / c[-21] - 1) if len(c) >= 21 else float("nan"),
+                    "return_20d": (c[-1] / c[-21] - 1)
+                    if len(c) >= 21
+                    else float("nan"),
                 }
             )
         return pd.DataFrame(rows).set_index("ticker")
 
-    def load_data(self, live: bool = False, tickers: list[str] | None = None) -> None:
-        if live and tickers:
-            fresh = self._compute_live(tickers)
-            for tkr in fresh.index:
-                if tkr not in self.stock_data.index:
-                    continue
-                for col in fresh.columns:
-                    if col in self.stock_data.columns:
-                        self.stock_data.at[tkr, col] = fresh.at[tkr, col]
-        else:
-            # Load the full indicators universe so return percentiles are ranked
-            # market-wide (independent of the request batch), then take the batch.
-            universe = indicators_repo.get_latest(None, self.signal_day).set_index(
-                "ticker"
+    def load_data(self) -> None:
+        # Load the full indicators universe so return percentiles are ranked
+        # market-wide (independent of the request batch), then take the batch.
+        universe = indicators_repo.get_latest_rows(None, self.signal_day).set_index(
+            "ticker"
+        )
+        self._universe_returns = universe[_RETURN_COLS].copy()
+
+        missing_tickers = [
+            t for t in self.stock_tickers if t not in universe.index
+        ]
+        if missing_tickers:
+            raise ValueError(
+                f"No indicator data as of {self.signal_day.date()} for: {missing_tickers}"
             )
-            self._universe_returns = universe[_RETURN_COLS].copy()
+        self.stock_data = universe.loc[self.stock_tickers].copy()
+        sector_map = tickers_repo.get(tickers=self.stock_tickers)[
+            ["ticker", "sector"]
+        ].set_index("ticker")["sector"]
+        self.stock_data["sector"] = sector_map.reindex(self.stock_data.index)
 
-            missing = [t for t in self.stock_tickers if t not in universe.index]
-            if missing:
-                raise ValueError(
-                    f"No indicator data as of {self.signal_day.date()} for: {missing}"
-                )
-            self.stock_data = universe.loc[self.stock_tickers].copy()
-            sector_map = tickers_repo.get(tickers=self.stock_tickers)[
-                ["ticker", "sector"]
-            ].set_index("ticker")["sector"]
-            self.stock_data["sector"] = sector_map.reindex(self.stock_data.index)
-
-            fund_data = self._fund_returns([self.benchmark_ticker] + self.etf_tickers)
-            self.benchmark_data = fund_data.loc[[self.benchmark_ticker]]
-            missing_etfs = [t for t in self.etf_tickers if t not in fund_data.index]
-            if missing_etfs:
-                raise ValueError(
-                    f"No fund price data as of {self.signal_day.date()} for ETFs: {missing_etfs}"
-                )
-            self.etf_data = fund_data.loc[self.etf_tickers]
+        fund_data = self._fund_returns([self.benchmark_ticker] + self.etf_tickers)
+        self.benchmark_data = fund_data.loc[[self.benchmark_ticker]]
+        missing_etfs = [t for t in self.etf_tickers if t not in fund_data.index]
+        if missing_etfs:
+            raise ValueError(
+                f"No fund price data as of {self.signal_day.date()} for ETFs: {missing_etfs}"
+            )
+        self.etf_data = fund_data.loc[self.etf_tickers]
 
         self.stock_data = _derive_relative_returns(
             self.stock_data, self.benchmark_data, self.etf_data, self.benchmark_ticker

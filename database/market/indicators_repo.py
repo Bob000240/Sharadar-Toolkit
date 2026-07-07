@@ -51,55 +51,45 @@ def create_table():
         conn.execute(
             text("""
             CREATE TABLE IF NOT EXISTS indicators (
-                ticker                  TEXT            NOT NULL,
-                date                    DATE            NOT NULL,
-                close                   DOUBLE PRECISION,
-
-                return_1d               DOUBLE PRECISION,
-                return_5d               DOUBLE PRECISION,
-                return_20d              DOUBLE PRECISION,
-                return_60d              DOUBLE PRECISION,
-                return_252d             DOUBLE PRECISION,
-
-                sma_20                  DOUBLE PRECISION,
-                sma_50                  DOUBLE PRECISION,
-                sma_200                 DOUBLE PRECISION,
-                ema_9                   DOUBLE PRECISION,
-                ema_21                  DOUBLE PRECISION,
-                ema_crossover_days_ago  DOUBLE PRECISION,
-                pct_from_sma_20         DOUBLE PRECISION,
-                pct_from_sma_50         DOUBLE PRECISION,
-
-                volume_sma_10           DOUBLE PRECISION,
-                volume_sma_50           DOUBLE PRECISION,
-                volume_ratio            DOUBLE PRECISION,
-                obv                     DOUBLE PRECISION,
-                dollar_volume           DOUBLE PRECISION,
-                dollar_volume_20d_avg   DOUBLE PRECISION,
-
-                rsi_14                  DOUBLE PRECISION,
-                macd                    DOUBLE PRECISION,
-                macd_signal             DOUBLE PRECISION,
-                macd_hist               DOUBLE PRECISION,
-
-                atr_14                  DOUBLE PRECISION,
-                atr_pct                 DOUBLE PRECISION,
-                volatility_20           DOUBLE PRECISION,
-                vol_adjusted_momentum   DOUBLE PRECISION,
+                ticker TEXT NOT NULL,
+                date DATE NOT NULL,
+                close DOUBLE PRECISION,
+                return_1d DOUBLE PRECISION,
+                return_5d DOUBLE PRECISION,
+                return_20d DOUBLE PRECISION,
+                return_60d DOUBLE PRECISION,
+                return_252d DOUBLE PRECISION,
+                sma_20 DOUBLE PRECISION,
+                sma_50 DOUBLE PRECISION,
+                sma_200 DOUBLE PRECISION,
+                ema_9 DOUBLE PRECISION,
+                ema_21 DOUBLE PRECISION,
+                ema_crossover_days_ago DOUBLE PRECISION,
+                pct_from_sma_20 DOUBLE PRECISION,
+                pct_from_sma_50 DOUBLE PRECISION,
+                volume_sma_10 DOUBLE PRECISION,
+                volume_sma_50 DOUBLE PRECISION,
+                volume_ratio DOUBLE PRECISION,
+                obv DOUBLE PRECISION,
+                dollar_volume DOUBLE PRECISION,
+                dollar_volume_20d_avg DOUBLE PRECISION,
+                rsi_14 DOUBLE PRECISION,
+                macd DOUBLE PRECISION,
+                macd_signal DOUBLE PRECISION,
+                macd_hist DOUBLE PRECISION,
+                atr_14 DOUBLE PRECISION,
+                atr_pct DOUBLE PRECISION,
+                volatility_20 DOUBLE PRECISION,
+                vol_adjusted_momentum DOUBLE PRECISION,
                 consolidation_tightness DOUBLE PRECISION,
-
-                high_52w                DOUBLE PRECISION,
-                pct_from_52w_high       DOUBLE PRECISION,
-
-                r_squared_60d           DOUBLE PRECISION,
-                trend_slope_60d         DOUBLE PRECISION,
-
-                rolling_20d_high        DOUBLE PRECISION,
+                high_52w DOUBLE PRECISION,
+                pct_from_52w_high DOUBLE PRECISION,
+                r_squared_60d DOUBLE PRECISION,
+                trend_slope_60d DOUBLE PRECISION,
+                rolling_20d_high DOUBLE PRECISION,
                 drawdown_from_recent_high DOUBLE PRECISION,
-
                 PRIMARY KEY (ticker, date)
             );
-            CREATE INDEX IF NOT EXISTS idx_indicators_ticker ON indicators (ticker);
         """)
         )
 
@@ -112,9 +102,8 @@ def drop_table():
 def insert(df: pd.DataFrame):
     if df.empty:
         return
-    df = df[_COLUMNS].replace([np.inf, -np.inf], np.nan)
-    records = df.where(pd.notnull(df), None).to_dict(orient="records")
-    records = [{k: None if v is pd.NaT else v for k, v in r.items()} for r in records]
+    frame = df[_COLUMNS].replace([np.inf, -np.inf], np.nan).astype(object)
+    records = frame.where(frame.notna(), None).to_dict(orient="records")
     with get_connection().begin() as conn:
         conn.execute(
             text(
@@ -144,7 +133,7 @@ def get(
     return pd.read_sql_query(text(q), get_connection(), params=params)
 
 
-def get_latest_date(tickers: str | list[str] | None = None) -> pd.DataFrame:
+def get_latest_dates(tickers: str | list[str] | None = None) -> pd.DataFrame:
     q = "SELECT ticker, MAX(date) AS latest_date FROM indicators"
     params = {}
     if tickers is not None:
@@ -154,7 +143,7 @@ def get_latest_date(tickers: str | list[str] | None = None) -> pd.DataFrame:
     return pd.read_sql_query(text(q), get_connection(), params=params)
 
 
-def get_latest(
+def get_latest_rows(
     tickers: str | list[str] | None, signal_day: pd.Timestamp
 ) -> pd.DataFrame:
     params = {

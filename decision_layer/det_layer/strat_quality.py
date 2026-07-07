@@ -31,8 +31,8 @@ _MIN_QUALITY_PERCENTILE = 70.0
 # Require at least 3 of the 4 QMJ pillars to have enough data to score.
 _MIN_QUALITY_PILLARS = 3
 # Soft-gate context labels appended to passed_gates (not hard gates). CALIBRATION.
-_ROE_STRONG = 0.15       # strong profitability (QMJ / Novy-Marx context)
-_LOW_LEVERAGE_DE = 1.0   # conservative balance sheet; distinct from the de<=2 hard floor
+_ROE_STRONG = 0.15  # strong profitability (QMJ / Novy-Marx context)
+_LOW_LEVERAGE_DE = 1.0  # conservative balance sheet; distinct from the de<=2 hard floor
 
 # Quality is a mid/large-cap factor (small/nano/micro excluded).
 _ALLOWED_CAPS = {"mid", "large"}
@@ -84,13 +84,13 @@ class StratQuality(Strategy):
             return []
         present = prices.index.tolist()
 
-        funds = FundamentalsModel(ts, present)
-        scored = [t for t in present if t in funds.data.index]
+        fundamentals = FundamentalsModel(ts, present)
+        scored = [t for t in present if t in fundamentals.data.index]
         events = EventsModel(ts, scored)
 
         results: list[ScreenResult] = []
         for ticker in scored:
-            f = funds.build_snapshot(ticker)
+            f = fundamentals.build_snapshot(ticker)
             if f.sector in _EXCLUDED_SECTORS:
                 continue
             cap = cap_bucket(f.marketcap)
@@ -123,8 +123,13 @@ class StratQuality(Strategy):
             row = prices.loc[ticker]
             # Entry = scheduled rank admission: a passing name enters at the next
             # rebalance. QMJ is a periodic rank sort, so there is one entry gate.
-            gates = ["quality_composite", "cash_earnings", "low_accruals",
-                     "rebalance_admission", f"{cap}_cap"]
+            gates = [
+                "quality_composite",
+                "cash_earnings",
+                "low_accruals",
+                "rebalance_admission",
+                f"{cap}_cap",
+            ]
             if f.roe > _ROE_STRONG:
                 gates.append("roe_strong")
             if f.de < _LOW_LEVERAGE_DE:
@@ -144,21 +149,32 @@ class StratQuality(Strategy):
                     levels={"sma_50": float(row["sma_50"])},
                     signal_context={
                         "sector": f.sector,
-                        "quality_composite_percentile": round(f.quality_composite_percentile, 2),
+                        "quality_composite_percentile": round(
+                            f.quality_composite_percentile, 2
+                        ),
                         "quality_composite_score": round(f.quality_composite_score, 3)
-                        if pd.notna(f.quality_composite_score) else None,
+                        if pd.notna(f.quality_composite_score)
+                        else None,
                         "valid_quality_pillars": int(f.valid_quality_pillars),
-                        "quality_profitability_score": round(f.quality_profitability_score, 3)
-                        if pd.notna(f.quality_profitability_score) else None,
+                        "quality_profitability_score": round(
+                            f.quality_profitability_score, 3
+                        )
+                        if pd.notna(f.quality_profitability_score)
+                        else None,
                         "quality_safety_score": round(f.quality_safety_score, 3)
-                        if pd.notna(f.quality_safety_score) else None,
+                        if pd.notna(f.quality_safety_score)
+                        else None,
                         "accrual_quality": round(f.accrual_quality, 4)
-                        if pd.notna(f.accrual_quality) else None,
+                        if pd.notna(f.accrual_quality)
+                        else None,
                         "roe_percentile": round(f.roe_percentile, 2)
-                        if pd.notna(f.roe_percentile) else None,
+                        if pd.notna(f.roe_percentile)
+                        else None,
                         "roic": round(f.roic, 4) if pd.notna(f.roic) else None,
                         "de": round(f.de, 3) if pd.notna(f.de) else None,
-                        "marketcap": round(f.marketcap, 0) if pd.notna(f.marketcap) else None,
+                        "marketcap": round(f.marketcap, 0)
+                        if pd.notna(f.marketcap)
+                        else None,
                         "days_since_last_earnings": ev.days_since_last_earnings,
                     },
                 )

@@ -26,14 +26,31 @@ DEFAULT_CONVICTION = {"HIGH_CONVICTION": 1.0, "CONVICTION": 0.6, "LOW_CONVICTION
 _REGIME_SCORE = {"supportive": 0.75, "mixed": 0.5, "hostile": 0.25}
 
 _PROFILE_KEYS = (
-    "name", "version", "description", "is_active", "universe",
-    "default_holding_days", "max_position_pct", "max_loss_pct",
-    "allowed_stop_ids", "allowed_target_ids", "allowed_timeline_ids",
-    "default_stop_id", "default_target_id", "default_timeline_id",
+    "name",
+    "version",
+    "description",
+    "is_active",
+    "universe",
+    "default_holding_days",
+    "max_position_pct",
+    "max_loss_pct",
+    "allowed_stop_ids",
+    "allowed_target_ids",
+    "allowed_timeline_ids",
+    "default_stop_id",
+    "default_target_id",
+    "default_timeline_id",
     "conviction_size_multipliers",
-    "backtest_win_rate", "backtest_expectancy", "backtest_sharpe",
-    "backtest_start_date", "backtest_end_date",
-    "wf_win_rate", "wf_expectancy", "wf_sharpe", "wf_start_date", "wf_end_date",
+    "backtest_win_rate",
+    "backtest_expectancy",
+    "backtest_sharpe",
+    "backtest_start_date",
+    "backtest_end_date",
+    "wf_win_rate",
+    "wf_expectancy",
+    "wf_sharpe",
+    "wf_start_date",
+    "wf_end_date",
 )
 
 
@@ -99,7 +116,7 @@ class Strategy(ABC):
 
     def _price_levels(self, signal_day: date, tickers: list[str]) -> pd.DataFrame:
         """Latest close / ATR / 50DMA per ticker as of signal_day (point-in-time)."""
-        df = indicators_repo.get_latest(tickers, pd.Timestamp(signal_day))
+        df = indicators_repo.get_latest_rows(tickers, pd.Timestamp(signal_day))
         if df.empty:
             return pd.DataFrame(columns=["close", "atr_14", "sma_50"])
         return df.set_index("ticker")[["close", "atr_14", "sma_50"]]
@@ -114,7 +131,9 @@ class Strategy(ABC):
     ) -> dict:
         p = self.profile
         stop, target, timeline = (
-            menus["default_stop"], menus["default_target"], menus["default_timeline"]
+            menus["default_stop"],
+            menus["default_target"],
+            menus["default_timeline"],
         )
         return {
             "symbol": result.symbol,
@@ -138,7 +157,10 @@ class Strategy(ABC):
             "backtest_win_rate": p.get("backtest_win_rate"),
             "backtest_expectancy": p.get("backtest_expectancy"),
             "backtest_sharpe": p.get("backtest_sharpe"),
-            "signal_context": {**result.signal_context, "macro_overlay": overlay.to_dict()},
+            "signal_context": {
+                **result.signal_context,
+                "macro_overlay": overlay.to_dict(),
+            },
             "feature_vector": None,
         }
 

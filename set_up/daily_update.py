@@ -4,11 +4,6 @@ Daily incremental update. Run each market day after close.
     uv run python -m set_up.daily_update
 """
 
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
 import pandas as pd
 from set_up.config import get_stock_symbols, BENCHMARK_SYMBOLS
 from set_up.load_data import START_DATE
@@ -43,19 +38,10 @@ def _batched(
     print(f"{label}: {total:,} rows upserted")
 
 
-def _update_prices_split(sh_fn, repo_insert, repo_get_latest, label: str, symbols: list):
-    """Fetch each ticker only from ITS OWN last-loaded date forward; tickers new to
-    the table get a full backfill. Tickers that share a last date are grouped into
-    the same API call.
-
-    This is the fix for the min()-pins-everyone problem: previously `since` was a
-    single date derived from the *earliest* last-date across the universe, so a
-    couple of laggard tickers forced a full-window re-fetch for all ~2,400 names
-    (most of which already had the data — silently discarded by ON CONFLICT DO
-    NOTHING, but still fetched over the network). Here, names already current fetch
-    nothing, and only genuine gaps are pulled — so the fetched row count is also
-    honest, since every fetched row is strictly newer than what's stored."""
-    latest = repo_get_latest(tickers=symbols)
+def _update_prices_split(
+    sh_fn, repo_insert, repo_get_latest_dates, label: str, symbols: list
+):
+    latest = repo_get_latest_dates(tickers=symbols)
     last_by_ticker = (
         dict(zip(latest["ticker"], latest["latest_date"])) if not latest.empty else {}
     )
@@ -98,7 +84,7 @@ def update_equity_prices(sh: SharadarData):
     _update_prices_split(
         sh.equity_prices,
         equity_repo.insert,
-        equity_repo.get_latest_date,
+        equity_repo.get_latest_dates,
         "Equity prices",
         get_stock_symbols(),
     )
@@ -108,14 +94,14 @@ def update_fund_prices(sh: SharadarData):
     _update_prices_split(
         sh.fund_prices,
         fund_repo.insert,
-        fund_repo.get_latest_date,
+        fund_repo.get_latest_dates,
         "Fund prices",
         BENCHMARK_SYMBOLS,
     )
 
 
 def update_indicators():
-    latest = indicators_repo.get_latest_date()
+    latest = indicators_repo.get_latest_dates()
     if latest.empty:
         print("Indicators: no base data")
         return
@@ -181,7 +167,7 @@ def update_tickers(sh: SharadarData):
 
 
 def update_macro():
-    since = macro_repo.get_latest_date() or "2021-01-01"
+    since = macro_repo.get_latest_dates() or "2021-01-01"
     df = MacroData().get_macro(since, TODAY)
     if df.empty:
         print("Macro: up to date")

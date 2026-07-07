@@ -18,9 +18,6 @@ import os
 import sys
 import tempfile
 import zipfile
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import numpy as np
 import pandas as pd
@@ -48,8 +45,6 @@ nasdaqdatalink.ApiConfig.api_key = os.getenv("NDL_APIKEY")
 START_DATE = "2016-01-01"
 END_DATE = pd.Timestamp.today().strftime("%Y-%m-%d")
 
-# Raw Sharadar tables loaded in this order (TICKERS first: the DB-derived
-# universe depends on it). code -> (repo, target table, date filter col, ticker whitelist).
 SHARADAR_TABLES = {
     "TICKERS": (tickers_repo, "tickers", None, None),
     "SEP": (equity_repo, "equity_prices", "date", None),
@@ -59,10 +54,7 @@ SHARADAR_TABLES = {
     "SF3": (institutional_repo, "institutional_holdings", "calendardate", None),
     "EVENTS": (event_repo, "events", "date", None),
 }
-# Bulk export uses Sharadar's raw column names; map any that differ from schema.
 _RENAMES = {"TICKERS": {"table": "table_code"}}
-# The full TICKERS export spans every product table (SF1/SF2/... rows, some with a
-# null ticker). We only use equity descriptors, so keep table_code='SEP' (incl. delisted).
 _ROW_FILTERS = {
     "TICKERS": lambda df: df[(df["table_code"] == "SEP") & df["ticker"].notna()],
 }
@@ -73,9 +65,7 @@ _CHUNK = 200_000
 
 
 def _export(code: str, dest: str, date_field: str | None, tickers: list | None) -> list[str]:
-    # Datatables bulk export (qopts.export) runs on the table-API entitlement,
-    # unlike the bulkdownload CLI endpoint. Filters pass through when given.
-    filters: dict = {}
+    # Datatables bulk export (qopts.export) runs on the table-API entitlement,    filters: dict = {}
     if date_field:
         filters[date_field] = {"gte": START_DATE}
     if tickers:
@@ -99,12 +89,9 @@ def load_sharadar_table(code: str) -> None:
     total = 0
     with tempfile.TemporaryDirectory() as dest:
         for part in _export(code, dest, date_field, tickers):
-            # Chunk the read so the big tables (SEP/SF3) don't blow up memory.
             for chunk in pd.read_csv(part, chunksize=_CHUNK):
                 if rename:
                     chunk = chunk.rename(columns=rename)
-                # Bulk exports include entities with no current ticker; we key
-                # every table by ticker, so drop those rows.
                 chunk = chunk[chunk["ticker"].notna()]
                 if row_filter is not None:
                     chunk = row_filter(chunk)

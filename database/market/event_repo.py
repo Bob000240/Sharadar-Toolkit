@@ -12,9 +12,9 @@ def create_table():
         conn.execute(
             text("""
             CREATE TABLE IF NOT EXISTS events (
-                ticker      TEXT NOT NULL,
-                date        DATE NOT NULL,
-                eventcodes  TEXT,
+                ticker TEXT NOT NULL,
+                date DATE NOT NULL,
+                eventcodes TEXT,
                 PRIMARY KEY (ticker, date)
             );
             CREATE INDEX IF NOT EXISTS idx_events_date ON events (date);
@@ -30,10 +30,8 @@ def drop_table():
 def insert(df: pd.DataFrame):
     if df.empty:
         return
-    records = (
-        df[_COLUMNS].where(pd.notnull(df[_COLUMNS]), None).to_dict(orient="records")
-    )
-    records = [{k: None if v is pd.NaT else v for k, v in r.items()} for r in records]
+    frame = df[_COLUMNS].astype(object)
+    records = frame.where(frame.notna(), None).to_dict(orient="records")
     with get_connection().begin() as conn:
         conn.execute(
             text(

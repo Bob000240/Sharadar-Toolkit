@@ -122,10 +122,10 @@ class StratMomentum(Strategy):
         events = EventsModel(ts, present)
         # Point-in-time market cap for the size gate. Momentum uses only technicals,
         # so pull marketcap via the slim per-ticker latest-ART lookup (not the full
-        # FundamentalsModel). Names without a fundamentals row are dropped by the cap
+        # fundamental signal pipeline). Names without a fundamentals row are dropped by the cap
         # gate below — can't verify size, so exclude.
         mcaps = (
-            fundamentals_repo.get_latest(present, "ART", ts)
+            fundamentals_repo.get_latest_rows(present, "ART", ts)
             .set_index("ticker")["marketcap"]
             .to_dict()
         )
@@ -162,8 +162,13 @@ class StratMomentum(Strategy):
 
             gates = ["liquid", "uptrend", "trend_confirmed", f"{cap}_cap"]
             gates += [f"mode_{name}" for name, passed in modes.items() if passed]
-            if sec.sector_rank_20d is not None and sec.sector_rank_20d <= _LEADING_SECTOR_RANK:
-                gates.append("leading_sector")  # Moskowitz-Grinblatt 1999 (top-3 sector)
+            if (
+                sec.sector_rank_20d is not None
+                and sec.sector_rank_20d <= _LEADING_SECTOR_RANK
+            ):
+                gates.append(
+                    "leading_sector"
+                )  # Moskowitz-Grinblatt 1999 (top-3 sector)
 
             # Score = intermediate/long momentum rank + leading-sector tilt.
             setup_score = min(
@@ -175,10 +180,14 @@ class StratMomentum(Strategy):
 
             risk_flags = [k for k, v in t.risk_flags().items() if v]
             risk_flags += [
-                k for k, v in ev_risks.items() if v and k in ("just_reported", "post_earnings")
+                k
+                for k, v in ev_risks.items()
+                if v and k in ("just_reported", "post_earnings")
             ]
             if mcap is not None and mcap >= _MEGA_CAP_THRESHOLD:
-                risk_flags.append("mega_cap_crowding")  # eligible, but crowded (see note above)
+                risk_flags.append(
+                    "mega_cap_crowding"
+                )  # eligible, but crowded (see note above)
 
             results.append(
                 ScreenResult(
@@ -206,7 +215,7 @@ class StratMomentum(Strategy):
                 )
             )
         return results
-    
+
     def risk_controls(self, packet: dict) -> list[str]:
         return packet.get("risk_flags", [])
 

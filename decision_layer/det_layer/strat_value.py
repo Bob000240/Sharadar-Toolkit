@@ -74,13 +74,13 @@ class StratValue(Strategy):
             return []
         present = prices.index.tolist()
 
-        funds = FundamentalsModel(ts, present)
-        scored = [t for t in present if t in funds.data.index]
+        fundamentals = FundamentalsModel(ts, present)
+        scored = [t for t in present if t in fundamentals.data.index]
         events = EventsModel(ts, scored)
 
         results: list[ScreenResult] = []
         for ticker in scored:
-            f = funds.build_snapshot(ticker)
+            f = fundamentals.build_snapshot(ticker)
             if f.sector in _EXCLUDED_SECTORS:
                 continue
             cap = cap_bucket(f.marketcap)
@@ -114,8 +114,14 @@ class StratValue(Strategy):
             row = prices.loc[ticker]
             # Entry = scheduled rank admission: a passing name enters at the next
             # rebalance. Value is a periodic rank sort, so one deterministic entry.
-            gates = ["deep_value", "value_metrics", "cash_earnings", "low_accruals",
-                     "rebalance_admission", f"{cap}_cap"]
+            gates = [
+                "deep_value",
+                "value_metrics",
+                "cash_earnings",
+                "low_accruals",
+                "rebalance_admission",
+                f"{cap}_cap",
+            ]
             if f.divyield > 0:
                 gates.append("dividend_payer")
 
@@ -133,24 +139,36 @@ class StratValue(Strategy):
                     levels={"sma_50": float(row["sma_50"])},
                     signal_context={
                         "sector": f.sector,
-                        "value_composite_percentile": round(f.value_composite_percentile, 2),
+                        "value_composite_percentile": round(
+                            f.value_composite_percentile, 2
+                        ),
                         "valid_value_metrics": int(f.valid_value_metrics),
                         "earnings_yield": round(f.earnings_yield, 4)
-                        if pd.notna(f.earnings_yield) else None,
-                        "fcf_yield": round(f.fcf_yield, 4) if pd.notna(f.fcf_yield) else None,
+                        if pd.notna(f.earnings_yield)
+                        else None,
+                        "fcf_yield": round(f.fcf_yield, 4)
+                        if pd.notna(f.fcf_yield)
+                        else None,
                         "accrual_quality": round(f.accrual_quality, 4)
-                        if pd.notna(f.accrual_quality) else None,
-                        "quality_composite_percentile": round(f.quality_composite_percentile, 2)
-                        if pd.notna(f.quality_composite_percentile) else None,
+                        if pd.notna(f.accrual_quality)
+                        else None,
+                        "quality_composite_percentile": round(
+                            f.quality_composite_percentile, 2
+                        )
+                        if pd.notna(f.quality_composite_percentile)
+                        else None,
                         "de": round(f.de, 3) if pd.notna(f.de) else None,
-                        "divyield": round(f.divyield, 4) if pd.notna(f.divyield) else None,
-                        "marketcap": round(f.marketcap, 0) if pd.notna(f.marketcap) else None,
+                        "divyield": round(f.divyield, 4)
+                        if pd.notna(f.divyield)
+                        else None,
+                        "marketcap": round(f.marketcap, 0)
+                        if pd.notna(f.marketcap)
+                        else None,
                         "days_since_last_earnings": ev.days_since_last_earnings,
                     },
                 )
             )
         return results
-    
 
     def risk_controls(self, packet: dict) -> list[str]:
         return packet.get("risk_flags", [])

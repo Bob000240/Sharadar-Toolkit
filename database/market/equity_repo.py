@@ -23,19 +23,18 @@ def create_table():
         conn.execute(
             text("""
             CREATE TABLE IF NOT EXISTS equity_prices (
-                ticker          TEXT            NOT NULL,
-                date            DATE            NOT NULL,
-                open            DOUBLE PRECISION,
-                high            DOUBLE PRECISION,
-                low             DOUBLE PRECISION,
-                close           DOUBLE PRECISION,
-                volume          DOUBLE PRECISION,
-                closeadj        DOUBLE PRECISION,
-                closeunadj      DOUBLE PRECISION,
-                lastupdated     DATE,
+                ticker TEXT NOT NULL,
+                date DATE NOT NULL,
+                open DOUBLE PRECISION,
+                high DOUBLE PRECISION,
+                low DOUBLE PRECISION,
+                close DOUBLE PRECISION,
+                volume DOUBLE PRECISION,
+                closeadj DOUBLE PRECISION,
+                closeunadj DOUBLE PRECISION,
+                lastupdated DATE,
                 PRIMARY KEY (ticker, date)
             );
-            CREATE INDEX IF NOT EXISTS idx_equity_ticker ON equity_prices (ticker);
         """)
         )
 
@@ -48,10 +47,8 @@ def drop_table():
 def insert(df: pd.DataFrame):
     if df.empty:
         return
-    records = (
-        df[_COLUMNS].where(pd.notnull(df[_COLUMNS]), None).to_dict(orient="records")
-    )
-    records = [{k: None if v is pd.NaT else v for k, v in r.items()} for r in records]
+    frame = df[_COLUMNS].astype(object)
+    records = frame.where(frame.notna(), None).to_dict(orient="records")
     with get_connection().begin() as conn:
         conn.execute(
             text(
@@ -81,7 +78,7 @@ def get(
     return pd.read_sql_query(text(q), get_connection(), params=params)
 
 
-def get_latest_date(tickers: str | list[str] | None = None) -> pd.DataFrame:
+def get_latest_dates(tickers: str | list[str] | None = None) -> pd.DataFrame:
     q = "SELECT ticker, MAX(date) AS latest_date FROM equity_prices"
     params = {}
     if tickers is not None:

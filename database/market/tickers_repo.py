@@ -34,6 +34,11 @@ _COLUMNS = [
 ]
 _COL_LIST = ", ".join(_COLUMNS)
 _BIND_LIST = ", ".join(f":{c}" for c in _COLUMNS)
+_UPDATE_SET = ", ".join(
+    f"{column} = COALESCE(EXCLUDED.{column}, tickers.{column})"
+    for column in _COLUMNS
+    if column not in ("ticker", "table_code")
+)
 
 
 def create_table():
@@ -41,34 +46,34 @@ def create_table():
         conn.execute(
             text("""
             CREATE TABLE IF NOT EXISTS tickers (
-                ticker          TEXT    NOT NULL,
-                table_code      TEXT    NOT NULL,
-                permaticker     TEXT,
-                name            TEXT,
-                exchange        TEXT,
-                isdelisted      TEXT,
-                category        TEXT,
-                cusips          TEXT,
-                siccode         TEXT,
-                sicsector       TEXT,
-                sicindustry     TEXT,
-                figi            TEXT,
-                famaindustry    TEXT,
-                sector          TEXT,
-                industry        TEXT,
-                scalemarketcap  TEXT,
-                scalerevenue    TEXT,
-                relatedtickers  TEXT,
-                currency        TEXT,
-                location        TEXT,
-                lastupdated     DATE,
-                firstadded      DATE,
-                firstpricedate  DATE,
-                lastpricedate   DATE,
-                firstquarter    DATE,
-                lastquarter     DATE,
-                secfilings      TEXT,
-                companysite     TEXT,
+                ticker TEXT NOT NULL,
+                table_code TEXT NOT NULL,
+                permaticker TEXT,
+                name TEXT,
+                exchange TEXT,
+                isdelisted TEXT,
+                category TEXT,
+                cusips TEXT,
+                siccode TEXT,
+                sicsector TEXT,
+                sicindustry TEXT,
+                figi TEXT,
+                famaindustry TEXT,
+                sector TEXT,
+                industry TEXT,
+                scalemarketcap TEXT,
+                scalerevenue TEXT,
+                relatedtickers TEXT,
+                currency TEXT,
+                location TEXT,
+                lastupdated DATE,
+                firstadded DATE,
+                firstpricedate DATE,
+                lastpricedate DATE,
+                firstquarter DATE,
+                lastquarter DATE,
+                secfilings TEXT,
+                companysite TEXT,
                 PRIMARY KEY (ticker, table_code)
             );
             CREATE INDEX IF NOT EXISTS idx_tickers_sector ON tickers (sector);
@@ -85,14 +90,13 @@ def insert(df: pd.DataFrame):
     if df.empty:
         return
     df = df.rename(columns={"table": "table_code"})
-    records = (
-        df[_COLUMNS].where(pd.notnull(df[_COLUMNS]), None).to_dict(orient="records")
-    )
-    records = [{k: None if v is pd.NaT else v for k, v in r.items()} for r in records]
+    frame = df[_COLUMNS].astype(object)
+    records = frame.where(frame.notna(), None).to_dict(orient="records")
     with get_connection().begin() as conn:
         conn.execute(
             text(
-                f"INSERT INTO tickers ({_COL_LIST}) VALUES ({_BIND_LIST}) ON CONFLICT DO NOTHING"
+                f"INSERT INTO tickers ({_COL_LIST}) VALUES ({_BIND_LIST}) "
+                f"ON CONFLICT (ticker, table_code) DO UPDATE SET {_UPDATE_SET}"
             ),
             records,
         )
@@ -116,33 +120,3 @@ def get(
         q += " AND isdelisted = :delisted"
     q += " ORDER BY ticker"
     return pd.read_sql_query(text(q), get_connection(), params=params)
-
-
-def get_universe(include_delisted: bool = False) -> pd.DataFrame:
-    """Tradeable equity universe from the tickers table.
-
-    USD-denominated domestic common stock (primary class only) on the major US
-    exchanges, excluding nano/micro caps. By default returns only live names;
-    set include_delisted=True for a survivorship-free backtest universe — note
-    that requires delisted tickers to have been loaded (see load_data.load_tickers,
-    which currently ingests is_delisted=False only).
-    """
-    delisted_clause = "" if include_delisted else "AND isdelisted = 'N'"
-    q = text(f"""
-        SELECT ticker, name, exchange, sector, industry, scalemarketcap
-        FROM tickers
-        WHERE table_code = 'SEP'                              -- equities only (not SFP ETFs)
-          AND currency = 'USD'                                -- USD-denominated lines only
-          AND exchange IN ('NYSE', 'NASDAQ', 'NYSEMKT')       -- listed; drops OTC/pink + NULL
-          AND category LIKE 'Domestic Common Stock%'          -- common stock only (no ADR/pref/CEF)
-          AND category NOT LIKE '%Secondary%'                 -- primary class only -> kills GOOG/GOOGL dupes
-          AND scalemarketcap NOT IN ('1 - Nano', '2 - Micro') -- tradeable size; tighten per strategy
-          {delisted_clause}
-        ORDER BY ticker
-    """)
-    return pd.read_sql_query(q, get_connection())
-
-
-def get_universe_tickers(include_delisted: bool = False) -> list[str]:
-    """Ticker symbols of the tradeable universe (see get_universe)."""
-    return get_universe(include_delisted)["ticker"].tolist()

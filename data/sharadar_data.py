@@ -6,12 +6,6 @@ from nasdaqdatalink.connection import Connection as _NDLConnection
 
 load_dotenv()
 
-# nasdaqdatalink issues its HTTP requests with no timeout, so if a connection
-# stalls (socket stays open but data stops flowing) the whole job hangs forever
-# instead of erroring. The library already configures urllib3 retries (5x with
-# backoff), but those never fire without a timeout to turn a stall into an
-# exception. Inject a default (connect, read) timeout so a stalled request fails
-# fast and the existing retry machinery actually kicks in.
 _CONNECT_TIMEOUT = 10
 _READ_TIMEOUT = 30
 
@@ -37,7 +31,12 @@ class SharadarData:
         return {k: v for k, v in kwargs.items() if v is not None}
 
     def _date_range(self, start: str | None, end: str | None) -> dict | None:
-        r = {k: v for k, v in {"gte": start, "lte": end}.items() if v is not None}
+        r = {}
+        if start is not None:
+            r["gte"] = start
+
+        if end is not None:
+            r["lte"] = end
         return r or None
 
     # -------------------------------------------------------------------------
