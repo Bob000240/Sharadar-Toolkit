@@ -3,9 +3,12 @@ from dataclasses import dataclass, fields
 
 import database.market.fund_repo as fund_repo
 import database.market.indicators_repo as indicators_repo
-import database.market.tickers_repo as tickers_repo
 from set_up.config import ETF_SECTOR_MAP
-from data.signals._common import python_scalar as _python_scalar, rank_pct
+from data.signals._common import (
+    attach_sectors,
+    python_scalar as _python_scalar,
+    rank_pct,
+)
 
 
 _RETURN_COLS = ["return_5d", "return_20d", "return_60d", "return_252d"]
@@ -37,6 +40,70 @@ def _derive_return_percentiles(stock_data, universe_returns):
             stock_data.index
         )
     return stock_data
+
+
+def calculate_fund_returns(
+    tickers: list[str], signal_day: pd.Timestamp
+) -> pd.DataFrame:
+    lookback = signal_day - pd.Timedelta(days=300)
+    prices = fund_repo.get(
+        tickers=tickers,
+        start_date=str(lookback.date()),
+        end_date=str(signal_day.date()),
+    )
+    prices["date"] = pd.to_datetime(prices["date"])
+
+    rows = []
+    for ticker, group in prices.groupby("ticker"):
+        close = group.sort_values("date")["close"].values
+        rows.append(
+            {
+                "ticker": ticker,
+                "return_5d": (
+                    close[-1] / close[-6] - 1 if len(close) >= 6 else float("nan")
+                ),
+                "return_20d": (
+                    close[-1] / close[-21] - 1 if len(close) >= 21 else float("nan")
+                ),
+            }
+        )
+    return pd.DataFrame(rows).set_index("ticker")
+
+
+def build_technical_signals(
+    tickers: list[str],
+    signal_day: pd.Timestamp,
+    benchmark_ticker: str,
+    etf_tickers: list[str],
+) -> pd.DataFrame:
+    """Build point-in-time technical and relative-strength signals."""
+    signal_day = pd.Timestamp(signal_day)
+    universe = indicators_repo.get_latest_rows(None, signal_day).set_index("ticker")
+    if universe.empty:
+        return pd.DataFrame()
+
+    missing_tickers = [ticker for ticker in tickers if ticker not in universe.index]
+    if missing_tickers:
+        raise ValueError(
+            f"No indicator data as of {signal_day.date()} for: {missing_tickers}"
+        )
+
+    stock_data = attach_sectors(universe.loc[tickers])
+    universe_returns = universe[_RETURN_COLS].copy()
+
+    fund_data = calculate_fund_returns([benchmark_ticker] + etf_tickers, signal_day)
+    benchmark_data = fund_data.loc[[benchmark_ticker]]
+    missing_etfs = [ticker for ticker in etf_tickers if ticker not in fund_data.index]
+    if missing_etfs:
+        raise ValueError(
+            f"No fund price data as of {signal_day.date()} for ETFs: {missing_etfs}"
+        )
+    etf_data = fund_data.loc[etf_tickers]
+
+    stock_data = _derive_relative_returns(
+        stock_data, benchmark_data, etf_data, benchmark_ticker
+    )
+    return _derive_return_percentiles(stock_data, universe_returns)
 
 
 @dataclass
@@ -150,68 +217,14 @@ class TechnicalsModel:
         self.benchmark_ticker = benchmark_ticker
         self.etf_tickers = etf_tickers
         self.stock_data = None
-        self.benchmark_data = None
-        self.etf_data = None
-        self._universe_returns = None
         self.load_data()
 
-    def _fund_returns(self, tickers: list[str]) -> pd.DataFrame:
-        lookback = self.signal_day - pd.Timedelta(days=300)
-        prices = fund_repo.get(
-            tickers=tickers,
-            start_date=str(lookback.date()),
-            end_date=str(self.signal_day.date()),
-        )
-        prices["date"] = pd.to_datetime(prices["date"])
-        rows = []
-        for tkr, grp in prices.groupby("ticker"):
-            c = grp.sort_values("date")["close"].values
-            rows.append(
-                {
-                    "ticker": tkr,
-                    "return_5d": (c[-1] / c[-6] - 1) if len(c) >= 6 else float("nan"),
-                    "return_20d": (c[-1] / c[-21] - 1)
-                    if len(c) >= 21
-                    else float("nan"),
-                }
-            )
-        return pd.DataFrame(rows).set_index("ticker")
-
     def load_data(self) -> None:
-        # Load the full indicators universe so return percentiles are ranked
-        # market-wide (independent of the request batch), then take the batch.
-        universe = indicators_repo.get_latest_rows(None, self.signal_day).set_index(
-            "ticker"
-        )
-        self._universe_returns = universe[_RETURN_COLS].copy()
-
-        missing_tickers = [
-            t for t in self.stock_tickers if t not in universe.index
-        ]
-        if missing_tickers:
-            raise ValueError(
-                f"No indicator data as of {self.signal_day.date()} for: {missing_tickers}"
-            )
-        self.stock_data = universe.loc[self.stock_tickers].copy()
-        sector_map = tickers_repo.get(tickers=self.stock_tickers)[
-            ["ticker", "sector"]
-        ].set_index("ticker")["sector"]
-        self.stock_data["sector"] = sector_map.reindex(self.stock_data.index)
-
-        fund_data = self._fund_returns([self.benchmark_ticker] + self.etf_tickers)
-        self.benchmark_data = fund_data.loc[[self.benchmark_ticker]]
-        missing_etfs = [t for t in self.etf_tickers if t not in fund_data.index]
-        if missing_etfs:
-            raise ValueError(
-                f"No fund price data as of {self.signal_day.date()} for ETFs: {missing_etfs}"
-            )
-        self.etf_data = fund_data.loc[self.etf_tickers]
-
-        self.stock_data = _derive_relative_returns(
-            self.stock_data, self.benchmark_data, self.etf_data, self.benchmark_ticker
-        )
-        self.stock_data = _derive_return_percentiles(
-            self.stock_data, self._universe_returns
+        self.stock_data = build_technical_signals(
+            self.stock_tickers,
+            self.signal_day,
+            self.benchmark_ticker,
+            self.etf_tickers,
         )
 
     def get(self, ticker: str, col: str):
@@ -271,22 +284,3 @@ class TechnicalsModel:
         )
 
 
-def print_snapshot_report(snapshot: TechnicalsSnapshot) -> None:
-    sections = {
-        "Risk Flags": snapshot.risk_flags(),
-    }
-
-    print(f"\n=== {snapshot.ticker} | {snapshot.signal_day.date()} ===")
-    for title, values in sections.items():
-        print(f"{title}: {values}")
-
-
-if __name__ == "__main__":
-    signal_day = pd.Timestamp("2024-06-30")
-    stock_tickers = ["AAPL", "MSFT", "GOOGL"]
-    benchmark_ticker = "SPY"
-    etf_tickers = list(ETF_SECTOR_MAP.keys())
-
-    model = TechnicalsModel(signal_day, stock_tickers, benchmark_ticker, etf_tickers)
-    for ticker in stock_tickers:
-        print_snapshot_report(model.build_snapshot(ticker))

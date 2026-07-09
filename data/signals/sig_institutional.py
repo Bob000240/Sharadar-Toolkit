@@ -29,6 +29,15 @@ class InstitutionalSnapshot:
     new_holders: int  # institutions that opened new positions
     closed_positions: int  # institutions that fully exited
 
+    def risk_flags(self) -> dict[str, bool]:
+        return {
+            "stale_filing": self.stale_days is not None and self.stale_days > 150,
+            "holder_exodus": self.closed_positions >= 5,
+            "heavy_selling": self.value_change_pct is not None
+            and not pd.isna(self.value_change_pct)
+            and self.value_change_pct < -0.20,
+        }
+
 
 class InstitutionalModel:
     def __init__(
@@ -140,37 +149,3 @@ class InstitutionalModel:
         return InstitutionalSnapshot(ticker=ticker, signal_day=self.signal_day, **m)
 
 
-def print_snapshot_report(snap: InstitutionalSnapshot) -> None:
-    quarter_end = str(snap.quarter_end.date()) if snap.quarter_end is not None else "n/a"
-    available_from = (
-        str(snap.assumed_available_from.date())
-        if snap.assumed_available_from is not None
-        else "n/a"
-    )
-    vpc = (
-        f"{snap.value_change_pct:+.1%}" if not pd.isna(snap.value_change_pct) else "n/a"
-    )
-    upc = (
-        f"{snap.units_change_pct:+.1%}" if not pd.isna(snap.units_change_pct) else "n/a"
-    )
-    print(f"\n=== {snap.ticker} | {snap.signal_day.date()} ===")
-    print(
-        f"  Reported quarter: {quarter_end}  |  assumed available: {available_from}"
-        f"  |  stale: {snap.stale_days if snap.stale_days is not None else 'n/a'}d"
-    )
-    print(f"  Holders: {snap.total_holders}  (Δ {snap.holders_change:+d})")
-    print(
-        f"  Value: ${snap.total_value_b:,.1f}B  (QoQ {vpc})  |  Units: {snap.total_units:,.0f}  (QoQ {upc})"
-    )
-    print(
-        f"  New entrants: {snap.new_holders}  |  Closed positions: {snap.closed_positions}"
-    )
-
-
-if __name__ == "__main__":
-    signal_day = pd.Timestamp("2024-06-30")
-    tickers = ["AAPL", "MSFT", "GOOGL"]
-
-    model = InstitutionalModel(signal_day=signal_day, tickers=tickers)
-    for tkr in tickers:
-        print_snapshot_report(model.build_snapshot(tkr))

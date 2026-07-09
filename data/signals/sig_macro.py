@@ -276,27 +276,3 @@ class MacroModel:
         )
 
 
-def print_snapshot_report(snap: MacroSnapshot) -> None:
-    print(f"\n=== Macro | {snap.signal_day.date()} ===")
-    print(
-        f"  Yield curve 2-10: {snap.yield_curve_2_10:+.2f}  |  10y: {snap.yield_10y:.2f}%  |  FFR: {snap.fed_funds_rate:.2f}%"
-    )
-    print(
-        f"  Real yield 10y: {snap.real_yield_10y:.2f}%  |  Breakeven 10y: {snap.breakeven_10y:.2f}%"
-    )
-    print(
-        f"  HY spread: {snap.spread_hy:.2f}% ({snap.spread_hy_change_20d:+.2f} 20d)"
-        f"  |  IG spread: {snap.spread_ig:.2f}% ({snap.spread_ig_change_20d:+.2f} 20d)"
-    )
-    print(f"  CPI YoY: {snap.cpi_yoy:.2f}%  |  Core CPI YoY: {snap.cpi_core_yoy:.2f}%")
-    print(
-        f"  Unemployment: {snap.unemployment_rate:.1f}%  |  Jobless claims: {snap.jobless_claims:,.0f}"
-    )
-    print(f"  VIX: {snap.vix:.1f}  |  DXY: {snap.dxy:.1f}  |  WTI: ${snap.oil_wti:.1f}")
-    print(f"  Overlay:     {snap.overlay().to_dict()}")
-
-
-if __name__ == "__main__":
-    signal_day = pd.Timestamp("2026-06-20")
-    model = MacroModel(signal_day=signal_day)
-    print_snapshot_report(model.build_snapshot())

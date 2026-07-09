@@ -106,22 +106,3 @@ class EventsModel:
         )
 
 
-def print_snapshot_report(snap: EventsSnapshot) -> None:
-    ds = (
-        f"{snap.days_since_last_earnings}d"
-        if snap.days_since_last_earnings is not None
-        else "none"
-    )
-    print(f"\n=== {snap.ticker} | {snap.signal_day.date()} ===")
-    print(f"  Last earnings: {ds} ago")
-    print(f"  Recent codes:   {snap.recent_event_codes}")
-    print(f"  Risk Flags:     {snap.risk_flags()}")
-
-
-if __name__ == "__main__":
-    signal_day = pd.Timestamp("2026-06-23")
-    tickers = ["AAPL", "MSFT", "GOOGL"]
-
-    model = EventsModel(signal_day=signal_day, tickers=tickers)
-    for tkr in tickers:
-        print_snapshot_report(model.build_snapshot(tkr))

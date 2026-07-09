@@ -3,8 +3,8 @@ import pandas as pd
 from dataclasses import dataclass
 
 import database.market.fundamentals_repo as fundamentals_repo
-import database.market.tickers_repo as tickers_repo
 from data.signals._common import (
+    attach_sectors,
     positive_inverse,
     positive_ratio,
     rank_within_sector,
@@ -52,10 +52,10 @@ QUALITY_PILLAR_METRICS = {
 }
 
 QUALITY_PILLAR_MINIMUMS = {
-    "profitability": 3,
-    "growth": 2,
-    "safety": 3,
-    "capital_discipline": 1,
+    "profitability": 6,
+    "growth": 5,
+    "safety": 6,
+    "capital_discipline": 2,
 }
 
 QUALITY_HISTORY_COLUMNS = (
@@ -68,7 +68,6 @@ QUALITY_HISTORY_COLUMNS = (
     "de_change_5y",
     "roe_volatility_5y",
     "grossmargin_volatility_5y",
-    "quality_history_years",
     "quality_history_observations",
     "complete_multi_year_history",
 )
@@ -81,8 +80,6 @@ GROWTH_COLUMNS = (
 )
 
 QUALITY_HISTORY_TARGET_YEARS = 5
-MAX_HISTORY_OBSERVATION_DISTANCE_DAYS = 183
-MIN_QUALITY_HISTORY_YEARS = 4.75
 MIN_QUALITY_HISTORY_OBSERVATIONS = 6
 
 
@@ -116,6 +113,15 @@ def calculate_growth(arq: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows).set_index("ticker")
 
 
+def _history_change(latest, prior, complete_history, column) -> float:
+    if prior is None or not complete_history:
+        return float("nan")
+    now, then = latest[column], prior[column]
+    if pd.isna(now) or pd.isna(then):
+        return float("nan")
+    return now - then
+
+
 def _history_volatility(
     window: pd.DataFrame, complete_history: bool, column: str
 ) -> float:
@@ -127,56 +133,30 @@ def _history_volatility(
     return values.std(ddof=0)
 
 
-def calculate_history_features(art: pd.DataFrame) -> pd.DataFrame:
-    """Calculate five-year changes and stability from annual fundamentals."""
-    if art.empty:
+def calculate_history_features(ary: pd.DataFrame) -> pd.DataFrame:
+    if ary.empty:
         return pd.DataFrame(columns=list(QUALITY_HISTORY_COLUMNS))
 
-    art = art.copy()
-    art["gross_profitability"] = safe_div(art["gp"], art["assets"])
-    art["cfo_to_assets"] = safe_div(art["ncfo"], art["assets"])
-    art["calendardate"] = pd.to_datetime(art["calendardate"])
-    art["datekey"] = pd.to_datetime(art["datekey"])
+    ary = ary.copy()
+    ary["gross_profitability"] = safe_div(ary["gp"], ary["assets"])
+    ary["cfo_to_assets"] = safe_div(ary["ncfo"], ary["assets"])
+    ary["calendardate"] = pd.to_datetime(ary["calendardate"])
+    ary["datekey"] = pd.to_datetime(ary["datekey"])
     rows = []
 
-    for ticker, group in art.groupby("ticker"):
-        group = (
-            group.dropna(subset=["calendardate"])
-            .sort_values(["calendardate", "datekey"])
-            .drop_duplicates("calendardate", keep="last")
-        )
+    for ticker, group in ary.groupby("ticker"):
+        group = group.dropna(subset=["calendardate"])
+        group = group.sort_values(["calendardate", "datekey"])
+        group = group.drop_duplicates("calendardate", keep="last")
         if group.empty:
             continue
 
         latest = group.iloc[-1]
-        targets = [
-            latest["calendardate"] - pd.DateOffset(years=years_ago)
-            for years_ago in range(QUALITY_HISTORY_TARGET_YEARS + 1)
-        ]
-        sampled_indices = []
-        for target in targets:
-            distance = (group["calendardate"] - target).abs()
-            closest = distance.idxmin()
-            if distance.loc[closest].days <= MAX_HISTORY_OBSERVATION_DISTANCE_DAYS:
-                sampled_indices.append(closest)
-
-        window = (
-            group.loc[list(dict.fromkeys(sampled_indices))]
-            .sort_values("calendardate")
-            .copy()
-        )
+        cutoff = latest["calendardate"] - pd.DateOffset(years=QUALITY_HISTORY_TARGET_YEARS)
+        window = group[group["calendardate"] >= cutoff]
         prior = window.iloc[0] if not window.empty else None
         observations = len(window)
-        history_years = np.nan
-        if prior is not None:
-            history_years = (
-                latest["calendardate"] - prior["calendardate"]
-            ).days / 365.25
-
-        complete_history = (
-            history_years >= MIN_QUALITY_HISTORY_YEARS
-            and observations >= MIN_QUALITY_HISTORY_OBSERVATIONS
-        )
+        complete_history = observations >= MIN_QUALITY_HISTORY_OBSERVATIONS
         rows.append(
             {
                 "ticker": ticker,
@@ -207,14 +187,11 @@ def calculate_history_features(art: pd.DataFrame) -> pd.DataFrame:
                 "grossmargin_volatility_5y": _history_volatility(
                     window, complete_history, "grossmargin"
                 ),
-                "quality_history_years": history_years,
                 "quality_history_observations": observations,
                 "complete_multi_year_history": complete_history,
             }
         )
 
-    if not rows:
-        return pd.DataFrame(columns=list(QUALITY_HISTORY_COLUMNS))
     return pd.DataFrame(rows).set_index("ticker")
 
 
@@ -227,31 +204,22 @@ def calculate_value(universe: pd.DataFrame) -> pd.DataFrame:
     universe["book_yield"] = positive_inverse(universe["pb"])
     universe["sales_yield"] = positive_inverse(universe["ps"])
 
-    percentile_columns = []
+    percentile_series = []
     for column in VALUE_YIELD_COLUMNS:
-        percentile = f"{column}_percentile"
-        universe[percentile] = rank_within_sector(universe[column], universe["sector"])
-        percentile_columns.append(percentile)
+        percentile = rank_within_sector(universe[column], universe["sector"])
+        percentile_series.append(percentile)
 
     universe["valid_value_metrics"] = (
         universe[list(VALUE_YIELD_COLUMNS)].notna().sum(axis=1)
     )
-    universe["value_composite_score"] = universe[percentile_columns].mean(
+    universe["value_composite_score"] = pd.concat(percentile_series, axis=1).mean(
         axis=1, skipna=True
     )
-    universe.loc[universe["valid_value_metrics"] < 2, "value_composite_score"] = np.nan
+    universe.loc[universe["valid_value_metrics"] < 5, "value_composite_score"] = np.nan
     universe["value_composite_percentile"] = rank_within_sector(
         universe["value_composite_score"], universe["sector"]
     )
     return universe
-
-
-def _mean_with_minimum(
-    frame: pd.DataFrame, columns: list[str], minimum: int
-) -> tuple[pd.Series, pd.Series]:
-    valid_count = frame[columns].notna().sum(axis=1)
-    score = frame[columns].mean(axis=1, skipna=True)
-    return score.where(valid_count >= minimum), valid_count
 
 
 def calculate_quality(universe: pd.DataFrame, history: pd.DataFrame) -> pd.DataFrame:
@@ -274,58 +242,37 @@ def calculate_quality(universe: pd.DataFrame, history: pd.DataFrame) -> pd.DataF
         universe["currentratio"], universe["sector"]
     )
 
-    pillar_columns = []
     for pillar, metrics in QUALITY_PILLAR_METRICS.items():
-        metric_percentiles = []
+        metric_percentiles = {}
         for metric, direction in metrics.items():
-            percentile = f"_quality_{metric}_percentile"
             values = universe.get(
                 metric, pd.Series(np.nan, index=universe.index, dtype=float)
             )
-            universe[percentile] = rank_within_sector(
+            metric_percentiles[metric] = rank_within_sector(
                 values * direction, universe["sector"]
             )
-            metric_percentiles.append(percentile)
-
         score_column = f"quality_{pillar}_score"
-        count_column = f"_valid_quality_{pillar}_metrics"
-        universe[score_column], universe[count_column] = _mean_with_minimum(
-            universe, metric_percentiles, QUALITY_PILLAR_MINIMUMS[pillar]
+        percentile_frame = pd.DataFrame(metric_percentiles, index=universe.index)
+        valid_count = percentile_frame.notna().sum(axis=1)
+        score = percentile_frame.mean(axis=1, skipna=True)
+        universe[score_column] = score.where(
+            valid_count >= QUALITY_PILLAR_MINIMUMS[pillar]
         )
-        pillar_columns.append(score_column)
 
+    pillar_columns = [f"quality_{p}_score" for p in QUALITY_PILLAR_METRICS.keys()]
     universe["valid_quality_pillars"] = universe[pillar_columns].notna().sum(axis=1)
     universe["quality_composite_score"] = universe[pillar_columns].mean(
         axis=1, skipna=True
     )
-    required = [
-        "quality_profitability_score",
-        "quality_growth_score",
-        "quality_safety_score",
-    ]
+    # Composite requires at least these three pillars to be non-null.
+    required_pillars = ["profitability", "growth", "safety", "capital_discipline"]
+    required = [f"quality_{p}_score" for p in required_pillars]
     universe.loc[universe[required].isna().any(axis=1), "quality_composite_score"] = (
         np.nan
     )
     universe["quality_composite_percentile"] = rank_within_sector(
         universe["quality_composite_score"], universe["sector"]
     )
-    return universe
-
-
-def _attach_sectors(universe: pd.DataFrame) -> pd.DataFrame:
-    universe = universe.copy()
-    if universe.empty:
-        universe["sector"] = pd.Series(dtype="object")
-        return universe
-
-    metadata = tickers_repo.get(
-        tickers=universe.index.astype(str).tolist(),
-        table_code="SEP",
-    )
-    sectors = metadata.drop_duplicates("ticker", keep="last").set_index("ticker")[
-        "sector"
-    ]
-    universe["sector"] = sectors.reindex(universe.index).fillna("Unknown")
     return universe
 
 
@@ -338,17 +285,19 @@ def build_fundamental_signals(
     if universe.empty:
         return pd.DataFrame()
 
-    universe = _attach_sectors(universe.set_index("ticker"))
+    universe = attach_sectors(universe.set_index("ticker"))
 
     history_start = signal_day - pd.DateOffset(years=6)
-    art_history = fundamentals_repo.get(
+    annual_history = fundamentals_repo.get(
         tickers=None,
-        dimension="ART",
+        dimension="ARY",
         start_date=str(history_start.date()),
         end_date=str(signal_day.date()),
     )
-    art_history = art_history[pd.to_datetime(art_history["datekey"]) <= signal_day]
-    history = calculate_history_features(art_history)
+    annual_history = annual_history[
+        pd.to_datetime(annual_history["datekey"]) <= signal_day
+    ]
+    history = calculate_history_features(annual_history)
 
     universe = calculate_value(universe)
     universe = calculate_quality(universe, history)
@@ -434,7 +383,6 @@ class FundamentalsSnapshot:
     de_change_5y: float
     roe_volatility_5y: float
     grossmargin_volatility_5y: float
-    quality_history_years: float
     quality_history_observations: int
     complete_multi_year_history: bool
 
@@ -518,7 +466,6 @@ class FundamentalsModel:
             de_change_5y=row["de_change_5y"],
             roe_volatility_5y=row["roe_volatility_5y"],
             grossmargin_volatility_5y=row["grossmargin_volatility_5y"],
-            quality_history_years=row["quality_history_years"],
             quality_history_observations=row["quality_history_observations"],
             complete_multi_year_history=row["complete_multi_year_history"],
         )

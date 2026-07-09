@@ -148,29 +148,3 @@ class SectorRotationModel:
         )
 
 
-def print_snapshot_report(snap: SectorRotationSnapshot) -> None:
-    rank = f"{snap.sector_rank_20d}/11" if snap.sector_rank_20d is not None else "n/a"
-    r20 = (
-        f"{snap.sector_return_20d:.1%}" if snap.sector_return_20d is not None else "n/a"
-    )
-    r5 = f"{snap.sector_return_5d:.1%}" if snap.sector_return_5d is not None else "n/a"
-    print(f"\n=== {snap.ticker} ({snap.sector}) | {snap.signal_day.date()} ===")
-    print(f"  Sector 5d/20d: {r5} / {r20}  |  Rank: {rank}")
-    print(f"  Top sectors:    {snap.top_3_sectors}")
-    print(f"  Bottom sectors: {snap.bottom_3_sectors}")
-    print(
-        f"  Cyclical/defensive spread: {snap.cyclical_vs_defensive_spread:+.1%}  "
-        f"({'cyclicals leading' if snap.cyclicals_leading else 'defensives leading'})"
-    )
-    print(f"  Sector Score:   {snap.sector_score():.3f}")
-
-
-if __name__ == "__main__":
-    signal_day = pd.Timestamp("2024-06-30")
-    model = SectorRotationModel(signal_day=signal_day)
-    for ticker, sector in [
-        ("AAPL", "Technology"),
-        ("JPM", "Financial Services"),
-        ("XOM", "Energy"),
-    ]:
-        print_snapshot_report(model.build_snapshot(ticker, sector))

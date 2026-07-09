@@ -1,17 +1,18 @@
 """
-Shared pure helpers for the signal layer.
+Shared helpers for the signal layer.
 
 Every derived column/feature is created by a helper like these — the signal
 Model/Snapshot "shapes" orchestrate and expose, they do not compute columns
-inline. Helpers are pure (no I/O, no self) so they're trivially testable and
-reusable across signal modules.
+inline.
 """
 
 from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-DEFAULT_MIN_SECTOR_RANK_SIZE = 5
+import database.market.tickers_repo as tickers_repo
+
+DEFAULT_MIN_SECTOR_RANK_SIZE = 10
 
 
 def python_scalar(value):
@@ -82,3 +83,21 @@ def rank_within_sector(
     sector_count = values.notna().groupby(sectors).transform("sum")
     market_rank = values.rank(pct=True, method="average") * 100
     return sector_rank.where(sector_count >= min_sector_size, market_rank)
+
+
+def attach_sectors(frame: pd.DataFrame) -> pd.DataFrame:
+    """Attach ticker sectors to a DataFrame indexed by ticker."""
+    frame = frame.copy()
+    if frame.empty:
+        frame["sector"] = pd.Series(dtype="object")
+        return frame
+
+    metadata = tickers_repo.get(
+        tickers=frame.index.astype(str).tolist(),
+        table_code="SEP",
+    )
+    sectors = metadata.drop_duplicates("ticker", keep="last").set_index("ticker")[
+        "sector"
+    ]
+    frame["sector"] = sectors.reindex(frame.index).fillna("Unknown")
+    return frame
