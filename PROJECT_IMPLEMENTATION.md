@@ -2,12 +2,12 @@
 
 ## Goal
 
-Build the deterministic spine first, then make the agent useful inside strict risk boundaries.
+Build a small, auditable paper-trading loop around deterministic strategies and a bounded agent.
 
-The project succeeds when QuorumNexus can prove whether an evidence-aware agent improves trade
-management over deterministic defaults. The target is not an unconstrained trading oracle. The target
-is an auditable system where every agent choice can be compared against the default stop, target,
-timeline, and pass/enter decision.
+The project succeeds when all three strategies can produce ranked candidates, the agent can select
+from those candidates, deterministic risk checks can validate an entry, open positions can be
+monitored against deterministic exit rules, and every completed trade becomes searchable decision
+memory. A formal evaluation harness is outside the current scope.
 
 ## Governance
 
@@ -47,15 +47,10 @@ Each passing strategy emits a candidate packet with:
 - setup score
 - passed gates
 - risk flags
-- default stop loss
-- default target price
-- default holding timeline
-- allowed stop choices
-- allowed target choices
-- allowed timeline choices
+- entry thesis and the facts needed to test whether it remains valid
 - maximum position size
 - maximum loss
-- relevant backtest/walk-forward stats
+- point-in-time signal context
 
 The agent cannot create a candidate for a strategy that did not pass.
 
@@ -65,23 +60,17 @@ The agent receives candidate packets from all passing strategies.
 
 Before making a decision, the agent must use typed tools to fetch agentic evidence, such as:
 
-- strategy backtest and walk-forward performance
-- similar past trades
+- similar completed trades
 - recent trade memory
 - current portfolio exposure
 - current signal and market context
-- mini-backtest results
 - optional event/news/evidence context
 
 The agent decides:
 
 - whether to accept or reject the trade
 - which strategy-generated candidate packet to use when multiple packets exist
-- which allowed stop to use
-- which allowed target to use
-- which allowed timeline to use
 - conviction tier
-- estimated profit likelihood and confidence
 - which evidence supports the decision
 
 The conviction tier controls position size and risk budget:
@@ -106,7 +95,6 @@ It enforces:
 - volatility limits
 - sector and portfolio exposure limits
 - correlation/concentration limits
-- allowed stop, target, and timeline IDs
 - no trade unless a deterministic strategy passed
 - no uncontrolled orders
 
@@ -114,37 +102,27 @@ The risk layer may reject or reduce an agent-approved trade.
 
 ### Execution Layer
 
-The execution layer only receives validated orders.
+The execution layer only receives validated orders. It places trades and stores current open-position
+state in `positions.json`. The position monitor applies the universal maximum-loss rule and the
+strategy-specific thesis-invalidation rule.
 
-It places trades, tracks positions, applies stops and targets, and records lifecycle events.
+### Database and Memory Layer
 
-### Database and Eval Layer
+Candidates remain in memory while the agent evaluates them. Rejected candidates and candidates
+blocked by deterministic risk validation are discarded. When a validated position opens, its frozen
+candidate packet, agent context, and execution state are stored in `positions.json`.
 
-The database records:
-
-- candidate packets
-- tool calls
-- evidence IDs
-- agent verdicts
-- selected stop, target, timeline, and conviction tier
-- realized outcomes
-
-The eval layer compares agent-managed trades against deterministic defaults:
-
-- default stop versus selected stop
-- default target versus selected target
-- default timeline versus selected timeline
-- full-size default versus conviction-adjusted sizing
-- agent accept/reject decisions versus strategy baseline
-- calibration of profit likelihood
+When that position exits, one complete append-only row is inserted into PostgreSQL
+`decision_memory`. JSONB stores the flexible candidate and evidence payloads; pgvector makes completed
+trades searchable by similarity. There is no separate screened-candidate, outcome, or eval table.
 
 ## Build order
 
 ### Current progress
 
 Phase 0 is mostly complete. The project now has the data-source map, Sharadar-backed raw data access,
-market repositories, signal modules, PostgreSQL table setup, pgvector enablement, operational
-candidate tables, decision memory, trade outcomes, and eval-result storage in place.
+market repositories, signal modules, PostgreSQL table setup, pgvector enablement, strategy profiles,
+and a completed-trade decision-memory repository.
 
 The remaining Phase 0 work is cleanup rather than architecture discovery:
 
@@ -156,14 +134,12 @@ The remaining Phase 0 work is cleanup rather than architecture discovery:
 
 | Phase | Layer | Progress | Notes |
 |---|---|---|---|
-| Phase 0 | Foundation | Mostly complete | Data access, repositories, setup, signals, candidate storage, decision memory, outcomes, and eval storage exist. |
-| Phase 1 | Deterministic | In progress | `strat_momentum`, `strat_value`, and `strat_quality` screens, entry modes, and exit policies are defined and research-backed; these three make up the complete deterministic suite. |
-| Phase 2 | Deterministic | Partial | The profile registry and `screened_candidates` exist; the active-strategy runner and pre-agent gates still need to be built. |
-| Phase 3 | Deterministic | Partial | Execution/PM code exists; deterministic verdict validation and no-order debug path need tightening. |
-| Phase 4 | Agentic | Not started | Typed agent-data tools need schemas, implementations, and audit logging. |
-| Phase 5 | Agentic | Partial | PM and LLM modules exist; structured tool-calling agent verdict loop still needs to be built. |
-| Phase 6 | Agentic | Partial | Point-in-time memory queries exist; useful retrieval, mini-backtests, and walk-forward stats remain. |
-| Phase 7 | Agentic | Partial | `eval_results` storage exists; replay/evaluation harness remains. |
+| Phase 0 | Foundation | Mostly complete | Data access, repositories, setup, signals, strategy profiles, and completed-trade memory exist. |
+| Phase 1 | Deterministic | In progress | `strat_momentum`, `strat_value`, and `strat_quality` screens and entry modes are defined; exit policy details have been reset to class skeletons before implementation. |
+| Phase 2 | Deterministic | Partial | The profile registry and decision-memory schema exist; the runner, accepted-verdict handoff, `positions.json`, and exit-to-memory flow still need to be built. |
+| Phase 3 | Agentic | Not started | Typed agent-data tools need schemas, implementations, and audit logging. |
+| Phase 4 | Agentic | Partial | PM and LLM modules exist; structured tool-calling agent verdict loop still needs to be built. |
+| Phase 5 | Agentic | Partial | Point-in-time completed-trade queries exist; embedding generation and useful retrieval tools remain. |
 
 ### Phase 0 — Data foundation and architecture inventory
 
@@ -183,15 +159,15 @@ strategies.
 | Investor/holder data | Sharadar SF3-derived holdings | Sharadar/reference source | `data/sharadar_data.py` | `institutional_holdings` | `sig_institutional` | Implemented as holdings-level data |
 | Fund / ETF data | Sharadar SFP | Sharadar / Alpaca / other source | `data/sharadar_data.py` | `fund_prices` via `database/market/fund_repo.py` | `sig_sector_rotation`, `sig_macro` | Implemented |
 | Events | Sharadar EVENTS | Sharadar / event source if later needed | `data/sharadar_data.py` | `events` via `database/market/event_repo.py` | `sig_events`, evidence stubs | Implemented |
-| Agentic trade memory | PostgreSQL + pgvector | PostgreSQL + pgvector | `database/agent_memory/decision_memory_repository.py` | `decision_memory`, `trade_outcomes` | typed agent tools | Schema implemented; tools next |
+| Agentic trade memory | PostgreSQL + pgvector | PostgreSQL + pgvector | `database/operational/decision_memory_repository.py` | `decision_memory` | typed agent tools | Completed-trade schema and queries implemented; tools next |
 | Evidence embeddings | Not implemented | pgvector | TBD | vector columns / evidence tables | retrieval tools | Later |
 
 Architecture components:
 
 | Component | Role | Status |
 |---|---|---|
-| PostgreSQL | Main relational database for deterministic data, candidates, decisions, outcomes, and evals | Implemented |
-| pgvector | Vector search for similar setups, trade memory, and later text evidence | Enabled in setup; vector indexes supported |
+| PostgreSQL | Main relational database for deterministic market data, strategy profiles, and completed-trade memory | Implemented |
+| pgvector | Vector search over completed trades and later text evidence | Enabled in setup; embedding method still needs selection |
 | Alpaca | Historical/paper market data and paper trading | Exists |
 | Charles Schwab | Live brokerage/execution target | Partial |
 | FRED | Macro data source | Exists |
@@ -199,7 +175,7 @@ Architecture components:
 | Sharadar | Primary source for fundamentals, ownership, insider, institutional, reference, events, fund prices, and OHLCV | Implemented |
 | Signal modules | Convert raw/processed data into strategy-ready feature sets | Implemented under `data/signals/` |
 | Strategies | Deterministic candidate generators such as `strat_momentum` | Base classes and profile registry implemented under legacy names; naming migration and first production packet are next |
-| Agent tools | Typed access to trade memory, backtests, portfolio context, current signal context, and evidence | Next major build item |
+| Agent tools | Typed access to completed-trade memory, portfolio context, current signal context, and evidence | Next major build item |
 
 Signal feed modules:
 
@@ -212,13 +188,15 @@ Signal feed modules:
 | `sig_institutional` | factual, stale-dated institutional ownership summaries with no score or interpreted flags | optional typed agent evidence only |
 | `sig_sector_rotation` | sector, industry, benchmark, fund, and ETF relative strength | sector rotation, relative strength |
 
-Core database additions:
+Core operational storage:
 
-- strategy profiles: implemented registry of active deterministic strategies and their versions; persistence naming still needs migration
-- `screened_candidates`: implemented storage for passing candidate packets emitted by strategies
-- `decision_memory`: implemented storage for agent verdicts, tool calls, evidence IDs, and selected trade plans
-- `trade_outcomes`: implemented storage for realized outcomes for accepted trades
-- `eval_results`: implemented storage for evaluation runs and metrics
+- `strategy_profiles`: seeded, read-only registry containing each strategy's position and loss limits
+- `positions.json`: current validated open positions; to be implemented
+- `decision_memory`: append-only completed trades, including the frozen candidate, agent context,
+  execution facts, outcome, exit cause, and retrieval embedding
+
+Passing candidates are intentionally not persisted. Rejected and risk-blocked candidates are also not
+retained.
 
 Point-in-time requirements:
 
@@ -287,145 +265,148 @@ the strategy's screen and at least one of its entry modes; it does not need to p
 | `strat_value` | Liquid small-, mid-, and large-cap US common stocks; exclude nano, micro, and illiquid securities. Financials and REITs are excluded only in v1 until dedicated sector metrics exist | Preferred, not required: broadening recovery or early expansion; improving growth and credit; rising inflation expectations; wide value-growth valuation dispersion. Interest rates and curve slope are context, not gates | Value traps and distress; peak-cycle earnings creating false cheapness; sector concentration; accounting and intangible-asset bias; long convergence and prolonged underperformance; specialized sectors require dedicated metrics | `sig_fundamentals`<br>`sig_events` | **Value = sector-relative cheapness + Piotroski trap filter.** Cheapness is the sector-ranked value composite — earnings yield (E/P; Basu 1977), FCF yield, EV/EBITDA yield (Loughran & Wellman 2011), book yield (B/M; Fama & French 1992), sales yield — computed point-in-time in `sig_fundamentals`. All gates required:<br>• **Cheapest 30% in sector** (`value_composite_percentile ≥ 70`) with ≥2 valid yield measures; negative/missing denominators cannot count as cheap. *[rank — cited]*<br>• **Operating cash flow > 0** — not a distress trap (Piotroski 2000). *[sign — cited]*<br>• **Low accruals: CFO > net income** (`accrual_quality > 0`) — earnings backed by cash (Sloan 1996). *[sign — cited]*<br>• **Reject** broad deterioration, or cash burn under leverage. Macro is a base-layer overlay, not a company-level gate. | **Scheduled rank admission (single entry gate):** a passing name is admitted at the next monthly/quarterly rebalance. Value is a periodic cross-sectional rank sort, so one deterministic entry — no fundamental-inflection mode (the Piotroski health signal now lives in the screen) and no confirmed-repricing mode (a value+momentum timing overlay is optional and not yet enabled). |
 | `strat_quality` | Liquid mid- and large-cap US common stocks in v1; small caps are deferred until a dollar-volume liquidity floor and a fundamental-completeness gate exist (the blanket mid/large cut stands in for them for now). Exclude financials and REITs in v1 until dedicated quality metrics exist | Preferred, not required: slowing growth; tightening credit; elevated uncertainty or volatility; late-cycle/risk-off conditions. Quality remains eligible across regimes but may lag early-cycle speculative or low-quality rallies | Can become expensive or crowded; may lag high-beta and low-quality rallies; sector concentration and overlap with growth/low-volatility factors; ROE can be inflated by leverage or buybacks; backward-looking profitability may deteriorate; accounting and sector differences can create false quality signals | `sig_fundamentals`<br>`sig_events` | **Quality = Quality-Minus-Junk composite** (Asness, Frazzini & Pedersen 2019): a point-in-time, sector-ranked blend of four pillars — profitability, growth, safety, payout — computed in `sig_fundamentals`. All gates required:<br>• **QMJ composite in sector top 30%** (`quality_composite_percentile ≥ 70`), with ≥3 of 4 pillars scorable; profitability pillar led by gross profits/assets (Novy-Marx 2013). *[rank — cited]*<br>• **Operating cash flow > 0** — earnings are real (Piotroski 2000). *[sign — cited]*<br>• **Low accruals: CFO > net income** (`accrual_quality > 0`) — earnings backed by cash (Sloan 1996). *[sign — cited]*<br>• **Not extreme leverage** (de ≤ 2). *[level — CALIBRATION, walk-forward]*<br>Valuation is crowding context, not a gate. Macro is applied as a portfolio overlay by the base layer, not a company-level gate. | **Scheduled rank admission (single entry gate):** a passing name is admitted at the next monthly/quarterly rebalance. QMJ is a periodic cross-sectional rank sort with no market-timing overlay, so quality has exactly one deterministic entry. No filing-upgrade mode (the improvement signal already lives in the QMJ growth pillar) and no pullback-reclaim mode (a technical timing overlay has no research basis for a quality factor). |
 
-##### Universal exit policies
+##### Exit policy skeleton
 
-| Universal exit policy | Applies to | Trigger | Cadence | Owner | Action |
+The deterministic exit system has two conditions:
+
+| Condition | Policy | Behavior |
+|---|---|---|
+| Maximum-loss breach | `UniversalExitPolicy` | Exit when any position reaches its approved maximum loss. This applies to every strategy and cannot be overridden by the agent. |
+| Entry-thesis invalidation | `StrategyExitPolicy` | Exit when the evidence that justified entry is no longer true. Each strategy defines its own invalidation rules. |
+
+`UniversalExitPolicy` and the `StrategyExitPolicy` base live in
+`decision_layer/det_layer/strategy.py`. `MomentumExitPolicy`, `ValueExitPolicy`, and
+`QualityExitPolicy` live beside their respective strategies.
+
+The open-position monitor evaluates both policies. No triggered decision means hold; either condition
+can trigger an exit, with the universal maximum-loss rule taking precedence. Strategy-specific rules
+must mirror the entry thesis and remain deterministic. Define their exact inputs and triggers when the
+position context and thesis state are implemented.
+
+#### Phase 2 — Candidate runner and decision memory
+
+Build the deterministic runner that executes all registered strategies, ranks their passing results,
+and sends only the top five candidates from each strategy to the agent. With three strategies, the
+agent receives at most fifteen candidate packets per run. Candidate packets remain in memory while the
+agent evaluates them; they are not written to SQL.
+
+##### Strategy-profile contract
+
+The strategy-profile table is seeded during database setup and read-only during normal strategy runs.
+It identifies the strategy and supplies its deterministic position and loss limits.
+
+| Key | `profile_id` | `name` | `description` | `max_position_pct` | `max_loss_pct` | `conviction_size_multipliers` |
+|---|---|---|---|---|---|---|
+| Explanation | Database-generated strategy identity. | Unique strategy name, such as `momentum`. | Human-readable explanation of the strategy. | Maximum portfolio allocation allowed for a position produced by the strategy. | Maximum loss allowed before `UniversalExitPolicy` exits the position. | Converts an agent conviction tier into a fraction of the maximum position size. |
+| Consumer | `decision_memory`, `positions.json`, and historical retrieval. | Strategy registry, exit-policy lookup, agent context, and logs. | Agent context and inspection. | Candidate snapshot and deterministic position-sizing validator. | Candidate snapshot and `UniversalExitPolicy`. | Deterministic position-sizing validator. |
+| Datatype | `SERIAL PRIMARY KEY` | `VARCHAR(64) NOT NULL UNIQUE` | `TEXT` | `NUMERIC(6,4) NOT NULL` | `NUMERIC(6,4) NOT NULL` | `JSONB NOT NULL` |
+
+Executable strategy selection remains code-owned: `StratMomentum`, `StratValue`, and `StratQuality`
+all run before the agent receives the completed candidate set. A profile row identifies a strategy; it
+does not dynamically load or execute Python code.
+
+##### Decision-memory contract
+
+`decision_memory` contains only completed trades that were accepted, passed risk validation, opened,
+and later exited. It does not store agent rejections, risk rejections, or open positions. Each row is
+inserted once after exit and is not gradually updated through a trade lifecycle.
+
+The three Markdown tables below are column groups for one SQL table, not separate subtables. Normal
+SQL columns hold stable trade facts, JSONB holds flexible candidate and evidence payloads, and pgvector
+supports similar-completed-trade retrieval.
+
+| Key | `trade_id` | `symbol` | `decision_date` | `profile_id` | `candidate_snapshot` |
 |---|---|---|---|---|---|
-| Protective stop | All open positions | Price reaches the maximum approved loss or the initial structure stop | Live | Broker or deterministic risk monitor | Exit |
-| Strategy invalidation | All open positions | The strategy thesis or entry structure becomes false | Strategy-specific: intraday, daily, or event-driven | Deterministic position monitor | Exit or reduce according to the approved policy |
-| Macro defense | Portfolio and new entries | Macro overlay becomes hostile or enters a high-volatility rebound regime | Daily and after material releases | Deterministic risk layer | Block new entries, reduce exposure, or tighten risk; do not force a healthy position exit by itself |
-| Judgment review | Ambiguous deterioration | Evidence weakens without crossing a deterministic exit threshold | Daily or event-driven | Agent | Hold, reduce, or exit within the allowed policy |
+| Explanation | UUID generated when the position opens and retained when the completed trade is inserted. | Traded stock. | Date the agent selected the candidate. | Strategy that produced the candidate. | Frozen copy of everything the strategy presented to the agent. |
+| Consumer | `positions.json`, exit handoff, audit, and retrieval. | Position monitor and historical queries. | Point-in-time retrieval and audit. | Strategy filtering and exit-policy lookup. | Thesis monitoring, audit, embedding generation, and future agent retrieval. |
+| Datatype | `UUID PRIMARY KEY` | `VARCHAR(16) NOT NULL` | `DATE NOT NULL` | `INT NOT NULL REFERENCES strategy_profiles(profile_id)` | `JSONB NOT NULL` |
 
-> **A note on exits vs. entries.** The factor literature covers *entry and periodic
-> rebalancing*, not discretionary exits, so exits are less citeable than the screens.
-> Three honest categories appear below: **(a) rank decay** — symmetric with the entry
-> rank sort, with hysteresis to limit turnover; **(b) hard-failure sign reversals** —
-> the Piotroski/Sloan floors that gated entry turning false (cited); **(c) risk
-> structure** — stops, trails, and time/review horizons, all `[CALIBRATION]`. Momentum
-> is the exception with genuine exit research (Daniel & Moskowitz 2016, momentum
-> crashes). No strategy uses a fixed take-profit.
-
-##### Momentum exit policies
-
-| Momentum exit policy | Trigger | Cadence | Owner | Action |
+| Key | `conviction_tier` | `rationale` | `evidence` | `tool_call_log` |
 |---|---|---|---|---|
-| Trend / relative-strength failure | Confirmed close below the trend average (e.g. 50-day) with momentum ranks rolling over — the Jegadeesh-Titman continuation is broken | Daily after close | Deterministic position monitor | Exit |
-| 52-week-high breakout failure | A 52-week-high entry closes back below the breakout pivot or loses the 20-/50-day structure (mirrors the George-Hwang entry) | Daily after close | Deterministic position monitor | Exit |
-| No-follow-through time stop | The move fails to develop within the formation-consistent window (Jegadeesh-Titman holding horizons; band `[CALIBRATION]`) | Daily | Deterministic position monitor | Exit |
-| Momentum-crash defense | A high-volatility market rebound follows a broad decline and the position shows adverse trend/RS — the momentum-crash regime (Daniel & Moskowitz 2016) | Daily and event-driven | Deterministic risk layer | Reduce exposure or tighten risk; macro alone does not force the exit |
-| Trailing winner protection | A profitable position breaches its approved ATR, price-structure, or moving-average trail | Live or daily, as encoded | Broker or deterministic risk monitor | Exit the protected remainder |
+| Explanation | Accepted trade's conviction tier, used for deterministic sizing. | Agent's concise reason for accepting the candidate. | Evidence references and summaries supporting the decision. | Tools used before acceptance and references to their results. |
+| Consumer | Position-size audit and future agent context. | Historical retrieval and review. | Audit, embedding generation, and future agent retrieval. | Debugging and audit. |
+| Datatype | `VARCHAR(24) NOT NULL` | `TEXT NOT NULL` | `JSONB` | `JSONB` |
 
-No fixed take-profit: momentum's edge lives in the positive-skew tail, so winners are trailed rather
-than truncated (optional partial realization may precede the trail).
+| Key | `entry_date` | `entry_price` | `position_size_pct` |
+|---|---|---|---|
+| Explanation | Actual date the position opened. | Actual executed entry price. | Actual fraction of the portfolio allocated to the position. |
+| Consumer | Holding-period and point-in-time calculations. | Maximum-loss monitoring and realized-return calculation. | Position and risk review. |
+| Datatype | `DATE NOT NULL` | `NUMERIC(12,4) NOT NULL` | `NUMERIC(6,4) NOT NULL` |
 
-##### Value exit policies
+| Key | `exit_date` | `exit_price` | `realized_pnl_pct` | `days_held` | `exit_reason` | `exit_policy` | `decision_embedding` |
+|---|---|---|---|---|---|---|---|
+| Explanation | Date the position closed. | Actual executed exit price. | Final percentage return. | Number of days held. | Deterministic condition that caused the exit. | Policy class that produced the exit decision. | Vector representation of the completed trade. |
+| Consumer | Point-in-time memory filtering. | Realized-return audit. | Future agent context and reporting. | Future agent context. | Audit and future agent context. | Exit debugging and strategy analysis. | Similar-trade retrieval through pgvector. |
+| Datatype | `DATE NOT NULL` | `NUMERIC(12,4) NOT NULL` | `NUMERIC(10,6) NOT NULL` | `INT NOT NULL` | `VARCHAR(32) NOT NULL` | `VARCHAR(64) NOT NULL` | `VECTOR NOT NULL` |
 
-| Value exit policy | Trigger | Cadence | Owner | Action |
-|---|---|---|---|---|
-| Valuation convergence (rank decay) | The sector value composite falls below the exit band (~50th pctile) after entry ≥70th — hysteresis to limit turnover | Monthly/quarterly rebalance | Deterministic position monitor | Exit and reallocate; no fixed profit target *(Fama-French mean reversion; bands `[CALIBRATION]`)* |
-| Fundamental / trap failure | Operating cash flow turns negative, or accruals turn adverse (CFO < net income), or combined deterioration appears — the Piotroski/Sloan floor that gated entry is now false | After each new filing | Deterministic position monitor | Exit next session *(Piotroski 2000; Sloan 1996 — sign reversal)* |
-| Stale thesis | After a ~12-month review, neither valuation convergence nor fundamental improvement has occurred and stronger eligible value names exist | Monthly review after the horizon | Portfolio construction | Exit and reallocate |
+Allowed conviction tiers are `HIGH_CONVICTION`, `CONVICTION`, and `LOW_CONVICTION`. Exit reasons are
+`MAXIMUM_LOSS_BREACH` and `THESIS_INVALIDATED`. `decision_embedding` remains dimensionless until one
+embedding method is selected; after that, its dimension must be fixed consistently.
 
-Entry and exit bands use hysteresis. A rank-sort entry keeps the universal maximum-loss stop but no
-tight chart-based stop by default. Bands and review horizons remain `[CALIBRATION]`.
+##### Storage lifecycle
 
-##### Quality exit policies
-
-| Quality exit policy | Trigger | Cadence | Owner | Action |
-|---|---|---|---|---|
-| Quality-rank decay (buffered) | The QMJ composite falls below the exit band (~50th pctile) after entry ≥70th; an incumbent inside the buffer may stay to limit turnover | Monthly/quarterly rebalance | Deterministic position monitor | Exit and reallocate *(QMJ periodic rebalance; bands `[CALIBRATION]`)* |
-| Hard quality-thesis failure | Operating cash flow turns negative, or accruals turn adverse (CFO < net income), or a hard-distress flag appears — the Piotroski/Sloan floor is now false | After each new filing or material event | Deterministic position monitor | Exit next session *(Piotroski 2000; Sloan 1996)* |
-| Quality replacement | An incumbent is inside the retention buffer, capacity is constrained, and a materially stronger eligible quality name is available | Monthly/quarterly rebalance | Portfolio construction | Replace the weaker holding, not treated as a thesis failure |
-
-No fixed take-profit and no short time stop — quality is a hold-and-compound factor. Valuation
-expansion, macro deterioration, or one soft filing do not by themselves invalidate a holding; they may
-block additions, reduce sizing, or prompt agent review. An exit requires the universal risk policy,
-rank decay, or a hard-failure sign reversal. Bands remain `[CALIBRATION]`.
-
-#### Phase 2 — Candidate runner, storage, and pre-agent gates
-
-Build the deterministic runner that executes all active strategies and produces the only candidate
-packets the agent is allowed to consider.
+| Pipeline result | Storage action |
+|---|---|
+| Strategy candidate awaiting agent review | Keep only in the current run's memory. |
+| Agent rejects candidate | Discard it. |
+| Agent accepts but deterministic risk rejects it | Discard it. |
+| Validated position opens | Generate `trade_id` and write the frozen candidate, agent context, risk limits, and execution facts to `positions.json`. |
+| Position exits | Add the exit facts and embedding, insert one complete row into `decision_memory`, then remove the position from `positions.json`. |
 
 The runner should:
 
-- load active strategies from the strategy profile registry
-- resolve the eligible universe for each profile
-- run every active strategy for the decision date
-- normalize every passing result into the shared candidate-packet schema
-- validate that each packet includes a complete risk menu before storage
-- persist each passing candidate to `screened_candidates`
-- allow multiple candidate packets for the same symbol when multiple strategies pass
-- attach profile-level backtest/walk-forward stats
-- reject candidates that fail hard gates before the agent sees them
-- record enough rejection/audit metadata to debug why candidates did not pass
+- run every strategy in the code-owned strategy registry
+- resolve the shared tradeable universe once
+- rank each strategy's passing results before agent handoff
+- keep only the top five packets from each strategy
+- validate each packet's strategy identity, risk limits, entry theses, and point-in-time context
+- send the completed in-memory candidate set to the agent once
+- pass only accepted verdicts to deterministic risk validation
+- write validated open positions to `positions.json`
+- insert one complete `decision_memory` row only after a position exits
+- allow the same symbol to produce separate decisions when multiple strategies pass
 
-Candidate packets must include deterministic choices for:
+The agent cannot create a candidate, ask to run another strategy after seeing the set, or change the
+deterministic packet. `trade_id` is the durable identity shared by the open-position JSON record and
+the completed SQL row.
 
-- default and allowed stops
-- default and allowed targets
-- default and allowed timelines
-- maximum position size
-- maximum loss
-- risk flags
-- setup score
-- point-in-time signal context
-- backtest or walk-forward stats when available
+##### Accepted-verdict handoff
 
-The output of Phase 2 is a clean `screened_candidates` set for a decision date. The agent only
-receives candidate IDs and packet contents that came from this table. It cannot create a candidate
-for a strategy that did not pass, and it cannot ask to run a different strategy after seeing the
-candidate set.
+Before opening an agent-approved position:
 
-#### Phase 3 — Deterministic verdict validation and portfolio handoff
+- confirm the verdict references a current in-memory candidate packet
+- validate the conviction tier
+- calculate position size from the strategy profile's conviction multiplier
+- enforce `max_position_pct`, `max_loss_pct`, and available portfolio capacity
+- write the executed position to `positions.json`
 
-Validate every structured agent verdict against the selected candidate packet before portfolio or
-execution code can act on it.
-
-The validator should:
-
-- accept only structured agent verdicts
-- fetch the selected `screened_candidates` row by candidate ID
-- reject verdicts that reference missing, stale, or mismatched candidate packets
-- enforce that the selected stop, target, and timeline IDs exist in the candidate packet's menus
-- reject any verdict that tries to loosen deterministic risk beyond the candidate envelope
-- derive position size from conviction tier and profile size multipliers
-- enforce maximum position size and maximum loss
-- enforce portfolio exposure, sector exposure, liquidity, volatility, and concentration limits
-- allow the risk layer to reject or reduce an agent-approved trade
-- emit a validated order plan for debug/no-order mode first
-- write validation status and final outcomes back into `trade_outcomes` and `decision_memory`
-
-The risk layer is deterministic and cannot call the LLM. It is allowed to reduce, reject, or hold a
-trade for manual/debug review, but it cannot expand the agent's chosen risk. Execution only receives
-validated order plans.
+Rejected or invalid verdicts are discarded. Exit monitoring belongs to `UniversalExitPolicy` and the
+selected strategy's `StrategyExitPolicy`. After exit, insert the completed trade into
+`decision_memory` and remove it from `positions.json`.
 
 ### Agentic layer
 
-The agentic layer interprets the deterministic candidate set, asks for typed evidence, selects from
-allowed options, records its reasoning, and later helps evaluate whether those choices improved over
-the deterministic defaults.
+The agentic layer interprets the deterministic candidate set, asks for typed evidence, and either
+accepts or rejects each opportunity. It cannot create candidates, loosen risk, or execute orders.
 
-#### Phase 4 — Typed agent-data tools
+#### Phase 3 — Typed agent-data tools
 
 Add the tool boundary the agent must use before making a decision.
 
 Initial tools:
 
-- `get_strategy_performance`
-- `search_similar_setups`
+- `search_similar_trades`
 - `get_recent_trade_memory`
 - `get_portfolio_context`
 - `get_current_signal_context`
 - `get_institutional_summary`
-- `run_mini_backtest`
 - `search_evidence_fixture` as fixture/stub if text evidence is needed later
 - `get_recent_event_context` as fixture/stub
 
 The tools may be partly stubbed at first, but they must return schema-valid data and record enough
 metadata for audit.
 
-#### Phase 5 — Agentic PM spine
+#### Phase 4 — Agentic PM spine
 
 Add the orchestration layer:
 
@@ -434,18 +415,13 @@ Add the orchestration layer:
 - typed tool definitions
 - tool-calling loop
 - agent prompt focused on selecting from passing candidate packets
-- decision writer
+- handoff to deterministic verdict validation
 
 The agent verdict must include:
 
 - accept/reject decision
-- selected candidate packet ID
-- selected stop ID
-- selected target ID
-- selected timeline ID
+- selected in-memory candidate reference
 - conviction tier
-- profit likelihood
-- confidence
 - tools called
 - evidence IDs
 - rationale
@@ -457,46 +433,26 @@ The conviction tier controls position size and risk budget:
 - `LOW_CONVICTION`: small size
 - `REJECT`: no position
 
-The verdict must be structured and written to `decision_memory`.
+The verdict must be structured. Rejected verdicts are discarded; accepted verdicts are retained in
+`positions.json` only if deterministic validation and execution succeed.
 
-#### Phase 6 — Retrieval, memory, and walk-forward stats
+#### Phase 5 — Completed-trade retrieval
 
 Make the typed tools useful behind the interface.
 
 Implement:
 
-- similar setup search over normalized deterministic feature vectors
-- retrieval of resolved prior trades only
-- strategy-level backtest and walk-forward performance
-- recent performance by profile and market regime
+- one consistent embedding method for completed trades
+- similar-trade search over `decision_embedding`
+- recent completed-trade retrieval, optionally filtered by strategy profile
 - point-in-time filters so future outcomes are never visible
-- optional pgvector support for numeric vectors and later text evidence
+- optional later support for separately indexed text evidence
 
 The key rule:
 
 ```sql
-WHERE resolution_date < decision_date
+WHERE exit_date < decision_date
 ```
-
-#### Phase 7 — Eval harness
-
-Build the harness that compares agent-managed trades against deterministic defaults.
-
-Measure:
-
-- win rate
-- expectancy
-- drawdown
-- selected stop versus default stop by strategy/profile
-- selected target versus default target by strategy/profile
-- selected timeline versus default timeline by strategy/profile
-- conviction-adjusted sizing versus full default size
-- pass decisions versus strategy baseline
-- strategy selection when multiple packets exist for the same symbol
-- calibration of `profit_likelihood`
-- lift from using similar-trade memory and walk-forward stats
-
-The eval result should be stored in `eval_results`.
 
 ## Key implementation targets
 
@@ -508,44 +464,36 @@ Modify:
 - `decision_layer/agentic_layer/llm_client.py`
 - `database/db_connection.py`
 - `database/market/fundamentals_repo.py`
-- `database/operational/prefilter_profiles_repository.py` (planned rename: `strategy_profiles_repository.py`)
-- `database/operational/screened_candidates_repository.py`
-- `database/agent_memory/decision_memory_repository.py`
-- `database/outcomes/trade_outcomes_repository.py`
-- `database/outcomes/eval_repository.py`
+- `database/operational/strategy_profiles_repository.py`
+- `database/operational/decision_memory_repository.py`
 
 Create:
 
 - `decision_layer/orchestration/`
 - `retrieval/`
-- `evals/`
+- `positions.json` and a small typed position-state reader/writer
 - typed tool modules for agent evidence access
 - risk validation module for agent verdicts
 - `decision_layer/schemas/` — shared candidate-packet and verdict schemas used by strategies, tools,
-  risk, and evals (TASK-001 in `docs/tasks/`)
+  and risk (TASK-001 in `docs/tasks/`)
 
 ## Verification
 
 Unit tests:
 
 - strategy emits schema-valid candidate packets
-- stop, target, and timeline choices validate correctly
-- agent verdict rejects IDs not present in the candidate packet
+- each strategy ranks before handing off at most five packets
 - agent verdict cannot loosen deterministic risk
 - typed tools return schema-valid data
+- exit policies return deterministic hold/exit decisions
 
 Integration tests:
 
-- debug buy path creates candidate packet, agent verdict, and decision-memory row
+- debug buy path creates a candidate packet, a validated agent verdict, and an open-position JSON entry
 - portfolio manager accepts valid choices and rejects invalid choices
-- sell path enforces deterministic floor plus agent tighten-only behavior
-- outcomes are written back for eval
-
-Eval tests:
-
-- historical replay compares agent choice to default choice
-- profit likelihood calibration is computed
-- retrieval never returns unresolved or future trades
+- sell path enforces maximum loss and strategy-thesis invalidation
+- exit handoff inserts one complete trade into `decision_memory` and removes it from `positions.json`
+- retrieval never returns a trade whose exit was not known by the requested decision date
 
 ## First milestone
 
@@ -553,6 +501,6 @@ The first milestone is not real-time trading and not broad text-evidence ingesti
 
 The first milestone is:
 
-> Strategy emits a candidate packet with a risk menu, agent selects stop/target/timeline/size within
-> that menu, portfolio logic validates it, decision memory records it, and an outcome can be compared
-> against deterministic defaults.
+> Strategy suite produces at most fifteen ranked candidates, the agent accepts or rejects them,
+> deterministic risk validates position size and limits, `positions.json` tracks open positions, and
+> every exited position becomes one complete searchable row in `decision_memory`.

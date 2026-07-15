@@ -17,7 +17,7 @@ import database.market.insider_repo as insider_repo
 import database.market.institutional_repo as institutional_repo
 import database.market.event_repo as event_repo
 import database.market.macro_repo as macro_repo
-import database.operational.prefilter_profiles_repository as profiles_repo
+import database.operational.strategy_profiles_repository as profiles_repo
 import database.operational.screened_candidates_repository as candidates_repo
 import database.agent_memory.decision_memory_repository as memory_repo
 import database.outcomes.trade_outcomes_repository as outcomes_repo
@@ -36,6 +36,7 @@ def drop_all():
         "trade_outcomes",
         "decision_memory",
         "screened_candidates",
+        "strategy_profiles",
         "prefilter_profiles",
         "events",
         "institutional_holdings",
@@ -77,7 +78,7 @@ def create_all():
 
     # Operational
     profiles_repo.create_table()
-    print("  created prefilter_profiles")
+    print("  created strategy_profiles")
     candidates_repo.create_table()
     print("  created screened_candidates")
 

@@ -1,23 +1,9 @@
+# Hidden files
+.*
+
 # Python
 __pycache__/
 
-# Environment variables
-.env
-
-# Database files
-*.db
-
-# Logs
-*.log
-
-# VS Code
-.vscode/
-
-# linting and formatting caches
-.ruff_cache/
-
-# Testing
-.pytest_cache/
 tests/
 
 SHARADAR_KEYS.csv

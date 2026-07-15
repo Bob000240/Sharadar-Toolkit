@@ -16,14 +16,13 @@ Factor portfolios are periodic rank sorts with no market-timing overlay, so
 quality has no separate entry mode. Signals: sig_fundamentals + sig_events.
 """
 
-from __future__ import annotations
 from datetime import date
 
 import pandas as pd
 
 from data.signals.sig_fundamentals import FundamentalsModel
 from data.signals.sig_events import EventsModel
-from decision_layer.det_layer.strategy import Strategy, ScreenResult
+from decision_layer.det_layer.strategy import Strategy, ScreenResult, StrategyExitPolicy
 from set_up.config import cap_bucket, get_stock_symbols
 
 # QMJ composite top-30% within sector (Asness/Frazzini/Pedersen 2019). Rank-based.
@@ -53,21 +52,13 @@ def _score01(value, fallback=0.5) -> float:
     return float(value) / 100.0 if pd.notna(value) else fallback
 
 
+class QualityExitPolicy(StrategyExitPolicy):
+    pass
+
+
 class StratQuality(Strategy):
     NAME = "quality"
-    PROFILE = {
-        "description": "High-quality compounders on liquid US equities (late-cycle tilt).",
-        "universe": "US_EQUITY",
-        "default_holding_days": 120,
-        "max_position_pct": 0.06,
-        "max_loss_pct": 0.12,
-        "allowed_stop_ids": ["atr_2_5x", "pct_12"],
-        "allowed_target_ids": ["rr_2", "pct_15"],
-        "allowed_timeline_ids": ["trend_90d", "trend_120d"],
-        "default_stop_id": "atr_2_5x",
-        "default_target_id": "rr_2",
-        "default_timeline_id": "trend_120d",
-    }
+    EXIT_POLICY = QualityExitPolicy
 
     def _rank_key(self, packet: dict):
         # setup_score is a within-sector percentile and saturates at 1.0 for each
@@ -181,10 +172,6 @@ class StratQuality(Strategy):
             )
         return results
 
-    def risk_controls(self, packet: dict) -> list[str]:
-        return packet.get("risk_flags", [])
-
-
 if __name__ == "__main__":
     strat = StratQuality()
     as_of = date.today()
@@ -193,5 +180,5 @@ if __name__ == "__main__":
     for p in packets:
         print(
             f"  {p['symbol']:6s} score={p['setup_score']:.3f} entry={p['entry_price']} "
-            f"stop={p['default_stop_id']} target={p['default_target_id']} gates={p['passed_gates']}"
+            f"gates={p['passed_gates']}"
         )

@@ -20,7 +20,6 @@ different names (a candidate may qualify for both). Signals: sig_technicals +
 sig_sector_rotation (context) + sig_events (risk).
 """
 
-from __future__ import annotations
 from datetime import date
 
 import pandas as pd
@@ -28,9 +27,9 @@ import pandas as pd
 from data.signals.sig_technicals import TechnicalsModel
 from data.signals.sig_sector_rotation import SectorRotationModel
 from data.signals.sig_events import EventsModel
-import database.market.fundamentals_repo as fundamentals_repo
+from data.signals.sig_fundamentals import load_marketcaps
 from set_up.config import ETF_SECTOR_MAP, cap_bucket, get_stock_symbols
-from decision_layer.det_layer.strategy import Strategy, ScreenResult
+from decision_layer.det_layer.strategy import Strategy, ScreenResult, StrategyExitPolicy
 
 _BENCHMARK = "SPY"
 _ETFS = list(ETF_SECTOR_MAP.keys())
@@ -64,21 +63,13 @@ _EXCLUDING_EVENTS = {
 }
 
 
+class MomentumExitPolicy(StrategyExitPolicy):
+    pass
+
+
 class StratMomentum(Strategy):
     NAME = "momentum"
-    PROFILE = {
-        "description": "Relative-strength / trend-continuation on liquid US equities.",
-        "universe": "US_EQUITY",
-        "default_holding_days": 90,
-        "max_position_pct": 0.05,
-        "max_loss_pct": 0.10,
-        "allowed_stop_ids": ["atr_2_5x", "atr_3x", "pct_12"],
-        "allowed_target_ids": ["rr_2", "rr_3", "pct_25"],
-        "allowed_timeline_ids": ["position_60d", "trend_90d", "trend_120d"],
-        "default_stop_id": "atr_2_5x",
-        "default_target_id": "rr_3",
-        "default_timeline_id": "trend_90d",
-    }
+    EXIT_POLICY = MomentumExitPolicy
 
     def _entry_modes(self, t) -> dict[str, bool]:
         """Two research-distinct entry paths; a candidate must confirm through at
@@ -120,15 +111,7 @@ class StratMomentum(Strategy):
         tech = TechnicalsModel(ts, present, _BENCHMARK, _ETFS)
         sectors = SectorRotationModel(ts)
         events = EventsModel(ts, present)
-        # Point-in-time market cap for the size gate. Momentum uses only technicals,
-        # so pull marketcap via the slim per-ticker latest-ART lookup (not the full
-        # fundamental signal pipeline). Names without a fundamentals row are dropped by the cap
-        # gate below — can't verify size, so exclude.
-        mcaps = (
-            fundamentals_repo.get_latest_rows(present, "ART", ts)
-            .set_index("ticker")["marketcap"]
-            .to_dict()
-        )
+        mcaps = load_marketcaps(present, ts)
 
         results: list[ScreenResult] = []
         for ticker in present:
@@ -216,10 +199,6 @@ class StratMomentum(Strategy):
             )
         return results
 
-    def risk_controls(self, packet: dict) -> list[str]:
-        return packet.get("risk_flags", [])
-
-
 if __name__ == "__main__":
     strat = StratMomentum()
     as_of = date.today()
@@ -228,6 +207,5 @@ if __name__ == "__main__":
     for p in packets:
         print(
             f"  {p['symbol']:6s} score={p['setup_score']:.3f} "
-            f"entry={p['entry_price']} stop={p['default_stop_id']} "
-            f"target={p['default_target_id']} gates={p['passed_gates']}"
+            f"entry={p['entry_price']} gates={p['passed_gates']}"
         )

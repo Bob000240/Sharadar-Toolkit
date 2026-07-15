@@ -17,14 +17,13 @@ Value is a periodic cross-sectional rank sort, so no market-timing overlay.
 Signals: sig_fundamentals + sig_events.
 """
 
-from __future__ import annotations
 from datetime import date
 
 import pandas as pd
 
 from data.signals.sig_fundamentals import FundamentalsModel
 from data.signals.sig_events import EventsModel
-from decision_layer.det_layer.strategy import Strategy, ScreenResult
+from decision_layer.det_layer.strategy import Strategy, ScreenResult, StrategyExitPolicy
 from set_up.config import cap_bucket, get_stock_symbols
 
 # Cheapest 30% within sector on the value composite (Fama-French / Asness). Rank-based.
@@ -51,21 +50,13 @@ def _score01(value, fallback=0.5) -> float:
     return float(value) / 100.0 if pd.notna(value) else fallback
 
 
+class ValueExitPolicy(StrategyExitPolicy):
+    pass
+
+
 class StratValue(Strategy):
     NAME = "value"
-    PROFILE = {
-        "description": "Sector-relative deep value with a Piotroski trap filter.",
-        "universe": "US_EQUITY",
-        "default_holding_days": 120,
-        "max_position_pct": 0.05,
-        "max_loss_pct": 0.15,
-        "allowed_stop_ids": ["pct_15", "atr_3x"],
-        "allowed_target_ids": ["pct_25", "rr_2"],
-        "allowed_timeline_ids": ["trend_90d", "trend_120d"],
-        "default_stop_id": "pct_15",
-        "default_target_id": "pct_25",
-        "default_timeline_id": "trend_120d",
-    }
+    EXIT_POLICY = ValueExitPolicy
 
     def screen(self, signal_day: date, tickers: list[str]) -> list[ScreenResult]:
         ts = pd.Timestamp(signal_day)
@@ -170,10 +161,6 @@ class StratValue(Strategy):
             )
         return results
 
-    def risk_controls(self, packet: dict) -> list[str]:
-        return packet.get("risk_flags", [])
-
-
 if __name__ == "__main__":
     strat = StratValue()
     as_of = date.today()
@@ -182,5 +169,5 @@ if __name__ == "__main__":
     for p in packets:
         print(
             f"  {p['symbol']:6s} score={p['setup_score']:.3f} entry={p['entry_price']} "
-            f"stop={p['default_stop_id']} target={p['default_target_id']} gates={p['passed_gates']}"
+            f"gates={p['passed_gates']}"
         )

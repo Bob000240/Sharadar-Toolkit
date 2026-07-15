@@ -34,32 +34,7 @@
 #     max_hold_days: int = 20
 #     atr: float = 0.0
 #     high_water_mark: float = 0.0
-#     partial_exit_done: bool = False
 #     strategy: str = ""
-
-
-# @dataclass
-# class Exit:
-#     symbol: str
-#     qty: float
-#     # "stop_loss" | "target_partial" | "target_hit" | "time_stop"
-#     reason: str
-
-
-# @dataclass
-# class TradeRecord:
-#     symbol: str
-#     strategy: str
-#     buy_date: str
-#     sell_date: str
-#     purchase_price: float
-#     sell_price: float
-#     qty: float
-#     stop_price: float
-#     target_price: float
-#     exit_reason: str
-#     pnl: float
-#     pnl_pct: float
 
 
 # @dataclass
@@ -97,94 +72,6 @@
 #     _POSITIONS_BOOK_PATH.parent.mkdir(parents=True, exist_ok=True)
 #     with open(_POSITIONS_BOOK_PATH, "w") as f:
 #         json.dump(book, f, indent=2)
-
-
-# def append_trade_log(record: TradeRecord) -> None:
-#     if _TRADE_LOG_PATH.exists():
-#         with open(_TRADE_LOG_PATH) as f:
-#             log = json.load(f)
-#     else:
-#         log = []
-#     log.append(dataclasses.asdict(record))
-#     with open(_TRADE_LOG_PATH, "w") as f:
-#         json.dump(log, f, indent=2)
-
-
-# # --- SellAgent ---
-
-
-# class SellAgent:
-#     def __init__(self, alpaca: TradingClient):
-#         self.alpaca = alpaca
-
-#     def run(self) -> list[Exit]:
-#         book = load_positions_book()
-#         raw = self.alpaca.get_all_positions()
-#         exits = []
-#         book_dirty = False
-
-#         for p in raw:
-#             entry = book.get(p.symbol, {})
-#             pos = Position(
-#                 symbol=p.symbol,
-#                 qty=float(p.qty),
-#                 market_value=float(p.market_value),
-#                 avg_entry_price=float(p.avg_entry_price),
-#                 current_price=float(p.current_price),
-#                 unrealized_pl=float(p.unrealized_pl),
-#                 unrealized_plpc=float(p.unrealized_plpc),
-#                 stop_price=entry.get("stop_price", 0.0),
-#                 target_price=entry.get("target_price", 0.0),
-#                 entry_date=entry.get("entry_date", ""),
-#                 max_hold_days=entry.get("max_hold_days", 20),
-#                 atr=entry.get("atr", 0.0),
-#                 high_water_mark=entry.get("high_water_mark", float(p.avg_entry_price)),
-#                 partial_exit_done=entry.get("partial_exit_done", False),
-#                 strategy=entry.get("strategy", ""),
-#             )
-
-#             if self._update_trailing_stop(pos, book):
-#                 book_dirty = True
-
-#             exit_ = self._check_exit(pos)
-#             if exit_:
-#                 exits.append(exit_)
-#                 if exit_.reason == "target_partial":
-#                     book[pos.symbol]["partial_exit_done"] = True
-#                     book[pos.symbol]["stop_price"] = pos.avg_entry_price
-#                     book_dirty = True
-
-#         if book_dirty:
-#             save_positions_book(book)
-
-#         return exits
-
-#     def _update_trailing_stop(self, pos: Position, book: dict) -> bool:
-#         if not pos.atr or pos.current_price <= pos.high_water_mark:
-#             return False
-#         new_stop = round(pos.current_price - 2 * pos.atr, 2)
-#         if new_stop <= pos.stop_price:
-#             return False
-#         book[pos.symbol]["stop_price"] = new_stop
-#         book[pos.symbol]["high_water_mark"] = pos.current_price
-#         pos.stop_price = new_stop
-#         return True
-
-#     def _check_exit(self, pos: Position) -> Optional[Exit]:
-#         if pos.stop_price and pos.current_price <= pos.stop_price:
-#             return Exit(symbol=pos.symbol, qty=pos.qty, reason="stop_loss")
-#         if pos.target_price and pos.current_price >= pos.target_price:
-#             if not pos.partial_exit_done:
-#                 return Exit(
-#                     symbol=pos.symbol, qty=round(pos.qty / 2), reason="target_partial"
-#                 )
-#             else:
-#                 return Exit(symbol=pos.symbol, qty=pos.qty, reason="target_hit")
-#         if pos.entry_date:
-#             days_held = (date.today() - date.fromisoformat(pos.entry_date)).days
-#             if days_held >= pos.max_hold_days:
-#                 return Exit(symbol=pos.symbol, qty=pos.qty, reason="time_stop")
-#         return None
 
 
 # # --- StrategyReceiver ---
@@ -316,31 +203,6 @@
 #         if dirty:
 #             save_positions_book(book)
 
-#     def _execute_sell(self, e: Exit) -> dict:
-#         if self.debug:
-#             print(f"[DEBUG] SELL {e.qty} {e.symbol} ({e.reason})")
-#             return {
-#                 "symbol": e.symbol,
-#                 "qty": e.qty,
-#                 "reason": e.reason,
-#                 "status": "debug",
-#             }
-#         req = MarketOrderRequest(
-#             symbol=e.symbol,
-#             qty=int(e.qty),
-#             side=OrderSide.SELL,
-#             time_in_force=TimeInForce.DAY,
-#         )
-#         resp = self.alpaca.submit_order(req)
-#         print(f"SELL {e.qty} {e.symbol} ({e.reason}) order_id={resp.id}")
-#         return {
-#             "symbol": e.symbol,
-#             "qty": e.qty,
-#             "reason": e.reason,
-#             "order_id": str(resp.id),
-#             "status": "submitted",
-#         }
-
 #     def _execute_buy(
 #         self, order: BuyOrder, time_in_force: TimeInForce = TimeInForce.DAY
 #     ) -> dict:
@@ -364,63 +226,7 @@
 #             "status": "submitted",
 #         }
 
-#     def sell(self) -> None:
-#         self._reconcile_book()
-#         sell_agent = SellAgent(self.alpaca)
-#         exits = sell_agent.run()
-#         print(f"SellAgent: {len(exits)} exits")
-
-#         book = load_positions_book()
-#         full_exit_reasons = {"stop_loss", "target_hit", "time_stop"}
-
-#         for e in exits:
-#             result = self._execute_sell(e)
-#             if result["status"] in ("submitted", "debug"):
-#                 entry = book.get(e.symbol, {})
-#                 sell_price = (
-#                     float(
-#                         next(
-#                             (
-#                                 p.current_price
-#                                 for p in self.alpaca.get_all_positions()
-#                                 if p.symbol == e.symbol
-#                             ),
-#                             entry.get("avg_entry_price", 0),
-#                         )
-#                     )
-#                     if not self.debug
-#                     else entry.get("avg_entry_price", 0)
-#                 )
-#                 purchase_price = entry.get("avg_entry_price", 0.0)
-#                 pnl = round((sell_price - purchase_price) * e.qty, 2)
-#                 pnl_pct = (
-#                     round((sell_price - purchase_price) / purchase_price * 100, 2)
-#                     if purchase_price
-#                     else 0.0
-#                 )
-#                 append_trade_log(
-#                     TradeRecord(
-#                         symbol=e.symbol,
-#                         strategy=entry.get("strategy", ""),
-#                         buy_date=entry.get("entry_date", ""),
-#                         sell_date=date.today().isoformat(),
-#                         purchase_price=purchase_price,
-#                         sell_price=sell_price,
-#                         qty=e.qty,
-#                         stop_price=entry.get("stop_price", 0.0),
-#                         target_price=entry.get("target_price", 0.0),
-#                         exit_reason=e.reason,
-#                         pnl=pnl,
-#                         pnl_pct=pnl_pct,
-#                     )
-#                 )
-#                 if e.reason in full_exit_reasons:
-#                     book.pop(e.symbol, None)
-
-#         save_positions_book(book)
-
 #     def optimize(self) -> None:
-#         # Trailing stops are updated inside SellAgent.run().
 #         # Reserved for future: rebalancing, sector exposure limits, etc.
 #         if self.debug:
 #             print(
@@ -495,7 +301,6 @@
 #                     "atr": order.atr,
 #                     "avg_entry_price": order.entry_price,
 #                     "high_water_mark": order.entry_price,
-#                     "partial_exit_done": False,
 #                     "strategy": order.strategy,
 #                 }
 #         save_positions_book(book)

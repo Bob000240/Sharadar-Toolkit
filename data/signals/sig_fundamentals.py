@@ -83,6 +83,14 @@ QUALITY_HISTORY_TARGET_YEARS = 5
 MIN_QUALITY_HISTORY_OBSERVATIONS = 6
 
 
+def load_marketcaps(tickers: list[str], signal_day: pd.Timestamp) -> dict[str, float]:
+    """Load point-in-time market cap per ticker as of signal_day."""
+    df = fundamentals_repo.get_latest_rows(tickers, "ART", signal_day)
+    if df.empty:
+        return {}
+    return df.set_index("ticker")["marketcap"].to_dict()
+
+
 def calculate_growth(arq: pd.DataFrame) -> pd.DataFrame:
     """Calculate latest year-over-year growth from quarterly fundamentals."""
     rows = []
