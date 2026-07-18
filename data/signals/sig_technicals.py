@@ -219,6 +219,26 @@ class TechnicalsModel:
         self.stock_data = None
         self.load_data()
 
+    @staticmethod
+    def price_levels(tickers: list[str], signal_day: pd.Timestamp) -> pd.DataFrame:
+        """Latest close/sma_200 for `tickers` as of `signal_day`, indexed by
+        ticker. Rows are silently dropped for any ticker with no indicator row
+        by this date — the returned index is `available_tickers`.
+
+        Two uses: (1) a direct, lightweight lookup for callers (e.g. a position
+        monitor) that need a raw level or two for a handful of symbols, not the
+        full universe-relative signal set this class builds; (2) the pre-filter
+        callers screening a large universe should apply before constructing
+        TechnicalsModel, since build_technical_signals() raises on any ticker
+        missing indicator data — use `.index.tolist()` on the result.
+
+        Columns are only what current callers read; add one when a caller
+        actually needs it."""
+        rows = indicators_repo.get_latest_rows(tickers, pd.Timestamp(signal_day))
+        if rows.empty:
+            return pd.DataFrame(columns=["close", "sma_200"])
+        return rows.set_index("ticker")[["close", "sma_200"]]
+
     def load_data(self) -> None:
         self.stock_data = build_technical_signals(
             self.stock_tickers,

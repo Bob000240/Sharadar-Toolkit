@@ -143,6 +143,20 @@ def get_latest_dates(tickers: str | list[str] | None = None) -> pd.DataFrame:
     return pd.read_sql_query(text(q), get_connection(), params=params)
 
 
+def get_missing_price_dates() -> pd.DataFrame:
+    """Return equity-price keys that do not yet have a matching indicator row."""
+    q = text("""
+        SELECT ep.ticker, ep.date
+        FROM equity_prices ep
+        LEFT JOIN indicators i
+          ON i.ticker = ep.ticker
+         AND i.date = ep.date
+        WHERE i.ticker IS NULL
+        ORDER BY ep.ticker, ep.date
+    """)
+    return pd.read_sql_query(q, get_connection())
+
+
 def get_latest_rows(
     tickers: str | list[str] | None, signal_day: pd.Timestamp
 ) -> pd.DataFrame:

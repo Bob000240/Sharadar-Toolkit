@@ -11,12 +11,18 @@ memory. A formal evaluation harness is outside the current scope.
 
 ## Governance
 
-AI coding sessions on this repository follow `docs/AI_EXECUTION_HANDBOOK.md` (evidence authority,
-decision records, layer-boundary rules, quality gates, self-review protocol). Current project state
-lives in `docs/WorkStatus.md`; point-in-time and architecture invariants live in
-`docs/invariants.md`. This document is the top of the evidence authority order — it changes only by
-deliberate edit, and schema/strategy/data-ownership changes require a Decision Record
-(`docs/decisions/`) before code.
+This document is the single source of truth for the project's architecture and build order. It
+changes only by deliberate edit.
+
+> **Corrected 2026-07-16.** This section previously required AI sessions to follow
+> `docs/AI_EXECUTION_HANDBOOK.md`, track state in `docs/WorkStatus.md`, keep invariants in
+> `docs/invariants.md`, and file a Decision Record in `docs/decisions/` before any
+> schema/strategy change — describing itself as "the top of the evidence authority order."
+> **None of those files or directories have ever existed in this repository** (`docs/` is absent
+> from the working tree and from all of git history; `.agents/` and `.codex/` are empty). The
+> process was aspirational and is removed rather than left as a rule nobody can follow. If a
+> decision-record process is wanted later, create the directory first, then restore the requirement
+> here.
 
 ## Chosen Architecture
 
@@ -39,6 +45,31 @@ The deterministic suite consists of:
 - `strat_momentum`
 - `strat_value`
 - `strat_quality`
+
+#### Strategy composition and run order
+
+> **Added 2026-07-16.** Replaces the earlier single-`screen()` strategy shape.
+
+A `Strategy` is a container composed of two strategy-specific stages:
+
+| Stage | Side | Input | Output |
+|---|---|---|---|
+| `Prefilter` | buy | ticker list + macro overlay | top five `CandidateSnapshot` |
+| `Analyzer` | sell | that strategy's open positions + macro overlay | `ExitSnapshot` per closed position |
+
+Each strategy runs **sell before buy**, so capital is freed before it is redeployed:
+
+1. `Analyzer` reads current positions, trims/sells per the exit conditions, updates position state,
+   and writes an `ExitSnapshot`.
+2. `Prefilter` screens the ticker list, selects its top five, and returns `CandidateSnapshot`s.
+
+The screens and entry modes defined in Phase 1 are the `Prefilter`'s logic. The exit conditions are
+the `Analyzer`'s.
+
+A portfolio manager/orchestrator drives this, calling deterministic Python methods and agent tools.
+Because each strategy selects five with **no view of the book**, dedupe (two strategies picking the
+same symbol), total position caps, capital allocation, and sector concentration are the
+orchestrator's responsibility — never a strategy's, and never agent discretion.
 
 Each passing strategy emits a candidate packet with:
 
@@ -103,18 +134,85 @@ The risk layer may reject or reduce an agent-approved trade.
 ### Execution Layer
 
 The execution layer only receives validated orders. It places trades and stores current open-position
-state in `positions.json`. The position monitor applies the universal maximum-loss rule and the
-strategy-specific thesis-invalidation rule.
+state in `position.json`. The position monitor applies the universal maximum-loss rule, the
+strategy-specific thesis-invalidation rule, and the agent's `CONCERNING_EVENTS` watchlist.
+
+> Open positions are stored in `position.json` (decided 2026-07-17) — a single-writer file the
+> orchestrator alone mutates (mutex + atomic write), not a Postgres table.
 
 ### Database and Memory Layer
 
-Candidates remain in memory while the agent evaluates them. Rejected candidates and candidates
-blocked by deterministic risk validation are discarded. When a validated position opens, its frozen
-candidate packet, agent context, and execution state are stored in `positions.json`.
+> **Revised 2026-07-17.** A brief 2026-07-16 revision introduced a `screened_candidates` table (a
+> three-grain model). That is reverted: recording every candidate only pays off for evaluating the
+> *ranking* ("did the names I skipped underperform the ones I took?"), which needs the full unbought
+> set — and the eval harness is out of scope (see Goal). Candidates that are bought already survive
+> as the frozen `candidate_snapshot` inside `decision_memory`, so nothing needed for the milestone is
+> lost. If an eval harness is built later, reintroduce `screened_candidates` then.
 
-When that position exits, one complete append-only row is inserted into PostgreSQL
-`decision_memory`. JSONB stores the flexible candidate and evidence payloads; pgvector makes completed
-trades searchable by similarity. There is no separate screened-candidate, outcome, or eval table.
+Storage follows two grains — open state and finished record:
+
+| Grain | Store | Contents | Written |
+|---|---|---|---|
+| open positions | `position.json` | actual fill price, quantity, entry date, high-water mark, status, frozen candidate + agent context | when a validated position opens |
+| `decision_memory` | PostgreSQL + pgvector, append-only | the completed trade: frozen candidate, agent context, execution facts, outcome, exit cause, embedding | once, after exit |
+
+Candidates are held in memory during a run (produced by the screen, handed to the agent) and are not
+persisted; rejected and risk-blocked candidates are discarded. `trade_id` links the open-position
+record to its eventual `decision_memory` row. JSONB stores the flexible candidate and evidence
+payloads; pgvector makes completed trades searchable by similarity.
+
+`trade_outcomes` and `eval_results` are dropped — `decision_memory` is the terminal record for a
+finished trade and already carries the exit facts.
+
+## Open questions
+
+Unresolved as of 2026-07-16, and deliberately not decided here. Code that assumes an answer to any of
+these is running ahead of the design.
+
+**Naming — `Prefilter` vs `prefilter_profiles`.** The `Prefilter` stage is the entire buy side
+(screen, rank, select five), but its name implies the cheap universe pre-cut that would run *before*
+strategy screening. Either the name is wrong for what it does, or the buy side is really two stages.
+Neither `Prefilter` nor `Analyzer` states its direction — `Screener` / `ExitAnalyzer` would.
+
+**`prefilter_profiles` vs `strategy_profiles`.** Two seeded profile tables exist. If `Prefilter` is
+the buy side and its limits live in `strategy_profiles`, `prefilter_profiles` is redundant. Resolve
+before either is wired.
+
+**Position store — decided (2026-07-17): `position.json`.** Open positions live in a JSON file, not a
+Postgres table. It is a single-writer store, so the orchestrator must be the sole writer and use a
+mutex + atomic write (tmp + rename); three strategies must never mutate it concurrently. The trade-off
+accepted: the live book sits outside Postgres while everything else is in it, in exchange for a
+simpler open-state store. `decision_memory` remains the permanent SQL record once a position closes.
+
+**Does `Strategy` stay an `ABC`?** Composition (`Strategy` owns `Prefilter` + `Analyzer`) weakens the
+original case for `ABC` + `@abstractmethod screen`, since `screen` is no longer the variation point.
+
+**Orchestrator shape.** Settled: it drives sell-then-buy per strategy and owns dedupe, position caps,
+capital allocation, and concentration limits. Undefined: its module, interface, and how it invokes
+agent tools.
+
+**Exit-policy class names.** The three exit *reasons* are settled; the classes are not. Code
+currently has `ExitPolicy` + `RiskWatchlist`, but three reasons imply three owners (universal floor,
+per-strategy thesis, agent). Whether the universal floor is its own class or a rule inside
+`ExitPolicy` is open.
+
+**Trailing-stop placement.** Proposed above as `THESIS_INVALIDATED` for momentum, reasoning that
+momentum's thesis *is* the trend. Not confirmed.
+
+**`CONCERNING_EVENTS` naming.** The reason doesn't say "agent" on its face. `AGENT_CONCERN` would be
+self-describing. (The `exit_policy` column this once pointed to is gone — see the decision-memory
+contract; provenance for an agent exit now lives in `exit_context`.)
+
+**Macro `hard_veto` has no exit bucket.** If a hostile regime can force de-risking, that's neither a
+loss breach nor a thesis break — it needs a fourth reason (`REGIME_VETO`) or an explicit decision that
+macro never force-exits.
+
+**DB/doc drift — resolved (2026-07-17).** `setup_db` now imports and runs: dropped the missing
+`screened_candidates_repository` and `database.outcomes.*` imports, fixed the `decision_memory`
+import path, and removed the `trade_outcomes`/`eval_results` creates. `decision_memory`'s schema was
+aligned to this doc (`strategy_name`, `exit_context`, `CONCERNING_EVENTS`; no `decision_date`). The
+live DB was migrated surgically (cruft dropped, empty `decision_memory` rebuilt) without touching the
+market-data tables.
 
 ## Build order
 
@@ -134,9 +232,9 @@ The remaining Phase 0 work is cleanup rather than architecture discovery:
 
 | Phase | Layer | Progress | Notes |
 |---|---|---|---|
-| Phase 0 | Foundation | Mostly complete | Data access, repositories, setup, signals, strategy profiles, and completed-trade memory exist. |
-| Phase 1 | Deterministic | In progress | `strat_momentum`, `strat_value`, and `strat_quality` screens and entry modes are defined; exit policy details have been reset to class skeletons before implementation. |
-| Phase 2 | Deterministic | Partial | The profile registry and decision-memory schema exist; the runner, accepted-verdict handoff, `positions.json`, and exit-to-memory flow still need to be built. |
+| Phase 0 | Foundation | Mostly complete | Data access, repositories, setup, signals, strategy profiles, and completed-trade memory exist. `setup_db` runs (imports fixed 2026-07-17; creates the correct table set). Indicators now cover all tickers (survivorship fix in `load_data`), pending the backfill run. |
+| Phase 1 | Deterministic | Being restructured (2026-07-16) | The screens and entry modes for `strat_momentum`, `strat_value`, and `strat_quality` are defined and remain valid — they are now the `Prefilter`'s logic. The base is being rebuilt by hand around the `Prefilter`/`Analyzer` composition; exit policies are class skeletons. Several structural questions are still open. |
+| Phase 2 | Deterministic | Partial | The profile registry and decision-memory schema exist; the runner, accepted-verdict handoff, `position.json` state, and exit-to-memory flow still need to be built. |
 | Phase 3 | Agentic | Not started | Typed agent-data tools need schemas, implementations, and audit logging. |
 | Phase 4 | Agentic | Partial | PM and LLM modules exist; structured tool-calling agent verdict loop still needs to be built. |
 | Phase 5 | Agentic | Partial | Point-in-time completed-trade queries exist; embedding generation and useful retrieval tools remain. |
@@ -191,12 +289,15 @@ Signal feed modules:
 Core operational storage:
 
 - `strategy_profiles`: seeded, read-only registry containing each strategy's position and loss limits
-- `positions.json`: current validated open positions; to be implemented
+- `prefilter_profiles`: seeded prefilter configuration — overlap with `strategy_profiles` is
+  unresolved, see [Open questions](#open-questions)
+- `position.json`: current validated open positions (single-writer file; the orchestrator is the sole
+  mutator, mutex + atomic write)
 - `decision_memory`: append-only completed trades, including the frozen candidate, agent context,
   execution facts, outcome, exit cause, and retrieval embedding
 
-Passing candidates are intentionally not persisted. Rejected and risk-blocked candidates are also not
-retained.
+Candidates are not persisted: they live in memory during a run and are discarded if rejected or
+risk-blocked. Only completed trades reach `decision_memory`.
 
 Point-in-time requirements:
 
@@ -267,39 +368,53 @@ the strategy's screen and at least one of its entry modes; it does not need to p
 
 ##### Exit policy skeleton
 
-The deterministic exit system has two conditions:
+> **Revised 2026-07-16.** Adds an agent-initiated exit. Exits were previously deterministic-only.
 
-| Condition | Policy | Behavior |
-|---|---|---|
-| Maximum-loss breach | `UniversalExitPolicy` | Exit when any position reaches its approved maximum loss. This applies to every strategy and cannot be overridden by the agent. |
-| Entry-thesis invalidation | `StrategyExitPolicy` | Exit when the evidence that justified entry is no longer true. Each strategy defines its own invalidation rules. |
+A position exits when **any** of three conditions fires — an OR, never a consensus:
 
-`UniversalExitPolicy` and the `StrategyExitPolicy` base live in
-`decision_layer/det_layer/strategy.py`. `MomentumExitPolicy`, `ValueExitPolicy`, and
-`QualityExitPolicy` live beside their respective strategies.
+| Exit reason | Owner | Kind | Behavior |
+|---|---|---|---|
+| `MAXIMUM_LOSS_BREACH` | universal policy | deterministic | Exit when a position reaches its approved `max_loss_pct`. Applies to every strategy. The agent cannot override, delay, or veto it. |
+| `THESIS_INVALIDATED` | per-strategy policy | deterministic | Exit when the evidence that justified entry is no longer true. Each strategy defines its own invalidation rule. |
+| `CONCERNING_EVENTS` | `RiskWatchlist` | agent judgment | The agent may exit on qualitative catastrophe signals — fraud allegation, going-concern, regulatory action — that price-based rules cannot see. |
 
-The open-position monitor evaluates both policies. No triggered decision means hold; either condition
-can trigger an exit, with the universal maximum-loss rule taking precedence. Strategy-specific rules
-must mirror the entry thesis and remain deterministic. Define their exact inputs and triggers when the
-position context and thesis state are implemented.
+**The agent's authority is asymmetric and additive.** It may pull an exit *forward*; it may never
+veto, delay, or loosen a deterministic one. The deterministic conditions fire regardless of what the
+agent concludes. Any agent exit must cite a retrieved source, recorded in the exit context, so that
+phantom exits are auditable and distinguishable from real ones.
+
+Why both kinds coexist: the deterministic stop is **price-reactive** — late, but certain. The agent
+watchlist is **news-anticipatory** — early, but fallible (it can miss, or hallucinate). OR-ing them
+gives early *and* guaranteed, with each covering the other's failure mode.
+
+No triggered condition means hold. `MAXIMUM_LOSS_BREACH` takes precedence when several fire together.
+
+Strategy-specific invalidation rules must mirror the entry thesis and remain deterministic. Momentum
+is the asymmetric case: its thesis *is* the trend, so a trailing stop is its invalidation rule, filed
+under `THESIS_INVALIDATED` — **not** `MAXIMUM_LOSS_BREACH`, since a trailing stop ratchets upward and
+can fire at a profit. Value and quality exit on signal/fundamental decay and carry no tight price
+stop, only the universal loss floor. (Trailing-stop placement is proposed, not settled — see
+[Open questions](#open-questions).)
+
+Define exact inputs and triggers when position context and thesis state are implemented.
 
 #### Phase 2 — Candidate runner and decision memory
 
 Build the deterministic runner that executes all registered strategies, ranks their passing results,
 and sends only the top five candidates from each strategy to the agent. With three strategies, the
-agent receives at most fifteen candidate packets per run. Candidate packets remain in memory while the
-agent evaluates them; they are not written to SQL.
+agent receives at most fifteen candidate packets per run. Candidate packets are held in memory for the
+duration of the run; they are not persisted.
 
 ##### Strategy-profile contract
 
 The strategy-profile table is seeded during database setup and read-only during normal strategy runs.
 It identifies the strategy and supplies its deterministic position and loss limits.
 
-| Key | `profile_id` | `name` | `description` | `max_position_pct` | `max_loss_pct` | `conviction_size_multipliers` |
-|---|---|---|---|---|---|---|
-| Explanation | Database-generated strategy identity. | Unique strategy name, such as `momentum`. | Human-readable explanation of the strategy. | Maximum portfolio allocation allowed for a position produced by the strategy. | Maximum loss allowed before `UniversalExitPolicy` exits the position. | Converts an agent conviction tier into a fraction of the maximum position size. |
-| Consumer | `decision_memory`, `positions.json`, and historical retrieval. | Strategy registry, exit-policy lookup, agent context, and logs. | Agent context and inspection. | Candidate snapshot and deterministic position-sizing validator. | Candidate snapshot and `UniversalExitPolicy`. | Deterministic position-sizing validator. |
-| Datatype | `SERIAL PRIMARY KEY` | `VARCHAR(64) NOT NULL UNIQUE` | `TEXT` | `NUMERIC(6,4) NOT NULL` | `NUMERIC(6,4) NOT NULL` | `JSONB NOT NULL` |
+| Key | `name` | `description` | `max_position_pct` | `max_loss_pct` | `conviction_size_multipliers` |
+|---|---|---|---|---|---|
+| Explanation | Unique strategy name, such as `momentum`. | Human-readable explanation of the strategy. | Maximum portfolio allocation allowed for a position produced by the strategy. | Maximum loss allowed before a `MAXIMUM_LOSS_BREACH` exit fires. | Converts an agent conviction tier into a fraction of the maximum position size. |
+| Consumer | `decision_memory`, `position.json`, historical retrieval, Strategy registry, and exit-policy lookup | Agent context and inspection. | Candidate snapshot and deterministic position-sizing validator. | Candidate snapshot and the universal maximum-loss exit. | Deterministic position-sizing validator. |
+| Datatype | `VARCHAR(64) NOT NULL UNIQUE` | `TEXT` | `NUMERIC(6,4) NOT NULL` | `NUMERIC(6,4) NOT NULL` | `JSONB NOT NULL` |
 
 Executable strategy selection remains code-owned: `StratMomentum`, `StratValue`, and `StratQuality`
 all run before the agent receives the completed candidate set. A profile row identifies a strategy; it
@@ -315,11 +430,11 @@ The three Markdown tables below are column groups for one SQL table, not separat
 SQL columns hold stable trade facts, JSONB holds flexible candidate and evidence payloads, and pgvector
 supports similar-completed-trade retrieval.
 
-| Key | `trade_id` | `symbol` | `decision_date` | `profile_id` | `candidate_snapshot` |
-|---|---|---|---|---|---|
-| Explanation | UUID generated when the position opens and retained when the completed trade is inserted. | Traded stock. | Date the agent selected the candidate. | Strategy that produced the candidate. | Frozen copy of everything the strategy presented to the agent. |
-| Consumer | `positions.json`, exit handoff, audit, and retrieval. | Position monitor and historical queries. | Point-in-time retrieval and audit. | Strategy filtering and exit-policy lookup. | Thesis monitoring, audit, embedding generation, and future agent retrieval. |
-| Datatype | `UUID PRIMARY KEY` | `VARCHAR(16) NOT NULL` | `DATE NOT NULL` | `INT NOT NULL REFERENCES strategy_profiles(profile_id)` | `JSONB NOT NULL` |
+| Key | `trade_id` | `symbol` | `strategy_name` | `candidate_snapshot` |
+|---|---|---|---|---|
+| Explanation | UUID generated when the position opens and retained when the completed trade is inserted. | Traded stock. | Strategy that produced the candidate. | Frozen copy of everything the strategy presented to the agent. |
+| Consumer | `position.json`, exit handoff, audit, and retrieval. | Position monitor and historical queries. | Strategy filtering and exit-rule lookup. | Thesis monitoring, audit, embedding generation, and future agent retrieval. |
+| Datatype | `UUID PRIMARY KEY` | `VARCHAR(16) NOT NULL` | `VARCHAR(64) NOT NULL REFERENCES strategy_profiles(name)` | `JSONB NOT NULL` |
 
 | Key | `conviction_tier` | `rationale` | `evidence` | `tool_call_log` |
 |---|---|---|---|---|
@@ -333,15 +448,29 @@ supports similar-completed-trade retrieval.
 | Consumer | Holding-period and point-in-time calculations. | Maximum-loss monitoring and realized-return calculation. | Position and risk review. |
 | Datatype | `DATE NOT NULL` | `NUMERIC(12,4) NOT NULL` | `NUMERIC(6,4) NOT NULL` |
 
-| Key | `exit_date` | `exit_price` | `realized_pnl_pct` | `days_held` | `exit_reason` | `exit_policy` | `decision_embedding` |
+| Key | `exit_date` | `exit_price` | `realized_pnl_pct` | `days_held` | `exit_reason` | `exit_context` | `decision_embedding` |
 |---|---|---|---|---|---|---|---|
-| Explanation | Date the position closed. | Actual executed exit price. | Final percentage return. | Number of days held. | Deterministic condition that caused the exit. | Policy class that produced the exit decision. | Vector representation of the completed trade. |
-| Consumer | Point-in-time memory filtering. | Realized-return audit. | Future agent context and reporting. | Future agent context. | Audit and future agent context. | Exit debugging and strategy analysis. | Similar-trade retrieval through pgvector. |
-| Datatype | `DATE NOT NULL` | `NUMERIC(12,4) NOT NULL` | `NUMERIC(10,6) NOT NULL` | `INT NOT NULL` | `VARCHAR(32) NOT NULL` | `VARCHAR(64) NOT NULL` | `VECTOR NOT NULL` |
+| Explanation | Date the position closed. | Actual executed exit price. | Final percentage return. | Number of days held. | Coarse condition that caused the exit. | Which specific rule fired, its trigger values, and — for an agent exit — the cited source. | Vector representation of the completed trade. |
+| Consumer | Point-in-time memory filtering. | Realized-return audit. | Future agent context and reporting. | Future agent context. | Exit debugging and strategy analysis (`GROUP BY`-friendly). | Exit debugging, audit of agent-cited sources, future agent retrieval. | Similar-trade retrieval through pgvector. |
+| Datatype | `DATE NOT NULL` | `NUMERIC(12,4) NOT NULL` | `NUMERIC(10,6) NOT NULL` | `INT NOT NULL` | `VARCHAR(32) NOT NULL` | `JSONB` | `VECTOR NOT NULL` |
 
 Allowed conviction tiers are `HIGH_CONVICTION`, `CONVICTION`, and `LOW_CONVICTION`. Exit reasons are
-`MAXIMUM_LOSS_BREACH` and `THESIS_INVALIDATED`. `decision_embedding` remains dimensionless until one
-embedding method is selected; after that, its dimension must be fixed consistently.
+`MAXIMUM_LOSS_BREACH`, `THESIS_INVALIDATED`, and `CONCERNING_EVENTS` (agent-initiated, added
+2026-07-16).
+
+> **Revised 2026-07-17.** Dropped the `exit_policy` column. It named the class that produced the
+> decision, but that is derivable from `exit_reason` + `strategy_name` in every case
+> (`MAXIMUM_LOSS_BREACH` and `CONCERNING_EVENTS` each map to exactly one owner; `THESIS_INVALIDATED`
+> maps to whichever strategy's row it is), so it was a redundant column. `exit_context` JSONB replaces
+> it and holds something `exit_policy` never could: which specific rule fired *within* a reason —
+> e.g. which of momentum's invalidation rules, or the agent's cited source for `CONCERNING_EVENTS` —
+> mirroring how `signal_context` carries the entry-side specifics. `exit_reason` stays the coarse,
+> `GROUP BY`-friendly column ("did agent exits beat rule exits?"); `exit_context` carries the detail.
+
+`decision_embedding` remains dimensionless until one embedding method is selected; after that, its
+dimension must be fixed consistently. It embeds only the entry-side context (strategy, signal
+context, regime) shared with a fresh candidate — never the outcome — since retrieval queries with a
+candidate that has no outcome yet; the outcome is read from the matched row, not embedded into it.
 
 ##### Storage lifecycle
 
@@ -350,8 +479,8 @@ embedding method is selected; after that, its dimension must be fixed consistent
 | Strategy candidate awaiting agent review | Keep only in the current run's memory. |
 | Agent rejects candidate | Discard it. |
 | Agent accepts but deterministic risk rejects it | Discard it. |
-| Validated position opens | Generate `trade_id` and write the frozen candidate, agent context, risk limits, and execution facts to `positions.json`. |
-| Position exits | Add the exit facts and embedding, insert one complete row into `decision_memory`, then remove the position from `positions.json`. |
+| Validated position opens | Generate `trade_id` and write the frozen candidate, agent context, risk limits, and execution facts to `position.json`. |
+| Position exits | Add the exit facts, reason, `exit_context`, and embedding; insert one complete row into `decision_memory`; remove the position from `position.json`. |
 
 The runner should:
 
@@ -362,7 +491,7 @@ The runner should:
 - validate each packet's strategy identity, risk limits, entry theses, and point-in-time context
 - send the completed in-memory candidate set to the agent once
 - pass only accepted verdicts to deterministic risk validation
-- write validated open positions to `positions.json`
+- write validated open positions to `position.json`
 - insert one complete `decision_memory` row only after a position exits
 - allow the same symbol to produce separate decisions when multiple strategies pass
 
@@ -378,11 +507,13 @@ Before opening an agent-approved position:
 - validate the conviction tier
 - calculate position size from the strategy profile's conviction multiplier
 - enforce `max_position_pct`, `max_loss_pct`, and available portfolio capacity
-- write the executed position to `positions.json`
+- write the executed position to `position.json`
 
-Rejected or invalid verdicts are discarded. Exit monitoring belongs to `UniversalExitPolicy` and the
-selected strategy's `StrategyExitPolicy`. After exit, insert the completed trade into
-`decision_memory` and remove it from `positions.json`.
+Rejected or invalid verdicts are discarded. Exit monitoring covers all three exit reasons — the
+universal `MAXIMUM_LOSS_BREACH` floor, the selected strategy's `THESIS_INVALIDATED` rule, and the
+agent's `CONCERNING_EVENTS` watchlist (class names are unsettled — see
+[Open questions](#open-questions)). After exit, insert the completed trade into `decision_memory` and
+remove it from `position.json`.
 
 ### Agentic layer
 
@@ -434,7 +565,7 @@ The conviction tier controls position size and risk budget:
 - `REJECT`: no position
 
 The verdict must be structured. Rejected verdicts are discarded; accepted verdicts are retained in
-`positions.json` only if deterministic validation and execution succeed.
+`position.json` only if deterministic validation and execution succeed.
 
 #### Phase 5 — Completed-trade retrieval
 
@@ -471,11 +602,11 @@ Create:
 
 - `decision_layer/orchestration/`
 - `retrieval/`
-- `positions.json` and a small typed position-state reader/writer
+- `position.json` and a small typed position-state reader/writer (single-writer, mutex + atomic write)
 - typed tool modules for agent evidence access
 - risk validation module for agent verdicts
 - `decision_layer/schemas/` — shared candidate-packet and verdict schemas used by strategies, tools,
-  and risk (TASK-001 in `docs/tasks/`)
+  and risk
 
 ## Verification
 
@@ -492,7 +623,7 @@ Integration tests:
 - debug buy path creates a candidate packet, a validated agent verdict, and an open-position JSON entry
 - portfolio manager accepts valid choices and rejects invalid choices
 - sell path enforces maximum loss and strategy-thesis invalidation
-- exit handoff inserts one complete trade into `decision_memory` and removes it from `positions.json`
+- exit handoff inserts one complete trade into `decision_memory` and removes it from `position.json`
 - retrieval never returns a trade whose exit was not known by the requested decision date
 
 ## First milestone
@@ -502,5 +633,5 @@ The first milestone is not real-time trading and not broad text-evidence ingesti
 The first milestone is:
 
 > Strategy suite produces at most fifteen ranked candidates, the agent accepts or rejects them,
-> deterministic risk validates position size and limits, `positions.json` tracks open positions, and
+> deterministic risk validates position size and limits, `position.json` tracks open positions, and
 > every exited position becomes one complete searchable row in `decision_memory`.

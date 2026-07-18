@@ -13,13 +13,21 @@ Research basis (see PROJECT_IMPLEMENTATION.md § Momentum):
     separately-published signal — its own entry mode, and it need not be
     top-quintile on trailing returns.
   - Industry momentum (Moskowitz & Grinblatt 1999): leading-sector tilt.
+  - Exits: momentum's thesis IS the trend, so the deterministic exit is a
+    trailing stop plus a primary-uptrend break (both THESIS_INVALIDATED), under
+    the universal max-loss floor (MAXIMUM_LOSS_BREACH). Stop-loss evidence:
+    Han, Zhou & Zhu 2016 (stops tame momentum crashes); trailing beats
+    entry-anchored stops with 15-20% most effective, evaluated at run cadence
+    rather than intraday.
 
-The screen is general momentum eligibility (liquid, primary uptrend, confirmed
-trend); the two entry modes carry the specific momentum thesis, so they admit
-different names (a candidate may qualify for both). Signals: sig_technicals +
-sig_sector_rotation (context) + sig_events (risk).
+Structure: two per-strategy processors. MomentumEntryScreener (buy side) screens
+a universe point-in-time and emits CandidateSnapshots; MomentumExitMonitor (sell
+side) evaluates open positions and emits ExitSnapshots. The portfolio manager
+owns signal_day, ranking, dedupe, sizing, persistence, and execution prices.
+CONCERNING_EVENTS is the agent's exit, not produced here.
 """
 
+from dataclasses import dataclass
 from datetime import date
 
 import pandas as pd
@@ -29,7 +37,61 @@ from data.signals.sig_sector_rotation import SectorRotationModel
 from data.signals.sig_events import EventsModel
 from data.signals.sig_fundamentals import load_marketcaps
 from set_up.config import ETF_SECTOR_MAP, cap_bucket, get_stock_symbols
-from decision_layer.det_layer.strategy import Strategy, ScreenResult, StrategyExitPolicy
+import database.operational.strategy_profiles_repository as profiles_repo
+
+
+# ── records: one per symbol ──────────────────────────────────────────────────
+# Shared contracts. Lift these (and the two bases below) into a shared module
+# when strat_value / strat_quality are rebuilt, so all three strategies and the
+# orchestrator import one CandidateSnapshot type.
+
+@dataclass
+class CandidateSnapshot:
+    symbol: str
+    entry_date: date              # the signal_day this candidate was screened
+    setup_score: float
+    passed_gates: list[str]
+    risk_flags: list[str]
+    signal_context: dict          # the numbers behind the pass
+
+
+@dataclass
+class ExitSnapshot:
+    symbol: str
+    exit_date: date               # the signal_day the exit condition fired
+    exit_reason: str              # MAXIMUM_LOSS_BREACH / THESIS_INVALIDATED / CONCERNING_EVENTS
+    exit_context: dict            # which rule fired, values, agent citation
+
+
+# ── processors: one per strategy ─────────────────────────────────────────────
+
+class EntryScreener:
+    def __init__(self, strategy_name: str):
+        self.strategy_name = strategy_name
+        self.profile = profiles_repo.get_profile_by_name(strategy_name)
+        if self.profile is None:
+            raise RuntimeError(
+                f"Strategy profile {strategy_name!r} is missing; run set_up.setup_db"
+            )
+
+    def run(self, symbols: list[str], signal_day: date) -> list[CandidateSnapshot]:
+        raise NotImplementedError
+
+
+class ExitMonitor:
+    def __init__(self, strategy_name: str):
+        self.strategy_name = strategy_name
+        self.profile = profiles_repo.get_profile_by_name(strategy_name)
+        if self.profile is None:
+            raise RuntimeError(
+                f"Strategy profile {strategy_name!r} is missing; run set_up.setup_db"
+            )
+
+    def run(self, positions: list[dict], signal_day: date) -> list[ExitSnapshot]:
+        raise NotImplementedError
+
+
+# ── momentum calibration ─────────────────────────────────────────────────────
 
 _BENCHMARK = "SPY"
 _ETFS = list(ETF_SECTOR_MAP.keys())
@@ -53,6 +115,12 @@ _VOLUME_SURGE = 1.5
 # Leading sector = top-3 of 11 sectors by 20d return (Moskowitz-Grinblatt tilt). CALIBRATION.
 _LEADING_SECTOR_RANK = 3
 
+# Trailing stop: drawdown from the position's high-water mark that invalidates
+# the trend thesis. 15-20% is the effective band in the stop-loss literature,
+# with trailing beating entry-anchored stops; evaluated at run cadence, not
+# intraday (prevents over-trading). CALIBRATION within the cited band.
+_TRAILING_STOP_DRAWDOWN = 0.20
+
 # Event codes that disqualify a name outright.
 _EXCLUDING_EVENTS = {
     "delisting_risk",
@@ -63,19 +131,15 @@ _EXCLUDING_EVENTS = {
 }
 
 
-class MomentumExitPolicy(StrategyExitPolicy):
-    pass
+class MomentumEntryScreener(EntryScreener):
+    """Buy side. Screen = general momentum eligibility (liquid, primary uptrend,
+    confirmed trend); the momentum thesis lives in two research-distinct entry
+    modes, so they admit different names (a candidate may qualify for both)."""
 
-
-class StratMomentum(Strategy):
-    NAME = "momentum"
-    EXIT_POLICY = MomentumExitPolicy
+    def __init__(self):
+        super().__init__("momentum")
 
     def _entry_modes(self, t) -> dict[str, bool]:
-        """Two research-distinct entry paths; a candidate must confirm through at
-        least one (it may qualify for both). The screen establishes general
-        momentum eligibility; each mode carries a *different* momentum thesis, so
-        they admit different names."""
         return {
             # Jegadeesh-Titman relative strength: top-quintile 12-month momentum with
             # intermediate corroboration (skip-a-month — not gating on the
@@ -100,20 +164,19 @@ class StratMomentum(Strategy):
             ),
         }
 
-    def screen(self, signal_day: date, tickers: list[str]) -> list[ScreenResult]:
+    def run(self, symbols: list[str], signal_day: date) -> list[CandidateSnapshot]:
         ts = pd.Timestamp(signal_day)
-        # Restrict to names that actually have indicators (avoids aborting the
-        # whole screen on a single name the universe lists but we haven't loaded).
-        present = self._price_levels(signal_day, tickers).index.tolist()
-        if not present:
-            return []
+        # No pre-filter: build_technical_signals() raises if any symbol lacks an
+        # indicator row as of signal_day (e.g. update_indicators() hasn't caught
+        # up to a newly-liquid universe addition yet). Accepted as-is.
+        present = symbols
 
         tech = TechnicalsModel(ts, present, _BENCHMARK, _ETFS)
         sectors = SectorRotationModel(ts)
         events = EventsModel(ts, present)
         mcaps = load_marketcaps(present, ts)
 
-        results: list[ScreenResult] = []
+        candidates: list[CandidateSnapshot] = []
         for ticker in present:
             t = tech.build_snapshot(ticker)
             ev = events.build_snapshot(ticker)
@@ -172,16 +235,15 @@ class StratMomentum(Strategy):
                     "mega_cap_crowding"
                 )  # eligible, but crowded (see note above)
 
-            results.append(
-                ScreenResult(
+            candidates.append(
+                CandidateSnapshot(
                     symbol=ticker,
+                    entry_date=signal_day,
                     setup_score=setup_score,
                     passed_gates=gates,
                     risk_flags=risk_flags,
-                    entry_price=t.price,
-                    atr=t.atr_14,
-                    levels={"sma_50": t.sma_50},
                     signal_context={
+                        "price": round(t.price, 4),
                         "return_20d_percentile": round(t.return_20d_percentile, 2),
                         "return_60d_percentile": round(t.return_60d_percentile, 2),
                         "return_252d_percentile": round(t.return_252d_percentile, 2),
@@ -197,15 +259,125 @@ class StratMomentum(Strategy):
                     },
                 )
             )
-        return results
+        return candidates
+
+
+class MomentumExitMonitor(ExitMonitor):
+    """Sell side. Deterministic exits only, first match wins, max-loss first
+    (universal floor takes precedence). Expected position keys: "symbol",
+    "entry_price" (actual fill, required), "high_water_mark" (optional until the
+    position store is settled — the trailing stop is skipped without it).
+
+    A held symbol with no indicator row is skipped (held): no price means no
+    deterministic verdict — a data gap for the agent's watchlist, not a rule.
+    """
+
+    def __init__(self):
+        super().__init__("momentum")
+
+    def run(self, positions: list[dict], signal_day: date) -> list[ExitSnapshot]:
+        if not positions:
+            return []
+        ts = pd.Timestamp(signal_day)
+        symbols = [p["symbol"] for p in positions]
+        rows = TechnicalsModel.price_levels(symbols, ts)
+        if rows.empty:
+            return []
+        max_loss_pct = float(self.profile["max_loss_pct"])
+
+        exits: list[ExitSnapshot] = []
+        for pos in positions:
+            symbol = pos["symbol"]
+            if symbol not in rows.index:
+                continue  # no market data — hold; agent territory
+            row = rows.loc[symbol]
+            close = float(row["close"])
+            entry_price = float(pos["entry_price"])
+
+            # 1. Universal max-loss floor. Cause-agnostic: budgeted loss is
+            # exceeded, exit regardless of thesis. Cannot be overridden.
+            pnl_pct = close / entry_price - 1
+            if pnl_pct <= -max_loss_pct:
+                exits.append(
+                    ExitSnapshot(
+                        symbol=symbol,
+                        exit_date=signal_day,
+                        exit_reason="MAXIMUM_LOSS_BREACH",
+                        exit_context={
+                            "rule": "universal_max_loss",
+                            "entry_price": entry_price,
+                            "close": close,
+                            "pnl_pct": round(pnl_pct, 4),
+                            "max_loss_pct": max_loss_pct,
+                        },
+                    )
+                )
+                continue
+
+            # 2. Trailing stop (thesis: the trend is intact). Ratchets off the
+            # high-water mark, so it can fire at a profit — which is why it is
+            # THESIS_INVALIDATED, not a loss breach.
+            hwm = pos.get("high_water_mark")
+            if hwm is not None:
+                drawdown = close / float(hwm) - 1
+                if drawdown <= -_TRAILING_STOP_DRAWDOWN:
+                    exits.append(
+                        ExitSnapshot(
+                            symbol=symbol,
+                            exit_date=signal_day,
+                            exit_reason="THESIS_INVALIDATED",
+                            exit_context={
+                                "rule": "trailing_stop",
+                                "high_water_mark": float(hwm),
+                                "close": close,
+                                "drawdown_from_high": round(drawdown, 4),
+                                "trailing_stop_drawdown": _TRAILING_STOP_DRAWDOWN,
+                            },
+                        )
+                    )
+                    continue
+
+            # 3. Primary uptrend broken — mirrors the entry screen's uptrend gate
+            # (price > 200-day). Below it, the momentum thesis no longer holds.
+            sma_200 = row["sma_200"]
+            if pd.notna(sma_200) and close < float(sma_200):
+                exits.append(
+                    ExitSnapshot(
+                        symbol=symbol,
+                        exit_date=signal_day,
+                        exit_reason="THESIS_INVALIDATED",
+                        exit_context={
+                            "rule": "primary_uptrend_broken",
+                            "close": close,
+                            "sma_200": float(sma_200),
+                        },
+                    )
+                )
+        return exits
+
 
 if __name__ == "__main__":
-    strat = StratMomentum()
     as_of = date.today()
-    packets = strat.run(as_of, tickers=get_stock_symbols(), persist=False, top_n=5)
-    print(f"{strat.NAME} ({as_of}): top {len(packets)} of the full passing set")
-    for p in packets:
+
+    screener = MomentumEntryScreener()
+    candidates = screener.run(get_stock_symbols(), as_of)
+    top = sorted(candidates, key=lambda c: c.setup_score, reverse=True)[:5]
+    print(f"momentum ({as_of}): {len(candidates)} candidates, top {len(top)}")
+    for c in top:
         print(
-            f"  {p['symbol']:6s} score={p['setup_score']:.3f} "
-            f"entry={p['entry_price']} gates={p['passed_gates']}"
+            f"  {c.symbol:6s} score={c.setup_score:.3f} "
+            f"price={c.signal_context['price']} gates={c.passed_gates}"
         )
+
+    if top:
+        # Exit-monitor smoke: pretend the top pick was bought at +25% above the
+        # current price so the max-loss rule fires, and once at the current
+        # price with an inflated high-water mark so the trailing stop fires.
+        monitor = MomentumExitMonitor()
+        px = top[0].signal_context["price"]
+        fake_positions = [
+            {"symbol": top[0].symbol, "entry_price": px * 1.25},
+            {"symbol": top[0].symbol, "entry_price": px, "high_water_mark": px * 1.30},
+        ]
+        for snap in monitor.run(fake_positions, as_of):
+            print(f"  exit {snap.symbol}: {snap.exit_reason} {snap.exit_context}")

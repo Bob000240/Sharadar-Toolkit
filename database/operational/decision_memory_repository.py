@@ -20,8 +20,7 @@ CREATE TABLE IF NOT EXISTS decision_memory (
     -- Identity and the original candidate shown to the agent.
     trade_id UUID PRIMARY KEY,
     symbol VARCHAR(16) NOT NULL,
-    decision_date DATE NOT NULL,
-    profile_id INT NOT NULL REFERENCES strategy_profiles(profile_id),
+    strategy_name VARCHAR(64) NOT NULL REFERENCES strategy_profiles(name),
     candidate_snapshot JSONB NOT NULL,
 
     -- Agent context recorded when the position opened.
@@ -43,9 +42,11 @@ CREATE TABLE IF NOT EXISTS decision_memory (
     realized_pnl_pct NUMERIC(10,6) NOT NULL,
     days_held INT NOT NULL,
     exit_reason VARCHAR(32) NOT NULL CHECK (
-        exit_reason IN ('MAXIMUM_LOSS_BREACH', 'THESIS_INVALIDATED')
+        exit_reason IN ('MAXIMUM_LOSS_BREACH', 'THESIS_INVALIDATED', 'CONCERNING_EVENTS')
     ),
-    exit_policy VARCHAR(64) NOT NULL,
+    -- Which specific rule fired within the reason, its trigger values, and (for
+    -- an agent exit) the cited source. Mirrors signal_context on the entry side.
+    exit_context JSONB,
 
     -- Embedding of the completed trade for similar-trade retrieval.
     -- The column is dimensionless until one embedding method is selected.
@@ -60,8 +61,8 @@ CREATE TABLE IF NOT EXISTS decision_memory (
 
 CREATE INDEX IF NOT EXISTS idx_decision_memory_symbol_exit
     ON decision_memory (symbol, exit_date DESC);
-CREATE INDEX IF NOT EXISTS idx_decision_memory_profile_exit
-    ON decision_memory (profile_id, exit_date DESC);
+CREATE INDEX IF NOT EXISTS idx_decision_memory_strategy_exit
+    ON decision_memory (strategy_name, exit_date DESC);
 """
 
 
@@ -78,7 +79,7 @@ def drop_table() -> None:
 def insert_trade(row: dict) -> UUID:
     """Insert one completed trade and return its existing trade_id."""
     row = dict(row)
-    for key in ("candidate_snapshot", "evidence", "tool_call_log"):
+    for key in ("candidate_snapshot", "evidence", "tool_call_log", "exit_context"):
         if isinstance(row.get(key), (dict, list)):
             row[key] = json.dumps(row[key])
     if isinstance(row.get("decision_embedding"), (list, tuple)):
@@ -86,19 +87,19 @@ def insert_trade(row: dict) -> UUID:
 
     sql = text("""
         INSERT INTO decision_memory
-            (trade_id, symbol, decision_date, profile_id, candidate_snapshot,
+            (trade_id, symbol, strategy_name, candidate_snapshot,
              conviction_tier, rationale, evidence, tool_call_log,
              entry_date, entry_price, position_size_pct,
              exit_date, exit_price, realized_pnl_pct, days_held,
-             exit_reason, exit_policy, decision_embedding)
+             exit_reason, exit_context, decision_embedding)
         VALUES
-            (:trade_id, :symbol, :decision_date, :profile_id,
+            (:trade_id, :symbol, :strategy_name,
              CAST(:candidate_snapshot AS jsonb),
              :conviction_tier, :rationale, CAST(:evidence AS jsonb),
              CAST(:tool_call_log AS jsonb),
              :entry_date, :entry_price, :position_size_pct,
              :exit_date, :exit_price, :realized_pnl_pct, :days_held,
-             :exit_reason, :exit_policy, CAST(:decision_embedding AS vector))
+             :exit_reason, CAST(:exit_context AS jsonb), CAST(:decision_embedding AS vector))
         RETURNING trade_id
     """)
     with get_connection().begin() as conn:
@@ -114,11 +115,11 @@ def get_trade(trade_id: UUID) -> dict | None:
 
 def get_prior_trades(
     before_date: date,
-    profile_id: int | None = None,
+    strategy_name: str | None = None,
     limit: int = 200,
 ) -> list[dict]:
     """Return only trades whose outcomes were known before before_date."""
-    if profile_id is None:
+    if strategy_name is None:
         sql = text("""
             SELECT * FROM decision_memory
             WHERE exit_date < :before_date
@@ -130,13 +131,13 @@ def get_prior_trades(
         sql = text("""
             SELECT * FROM decision_memory
             WHERE exit_date < :before_date
-              AND profile_id = :profile_id
+              AND strategy_name = :strategy_name
             ORDER BY exit_date DESC
             LIMIT :limit
         """)
         params = {
             "before_date": before_date,
-            "profile_id": profile_id,
+            "strategy_name": strategy_name,
             "limit": limit,
         }
 

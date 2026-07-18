@@ -1,7 +1,14 @@
+"""
+Macro facts, point-in-time. This module is a fact source, not a classifier: it
+emits levels, directional changes, and the release date of each input. Judgment
+about what those numbers mean (regime, risk posture) belongs to the agent, which
+reads these facts as context. Consistent with the rest of the signal layer —
+numbers out, no verdicts.
+"""
+
 import pandas as pd
 import numpy as np
 from dataclasses import dataclass, fields
-from typing import Literal
 
 import database.market.macro_repo as macro_repo
 
@@ -14,24 +21,6 @@ def _python_scalar(v):
 
 def _is_known(value) -> bool:
     return value is not None and not pd.isna(value)
-
-
-@dataclass(frozen=True)
-class MacroOverlay:
-    regime: Literal["supportive", "mixed", "hostile"]
-    hard_veto: bool
-    drivers: tuple[str, ...]
-    hazards: tuple[str, ...]
-    as_of: dict[str, str | None]
-
-    def to_dict(self) -> dict:
-        return {
-            "regime": self.regime,
-            "hard_veto": self.hard_veto,
-            "drivers": list(self.drivers),
-            "hazards": list(self.hazards),
-            "as_of": self.as_of,
-        }
 
 
 @dataclass
@@ -112,82 +101,28 @@ class MacroSnapshot:
             for name in names
         }
 
-    def overlay(self) -> MacroOverlay:
-        """Classify broad financial conditions without a false-precision score."""
-        drivers: list[str] = []
-        hazards: list[str] = []
-
-        if (
-            _is_known(self.spread_hy)
-            and _is_known(self.spread_hy_change_20d)
-            and self.spread_hy < 4.0
-            and self.spread_hy_change_20d <= 0
-        ):
-            drivers.append("benign_credit")
-        if (
-            _is_known(self.vix)
-            and _is_known(self.vix_change_20d)
-            and self.vix < 25
-            and self.vix_change_20d <= 0
-        ):
-            drivers.append("contained_volatility")
-        if (
-            _is_known(self.real_yield_change_20d)
-            and self.real_yield_change_20d < 0.25
-        ):
-            drivers.append("stable_real_yields")
-        if (
-            _is_known(self.claims_change_13w_pct)
-            and self.claims_change_13w_pct < 0.10
-        ):
-            drivers.append("stable_labor")
-
-        if _is_known(self.spread_hy) and self.spread_hy > 6.0:
-            hazards.append("credit_stress")
-        if (
-            _is_known(self.spread_hy_change_20d)
-            and self.spread_hy_change_20d > 0.75
-        ):
-            hazards.append("credit_widening_fast")
-        if _is_known(self.vix) and self.vix >= 30:
-            hazards.append("high_volatility")
-        if _is_known(self.vix_change_20d) and self.vix_change_20d > 7.5:
-            hazards.append("volatility_spike")
-        if (
-            _is_known(self.real_yield_change_20d)
-            and self.real_yield_change_20d > 0.50
-        ):
-            hazards.append("real_yield_shock")
-        if (
-            _is_known(self.claims_change_13w_pct)
-            and self.claims_change_13w_pct > 0.15
-        ):
-            hazards.append("claims_accelerating")
-
-        hard_veto = (
-            (_is_known(self.vix) and self.vix >= 40)
-            or (_is_known(self.spread_hy) and self.spread_hy >= 8.0)
-            or ("credit_stress" in hazards and "high_volatility" in hazards)
-        )
-        if (
-            hard_veto
-            or "credit_stress" in hazards
-            or "high_volatility" in hazards
-            or len(hazards) >= 2
-        ):
-            regime = "hostile"
-        elif not hazards and len(drivers) >= 3:
-            regime = "supportive"
-        else:
-            regime = "mixed"
-
-        return MacroOverlay(
-            regime=regime,
-            hard_veto=hard_veto,
-            drivers=tuple(drivers),
-            hazards=tuple(hazards),
-            as_of=self.as_of_dates(),
-        )
+    def to_dict(self) -> dict:
+        """The point-in-time facts, serialized for the agent. Numbers only, no
+        judgment. Unavailable values (NaN) become null; each input group carries
+        the date it was actually released."""
+        skip = {
+            "signal_day",
+            "rates_as_of",
+            "credit_as_of",
+            "inflation_as_of",
+            "unemployment_as_of",
+            "claims_as_of",
+            "volatility_as_of",
+        }
+        facts: dict = {}
+        for f in fields(self):
+            if f.name in skip:
+                continue
+            value = getattr(self, f.name)
+            facts[f.name] = value if _is_known(value) else None
+        facts["signal_day"] = pd.Timestamp(self.signal_day).date().isoformat()
+        facts["as_of"] = self.as_of_dates()
+        return facts
 
 
 class MacroModel:
@@ -274,5 +209,10 @@ class MacroModel:
             claims_as_of=r.get("claims_as_of"),
             volatility_as_of=r.get("volatility_as_of"),
         )
+
+
+def macro_facts(signal_day: pd.Timestamp) -> dict:
+    """Agent-facing entry point: current point-in-time macro facts as a dict."""
+    return MacroModel(pd.Timestamp(signal_day)).build_snapshot().to_dict()
 
 

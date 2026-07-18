@@ -2,10 +2,16 @@
 Daily incremental update. Run each market day after close.
 
     uv run python -m set_up.daily_update
+
+Fetches everything updated since the last load, across ALL tickers — Sharadar
+returns every ticker when no ticker filter is passed. No universe curation here:
+delisted and newly-listed names stay covered so backtests aren't survivorship-
+biased. The tradeable universe (get_stock_symbols) is narrowed point-in-time at
+screen time, not at load time.
 """
 
 import pandas as pd
-from set_up.config import get_stock_symbols, BENCHMARK_SYMBOLS
+from set_up.config import BENCHMARK_SYMBOLS
 from set_up.load_data import START_DATE
 from data.sharadar_data import SharadarData
 from data.macro_data import MacroData
@@ -24,142 +30,158 @@ import database.market.macro_repo as macro_repo
 TODAY = pd.Timestamp.today().strftime("%Y-%m-%d")
 
 
-def _batched(
-    sh_fn, repo_insert, label: str, symbols: list = None, batch_size: int = 50, **kwargs
-):
-    symbols = symbols if symbols is not None else get_stock_symbols()
-    total = 0
-    for i in range(0, len(symbols), batch_size):
-        batch = symbols[i : i + batch_size]
-        df = sh_fn(tickers=batch, **kwargs)
-        if not df.empty:
-            repo_insert(df)
-            total += len(df)
-    print(f"{label}: {total:,} rows upserted")
+def _lookback(days: int) -> str:
+    return (pd.Timestamp.today() - pd.Timedelta(days=days)).strftime("%Y-%m-%d")
 
 
-def _update_prices_split(
-    sh_fn, repo_insert, repo_get_latest_dates, label: str, symbols: list
-):
-    latest = repo_get_latest_dates(tickers=symbols)
-    last_by_ticker = (
-        dict(zip(latest["ticker"], latest["latest_date"])) if not latest.empty else {}
-    )
+def _fetch_all(sh_fn, repo_insert, label: str, start_date: str, **kwargs) -> None:
+    """Fetch every ticker with data in [start_date, TODAY] (no ticker filter) and
+    upsert. Sharadar paginates the full cross-section in one logical call."""
+    df = sh_fn(start_date=start_date, end_date=TODAY, **kwargs)
+    if df.empty:
+        print(f"{label}: up to date")
+        return
+    repo_insert(df)
+    print(f"{label}: {len(df):,} rows upserted")
 
-    # New tickers (no rows yet) → full backfill from inception.
-    new = [t for t in symbols if t not in last_by_ticker]
-    if new:
-        _batched(
-            sh_fn,
-            repo_insert,
-            f"{label} (new, backfill {len(new)} tickers)",
-            symbols=new,
-            start_date=START_DATE,
-            end_date=TODAY,
-        )
 
-    # Known tickers → group by their own next-needed date; skip any already current.
-    by_since: dict[str, list[str]] = {}
-    for t in symbols:
-        last = last_by_ticker.get(t)
-        if last is None:
-            continue
-        since = str(last + pd.Timedelta(days=1))
-        if since > TODAY:
-            continue  # already up to date — fetch nothing
-        by_since.setdefault(since, []).append(t)
-
-    for since, group in sorted(by_since.items()):
-        _batched(
-            sh_fn,
-            repo_insert,
-            f"{label} (from {since}, {len(group)} tickers)",
-            symbols=group,
-            start_date=since,
-            end_date=TODAY,
-        )
+# ── prices ────────────────────────────────────────────────────────────────────
 
 
 def update_equity_prices(sh: SharadarData):
-    _update_prices_split(
-        sh.equity_prices,
-        equity_repo.insert,
-        equity_repo.get_latest_dates,
-        "Equity prices",
-        get_stock_symbols(),
-    )
+    latest = equity_repo.get_latest_dates()
+    if latest.empty:
+        _fetch_all(sh.equity_prices, equity_repo.insert, "Equity prices", START_DATE)
+        return
+    latest["latest_date"] = pd.to_datetime(latest["latest_date"])
+
+    # Which tickers are still trading? A listed name gets a row every trading day,
+    # so anything more than ~10 days behind the most recent data is delisted/halted
+    # (no new data to fetch — and its old date must not drag the fetch back years).
+    max_date = latest["latest_date"].max()
+    active = latest[latest["latest_date"] >= max_date - pd.Timedelta(days=10)]
+
+    # Start from the OLDEST active latest date, not the newest, so a ticker that's
+    # behind isn't skipped — every active ticker gets every day after its own
+    # latest date. One no-filter fetch covers them all; ON CONFLICT DO NOTHING
+    # dedupes the recent days most tickers already have.
+    since = (active["latest_date"].min() + pd.Timedelta(days=1)).date()
+    if str(since) > TODAY:
+        print("Equity prices: up to date")
+        return
+    df = sh.equity_prices(start_date=str(since), end_date=TODAY)
+    if df.empty:
+        print("Equity prices: up to date")
+        return
+    equity_repo.insert(df)
+    print(f"Equity prices: {len(df):,} rows upserted (since {since})")
 
 
 def update_fund_prices(sh: SharadarData):
-    _update_prices_split(
-        sh.fund_prices,
-        fund_repo.insert,
-        fund_repo.get_latest_dates,
-        "Fund prices",
-        BENCHMARK_SYMBOLS,
+    # Funds are a fixed curated set (benchmark + sector ETFs), not the equity
+    # universe — fetch exactly those, incrementally.
+    latest = fund_repo.get_latest_dates(tickers=BENCHMARK_SYMBOLS)
+    since = (
+        str(latest["latest_date"].max() + pd.Timedelta(days=1))
+        if not latest.empty
+        else START_DATE
     )
+    if since > TODAY:
+        print("Fund prices: up to date")
+        return
+    df = sh.fund_prices(tickers=BENCHMARK_SYMBOLS, start_date=since, end_date=TODAY)
+    if df.empty:
+        print("Fund prices: up to date")
+        return
+    fund_repo.insert(df)
+    print(f"Fund prices: {len(df):,} rows upserted")
 
 
-def update_indicators():
-    latest = indicators_repo.get_latest_dates()
-    if latest.empty:
+# ── indicators (computed locally from equity_prices) ───────────────────────────
+
+
+def update_indicators(batch_size: int = 200):
+    ind_latest = indicators_repo.get_latest_dates()
+    if ind_latest.empty:
         print("Indicators: no base data")
         return
-    latest_date = latest["latest_date"].min()
-    lookback = pd.Timestamp(latest_date) - pd.Timedelta(days=400)
-    symbols = get_stock_symbols()
+    missing = indicators_repo.get_missing_price_dates()
+    if missing.empty:
+        print("Indicators: up to date")
+        return
+    missing["date"] = pd.to_datetime(missing["date"])
+    missing_dates = {
+        ticker: set(group["date"])
+        for ticker, group in missing.groupby("ticker", sort=False)
+    }
+    symbols = list(missing_dates)
+
     total = 0
-    for i in range(0, len(symbols), 50):
-        batch = symbols[i : i + 50]
-        df = equity_repo.get(tickers=batch, start_date=str(lookback.date()))
+    n_batches = -(-len(symbols) // batch_size)
+    for i in range(0, len(symbols), batch_size):
+        batch = symbols[i : i + batch_size]
+        earliest_gap = min(date for ticker in batch for date in missing_dates[ticker])
+        lookback = (earliest_gap - pd.Timedelta(days=400)).date()
+        df = equity_repo.get(tickers=batch, start_date=str(lookback))
         if df.empty:
             continue
-        parts = [
-            compute_indicators(g.reset_index(drop=True))
-            for _, g in df.sort_values(["ticker", "date"]).groupby("ticker", sort=False)
-        ]
-        ind_df = pd.concat(parts, ignore_index=True)
-        new_rows = ind_df[ind_df["date"] > latest_date]
+        new_parts = []
+        for tk, g in df.sort_values(["ticker", "date"]).groupby("ticker", sort=False):
+            ind = compute_indicators(g.reset_index(drop=True))
+            ind["date"] = pd.to_datetime(ind["date"])
+            wanted = ind["date"].isin(missing_dates[tk])
+            new_parts.append(ind[wanted])
+        new_rows = pd.concat(new_parts, ignore_index=True)
         if not new_rows.empty:
             indicators_repo.insert(new_rows)
             total += len(new_rows)
-    print(f"Indicators: {total:,} new rows")
+        print(f"  indicators batch {i // batch_size + 1}/{n_batches}  (+{total:,} rows)")
+    print(f"Indicators: {total:,} new rows ({len(symbols):,} tickers)")
+
+
+# ── fundamentals / ownership / events (all tickers, by date) ───────────────────
 
 
 def update_fundamentals(sh: SharadarData):
-    since = (pd.Timestamp.today() - pd.Timedelta(days=90)).strftime("%Y-%m-%d")
+    # calendardate lookback catches recent periods across all names (Sharadar's
+    # fundamentals endpoint filters on calendardate, not lastupdated).
+    since = _lookback(90)
     for dim in ("ARY", "ARQ", "ART"):
-        _batched(
+        _fetch_all(
             sh.fundamentals,
             fundamentals_repo.insert,
             f"Fundamentals {dim}",
+            since,
             dimension=dim,
-            start_date=since,
         )
 
 
 def update_insider(sh: SharadarData):
-    since = (pd.Timestamp.today() - pd.Timedelta(days=14)).strftime("%Y-%m-%d")
-    _batched(sh.insider_transactions, insider_repo.insert, "Insider", start_date=since)
+    _fetch_all(
+        sh.insider_transactions, insider_repo.insert, "Insider", _lookback(14)
+    )
 
 
 def update_institutional(sh: SharadarData):
-    since = (pd.Timestamp.today() - pd.Timedelta(days=60)).strftime("%Y-%m-%d")
-    _batched(
+    _fetch_all(
         sh.institutional_holdings,
         institutional_repo.insert,
         "Institutional",
-        start_date=since,
+        _lookback(60),
     )
 
 
 def update_events(sh: SharadarData):
-    since = (pd.Timestamp.today() - pd.Timedelta(days=7)).strftime("%Y-%m-%d")
-    _batched(sh.events, event_repo.insert, "Events", start_date=since)
+    _fetch_all(sh.events, event_repo.insert, "Events", _lookback(7))
+
+
+# ── descriptors + macro ────────────────────────────────────────────────────────
 
 
 def update_tickers(sh: SharadarData):
-    equities = sh.tickers(table="SEP", is_delisted=False)
+    # Include delisted — the descriptor table must know names that have died so
+    # historical/point-in-time lookups can resolve them.
+    equities = sh.tickers(table="SEP")
     funds = sh.tickers(table="SFP", tickers=BENCHMARK_SYMBOLS)
     df = pd.concat([equities, funds], ignore_index=True)
     tickers_repo.insert(df)

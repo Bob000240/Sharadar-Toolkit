@@ -53,13 +53,16 @@ def cap_bucket(marketcap) -> str | None:
 
 
 @lru_cache(maxsize=2)
-def get_stock_symbols(include_delisted: bool = False) -> list[str]:
-    """Return the database-backed tradeable stock universe for the current run."""
+def get_stock_symbols(
+    signal_day: "str | None" = None, include_delisted: bool = False
+) -> list[str]:
     import pandas as pd
+    from datetime import date
     from sqlalchemy import text
 
     from database.db_connection import get_connection
 
+    as_of = signal_day if signal_day is not None else date.today().isoformat()
     delisted_filter = "" if include_delisted else "AND t.isdelisted = 'N'"
     query = text(f"""
         SELECT t.ticker
@@ -73,7 +76,7 @@ def get_stock_symbols(include_delisted: bool = False) -> list[str]:
                 SELECT ep.close * ep.volume AS dollar_volume
                 FROM equity_prices AS ep
                 WHERE ep.ticker = t.ticker
-                  AND ep.date <= CURRENT_DATE
+                  AND ep.date <= :as_of
                   AND ep.close > 0
                   AND ep.volume >= 0
                 ORDER BY ep.date DESC
@@ -90,4 +93,6 @@ def get_stock_symbols(include_delisted: bool = False) -> list[str]:
           AND liquidity.median_dollar_volume_20d >= 5000000
         ORDER BY t.ticker
     """)
-    return pd.read_sql_query(query, get_connection())["ticker"].tolist()
+    return pd.read_sql_query(
+        query, get_connection(), params={"as_of": as_of}
+    )["ticker"].tolist()

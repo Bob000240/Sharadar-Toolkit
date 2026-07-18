@@ -109,8 +109,13 @@ def load_sharadar_bulk() -> None:
 
 
 def load_indicators() -> None:
-    print("Computing indicators from equity prices...")
-    symbols = get_stock_symbols()
+    # Compute indicators for EVERY ticker in equity_prices, incl. delisted — not
+    # get_stock_symbols() (the current tradeable universe). Curating here is what
+    # bakes survivorship bias into every backtest: delisted names would have
+    # prices but no technicals, so a historical screen never sees the losers.
+    # The universe is narrowed point-in-time at screen time instead.
+    print("Computing indicators from equity prices (all tickers)...")
+    symbols = equity_repo.get_latest_dates()["ticker"].tolist()
     total = 0
     for i in range(0, len(symbols), 50):
         batch = symbols[i : i + 50]
@@ -124,7 +129,7 @@ def load_indicators() -> None:
         ind_df = pd.concat(parts, ignore_index=True).replace([np.inf, -np.inf], np.nan)
         total += copy_insert("indicators", indicators_repo._COLUMNS, ind_df)
         print(f"  batch {i // 50 + 1}/{-(-len(symbols) // 50)}: {len(ind_df):,} rows")
-    print(f"  total: {total:,} rows")
+    print(f"  total: {total:,} rows  ({len(symbols):,} tickers)")
 
 
 # ── Stage 3: macro from FRED ─────────────────────────────────────────────
@@ -141,7 +146,8 @@ def main() -> None:
     print("=== QuorumNexus full load ===")
     print(f"Date range: {START_DATE} → {END_DATE}\n")
     load_sharadar_bulk()
-    print(f"\nUniverse: {len(get_stock_symbols())} stocks\n")
+    print(f"\nScreening universe (current, liquid): {len(get_stock_symbols())} stocks")
+    print("(indicators are computed for all tickers, not just this universe)\n")
     load_indicators()
     load_macro()
     print("\n=== Load complete ===")

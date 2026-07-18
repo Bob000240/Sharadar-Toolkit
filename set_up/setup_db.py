@@ -18,10 +18,7 @@ import database.market.institutional_repo as institutional_repo
 import database.market.event_repo as event_repo
 import database.market.macro_repo as macro_repo
 import database.operational.strategy_profiles_repository as profiles_repo
-import database.operational.screened_candidates_repository as candidates_repo
-import database.agent_memory.decision_memory_repository as memory_repo
-import database.outcomes.trade_outcomes_repository as outcomes_repo
-import database.outcomes.eval_repository as eval_repo
+import database.operational.decision_memory_repository as memory_repo
 
 
 def enable_pgvector():
@@ -32,12 +29,8 @@ def enable_pgvector():
 
 def drop_all():
     tables = [
-        "eval_results",
-        "trade_outcomes",
         "decision_memory",
-        "screened_candidates",
         "strategy_profiles",
-        "prefilter_profiles",
         "events",
         "institutional_holdings",
         "insider_transactions",
@@ -79,16 +72,8 @@ def create_all():
     # Operational
     profiles_repo.create_table()
     print("  created strategy_profiles")
-    candidates_repo.create_table()
-    print("  created screened_candidates")
-
-    # Agent memory + outcomes
     memory_repo.create_table()
     print("  created decision_memory")
-    outcomes_repo.create_table()
-    print("  created trade_outcomes")
-    eval_repo.create_table()
-    print("  created eval_results")
 
     print("All tables created")
 

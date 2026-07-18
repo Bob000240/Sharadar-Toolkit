@@ -1,5 +1,31 @@
 import pandas as pd
 import numpy as np
+from numpy.lib.stride_tricks import sliding_window_view
+
+
+def _rolling_trend(close: pd.Series, window: int = 60) -> tuple[pd.Series, pd.Series]:
+    """Vectorized 60-day trend quality: R^2 and annualized slope of a linear fit of
+    close vs time. Closed-form rolling regression — replaces per-window
+    rolling.apply(corrcoef/polyfit), which ran a Python callable on every window of
+    every ticker and dominated indicator runtime. Same values (leading window-1 rows
+    and any NaN-containing window are NaN, matching rolling(window).apply)."""
+    y = close.to_numpy(dtype=float)
+    n = y.size
+    r2 = np.full(n, np.nan)
+    slope = np.full(n, np.nan)
+    if n >= window:
+        w = sliding_window_view(y, window)          # (n-window+1, window)
+        t = np.arange(window, dtype=float)
+        tc = t - t.mean()
+        t_ss = float((tc * tc).sum())               # constant across windows
+        yc = w - w.mean(axis=1, keepdims=True)
+        cov_ty = (tc * yc).sum(axis=1)              # Sigma tc*yc
+        y_ss = (yc * yc).sum(axis=1)
+        last = w[:, -1]
+        with np.errstate(invalid="ignore", divide="ignore"):
+            r2[window - 1:] = np.where(y_ss > 0, cov_ty * cov_ty / (t_ss * y_ss), np.nan)
+            slope[window - 1:] = (cov_ty / t_ss) / last * 252.0
+    return pd.Series(r2, index=close.index), pd.Series(slope, index=close.index)
 
 
 def _sma(series: pd.Series, length: int) -> pd.Series:
@@ -113,21 +139,8 @@ def compute_indicators(df: pd.DataFrame):
     df["dollar_volume"] = df["close"] * df["volume"]
     df["dollar_volume_20d_avg"] = df["dollar_volume"].rolling(20).mean()
 
-    # Trend quality
-    df["r_squared_60d"] = (
-        df["close"]
-        .rolling(60)
-        .apply(lambda x: np.corrcoef(np.arange(60), x)[0, 1] ** 2, raw=True)
-    )
-
-    df["trend_slope_60d"] = (
-        df["close"]
-        .rolling(60)
-        .apply(
-            lambda x: np.polyfit(np.arange(60), x, 1)[0] / x[-1] * 252,
-            raw=True,
-        )
-    )
+    # Trend quality — vectorized 60-day linear-fit R^2 and annualized slope.
+    df["r_squared_60d"], df["trend_slope_60d"] = _rolling_trend(df["close"], 60)
 
     # Drawdown / breakout from recent high
     df["rolling_20d_high"] = df["close"].rolling(20).max()
