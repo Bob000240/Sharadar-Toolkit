@@ -1,62 +1,57 @@
+"""Point-in-time fundamental rows with optional fact attachments."""
+
 import numpy as np
 import pandas as pd
-from dataclasses import dataclass
 
 import database.market.fundamentals_repo as fundamentals_repo
-from data.signals._common import (
-    attach_sectors,
-    positive_inverse,
-    positive_ratio,
-    rank_within_sector,
-    safe_div,
-    safe_growth,
-)
+from data.signals.sig import Signals
 
 
-VALUE_YIELD_COLUMNS = (
-    "earnings_yield",
+# Direction-free sector percentiles. Strategies decide whether high or low is
+# desirable and how, if at all, to combine these facts.
+RANKED_METRICS = (
+    # value
+    "pe",
+    "pb",
+    "ps",
+    "evebitda",
     "fcf_yield",
-    "ebitda_yield",
-    "book_yield",
-    "sales_yield",
+    # profitability
+    "gross_profitability",
+    "roa",
+    "roic",
+    "cfo_to_assets",
+    "grossmargin",
+    "accrual_quality",
+    "roe",
+    # safety / leverage
+    "de",
+    "currentratio",
+    "interest_coverage",
+    "roe_volatility_5y",
+    "grossmargin_volatility_5y",
+    # five-year trend
+    "gross_profitability_change_5y",
+    "roa_change_5y",
+    "roic_change_5y",
+    "cfo_to_assets_change_5y",
+    "grossmargin_change_5y",
+    "de_change_5y",
+    # capital discipline
+    "net_payout_yield",
+    "share_dilution_5y",
+    # growth
+    "revenue_growth_yoy",
 )
 
-QUALITY_PILLAR_METRICS = {
-    "profitability": {
-        "gross_profitability": 1,
-        "roa": 1,
-        "roic": 1,
-        "cfo_to_assets": 1,
-        "grossmargin": 1,
-        "accrual_quality": 1,
-    },
-    "growth": {
-        "gross_profitability_change_5y": 1,
-        "roa_change_5y": 1,
-        "roic_change_5y": 1,
-        "cfo_to_assets_change_5y": 1,
-        "grossmargin_change_5y": 1,
-    },
-    "safety": {
-        "de": -1,
-        "currentratio": 1,
-        "interest_coverage": 1,
-        "roe_volatility_5y": -1,
-        "grossmargin_volatility_5y": -1,
-        "de_change_5y": -1,
-    },
-    "capital_discipline": {
-        "net_payout_yield": 1,
-        "share_dilution_5y": -1,
-    },
-}
+_VALUATION_MULTIPLES = ("pe", "pb", "ps", "evebitda")
 
-QUALITY_PILLAR_MINIMUMS = {
-    "profitability": 6,
-    "growth": 5,
-    "safety": 6,
-    "capital_discipline": 2,
-}
+GROWTH_COLUMNS = (
+    "revenue_growth_yoy",
+    "eps_growth_yoy",
+    "grossmargin_change_yoy",
+    "opinc_growth_yoy",
+)
 
 QUALITY_HISTORY_COLUMNS = (
     "gross_profitability_change_5y",
@@ -72,429 +67,275 @@ QUALITY_HISTORY_COLUMNS = (
     "complete_multi_year_history",
 )
 
-GROWTH_COLUMNS = (
-    "revenue_growth_yoy",
-    "eps_growth_yoy",
-    "grossmargin_change_yoy",
-    "opinc_growth_yoy",
-)
-
 QUALITY_HISTORY_TARGET_YEARS = 5
 MIN_QUALITY_HISTORY_OBSERVATIONS = 6
 
 
-def load_marketcaps(tickers: list[str], signal_day: pd.Timestamp) -> dict[str, float]:
-    """Load point-in-time market cap per ticker as of signal_day."""
-    df = fundamentals_repo.get_latest_rows(tickers, "ART", signal_day)
-    if df.empty:
-        return {}
-    return df.set_index("ticker")["marketcap"].to_dict()
+class FundamentalSignals(Signals):
+    """SQL-backed fundamental facts with opt-in DataFrame attachments."""
 
+    @classmethod
+    def get_signals(
+        cls,
+        tickers: list[str] | None,
+        signal_day: pd.Timestamp,
+    ) -> pd.DataFrame:
+        """Return latest point-in-time ART rows directly from the SQL repository."""
+        signal_day = pd.Timestamp(signal_day)
+        frame = fundamentals_repo.get_latest_rows(tickers, "ART", signal_day)
+        if frame.empty:
+            return pd.DataFrame().rename_axis("ticker")
 
-def calculate_growth(arq: pd.DataFrame) -> pd.DataFrame:
-    """Calculate latest year-over-year growth from quarterly fundamentals."""
-    rows = []
-    for ticker, group in arq.groupby("ticker"):
-        group = group.sort_values("datekey")
-        if len(group) < 5:
-            continue
+        frame = frame.set_index("ticker")
+        if tickers is not None:
+            ordered = [ticker for ticker in tickers if ticker in frame.index]
+            frame = frame.loc[ordered]
+        return frame.copy()
 
-        latest = group.iloc[-1]
-        prior = group.iloc[-5]
-        rows.append(
-            {
-                "ticker": ticker,
-                "revenue_growth_yoy": safe_growth(latest["revenue"], prior["revenue"]),
-                "eps_growth_yoy": safe_growth(latest["eps"], prior["eps"]),
-                "grossmargin_change_yoy": (
-                    latest["grossmargin"] - prior["grossmargin"]
-                    if pd.notna(latest["grossmargin"])
-                    and pd.notna(prior["grossmargin"])
-                    else np.nan
-                ),
-                "opinc_growth_yoy": safe_growth(latest["opinc"], prior["opinc"]),
-            }
+    @classmethod
+    def attach_growth(
+        cls,
+        frame: pd.DataFrame,
+        signal_day: pd.Timestamp,
+    ) -> pd.DataFrame:
+        """Attach latest year-over-year facts from quarterly fundamentals."""
+        frame = frame.copy()
+        signal_day = pd.Timestamp(signal_day)
+        growth_start = signal_day - pd.Timedelta(days=730)
+        arq = fundamentals_repo.get(
+            tickers=frame.index.astype(str).tolist(),
+            dimension="ARQ",
+            start_date=str(growth_start.date()),
+            end_date=str(signal_day.date()),
         )
+        if not arq.empty:
+            arq = arq[pd.to_datetime(arq["datekey"]) <= signal_day]
+        return frame.join(cls._calculate_growth(arq), how="left")
 
-    if not rows:
-        return pd.DataFrame(columns=list(GROWTH_COLUMNS))
-    return pd.DataFrame(rows).set_index("ticker")
-
-
-def _history_change(latest, prior, complete_history, column) -> float:
-    if prior is None or not complete_history:
-        return float("nan")
-    now, then = latest[column], prior[column]
-    if pd.isna(now) or pd.isna(then):
-        return float("nan")
-    return now - then
-
-
-def _history_volatility(
-    window: pd.DataFrame, complete_history: bool, column: str
-) -> float:
-    if not complete_history:
-        return np.nan
-    values = pd.to_numeric(window[column], errors="coerce").dropna()
-    if len(values) < 3:
-        return np.nan
-    return values.std(ddof=0)
-
-
-def calculate_history_features(ary: pd.DataFrame) -> pd.DataFrame:
-    if ary.empty:
-        return pd.DataFrame(columns=list(QUALITY_HISTORY_COLUMNS))
-
-    ary = ary.copy()
-    ary["gross_profitability"] = safe_div(ary["gp"], ary["assets"])
-    ary["cfo_to_assets"] = safe_div(ary["ncfo"], ary["assets"])
-    ary["calendardate"] = pd.to_datetime(ary["calendardate"])
-    ary["datekey"] = pd.to_datetime(ary["datekey"])
-    rows = []
-
-    for ticker, group in ary.groupby("ticker"):
-        group = group.dropna(subset=["calendardate"])
-        group = group.sort_values(["calendardate", "datekey"])
-        group = group.drop_duplicates("calendardate", keep="last")
-        if group.empty:
-            continue
-
-        latest = group.iloc[-1]
-        cutoff = latest["calendardate"] - pd.DateOffset(years=QUALITY_HISTORY_TARGET_YEARS)
-        window = group[group["calendardate"] >= cutoff]
-        prior = window.iloc[0] if not window.empty else None
-        observations = len(window)
-        complete_history = observations >= MIN_QUALITY_HISTORY_OBSERVATIONS
-        rows.append(
-            {
-                "ticker": ticker,
-                "gross_profitability_change_5y": _history_change(
-                    latest, prior, complete_history, "gross_profitability"
-                ),
-                "roa_change_5y": _history_change(
-                    latest, prior, complete_history, "roa"
-                ),
-                "roic_change_5y": _history_change(
-                    latest, prior, complete_history, "roic"
-                ),
-                "cfo_to_assets_change_5y": _history_change(
-                    latest, prior, complete_history, "cfo_to_assets"
-                ),
-                "grossmargin_change_5y": _history_change(
-                    latest, prior, complete_history, "grossmargin"
-                ),
-                "share_dilution_5y": (
-                    safe_growth(latest["shareswa"], prior["shareswa"])
-                    if prior is not None and complete_history
-                    else np.nan
-                ),
-                "de_change_5y": _history_change(latest, prior, complete_history, "de"),
-                "roe_volatility_5y": _history_volatility(
-                    window, complete_history, "roe"
-                ),
-                "grossmargin_volatility_5y": _history_volatility(
-                    window, complete_history, "grossmargin"
-                ),
-                "quality_history_observations": observations,
-                "complete_multi_year_history": complete_history,
-            }
+    @classmethod
+    def attach_history_features(
+        cls,
+        frame: pd.DataFrame,
+        signal_day: pd.Timestamp,
+    ) -> pd.DataFrame:
+        """Attach five-year change, volatility, and history-sufficiency facts."""
+        frame = frame.copy()
+        signal_day = pd.Timestamp(signal_day)
+        history_start = signal_day - pd.DateOffset(years=6)
+        annual_history = fundamentals_repo.get(
+            tickers=frame.index.astype(str).tolist(),
+            dimension="ARY",
+            start_date=str(history_start.date()),
+            end_date=str(signal_day.date()),
         )
+        if not annual_history.empty:
+            annual_history = annual_history[
+                pd.to_datetime(annual_history["datekey"]) <= signal_day
+            ]
+        history = cls._calculate_history_features(annual_history)
+        return frame.join(history, how="left")
 
-    return pd.DataFrame(rows).set_index("ticker")
+    @classmethod
+    def attach_ratios(cls, frame: pd.DataFrame) -> pd.DataFrame:
+        """Attach ratios that combine multiple stored fundamental columns."""
+        frame = frame.copy()
+        frame["fcf_yield"] = cls.positive_ratio(frame["fcf"], frame["marketcap"])
+        frame["interest_coverage"] = cls.safe_div(frame["ebit"], frame["intexp"])
+        frame["gross_profitability"] = cls.safe_div(frame["gp"], frame["assets"])
+        frame["cfo_to_assets"] = cls.safe_div(frame["ncfo"], frame["assets"])
+        frame["accrual_quality"] = cls.safe_div(
+            frame["ncfo"] - frame["netinc"],
+            frame["assets"],
+        )
+        payout = frame[["ncfcommon", "ncfdiv"]].sum(axis=1, min_count=1)
+        frame["net_payout_yield"] = cls.safe_div(
+            -payout,
+            frame["marketcap"].where(frame["marketcap"] > 0),
+        )
+        return frame
 
-
-def calculate_value(universe: pd.DataFrame) -> pd.DataFrame:
-    """Calculate valuation yields and their sector-relative composite."""
-    universe = universe.copy()
-    universe["earnings_yield"] = positive_inverse(universe["pe"])
-    universe["fcf_yield"] = positive_ratio(universe["fcf"], universe["marketcap"])
-    universe["ebitda_yield"] = positive_inverse(universe["evebitda"])
-    universe["book_yield"] = positive_inverse(universe["pb"])
-    universe["sales_yield"] = positive_inverse(universe["ps"])
-
-    percentile_series = []
-    for column in VALUE_YIELD_COLUMNS:
-        percentile = rank_within_sector(universe[column], universe["sector"])
-        percentile_series.append(percentile)
-
-    universe["valid_value_metrics"] = (
-        universe[list(VALUE_YIELD_COLUMNS)].notna().sum(axis=1)
-    )
-    universe["value_composite_score"] = pd.concat(percentile_series, axis=1).mean(
-        axis=1, skipna=True
-    )
-    universe.loc[universe["valid_value_metrics"] < 5, "value_composite_score"] = np.nan
-    universe["value_composite_percentile"] = rank_within_sector(
-        universe["value_composite_score"], universe["sector"]
-    )
-    return universe
-
-
-def calculate_quality(universe: pd.DataFrame, history: pd.DataFrame) -> pd.DataFrame:
-    """Calculate quality pillars and their sector-relative composite."""
-    universe = universe.join(history, how="left")
-    universe["interest_coverage"] = safe_div(universe["ebit"], universe["intexp"])
-    universe["gross_profitability"] = safe_div(universe["gp"], universe["assets"])
-    universe["cfo_to_assets"] = safe_div(universe["ncfo"], universe["assets"])
-    universe["accrual_quality"] = safe_div(
-        universe["ncfo"] - universe["netinc"], universe["assets"]
-    )
-    payout = universe[["ncfcommon", "ncfdiv"]].sum(axis=1, min_count=1)
-    universe["net_payout_yield"] = safe_div(
-        -payout, universe["marketcap"].where(universe["marketcap"] > 0)
-    )
-
-    universe["roe_percentile"] = universe["roe"].rank(pct=True, method="average") * 100
-    universe["de_percentile"] = rank_within_sector(universe["de"], universe["sector"])
-    universe["currentratio_percentile"] = rank_within_sector(
-        universe["currentratio"], universe["sector"]
-    )
-
-    for pillar, metrics in QUALITY_PILLAR_METRICS.items():
-        metric_percentiles = {}
-        for metric, direction in metrics.items():
-            values = universe.get(
-                metric, pd.Series(np.nan, index=universe.index, dtype=float)
+    @classmethod
+    def attach_sector_ranks(cls, frame: pd.DataFrame) -> pd.DataFrame:
+        """Attach `{metric}_sector_pct` for every direction-free ranked metric."""
+        if "sector" not in frame.columns:
+            raise ValueError(
+                "sector is required; call FundamentalSignals.attach_sectors() first"
             )
-            metric_percentiles[metric] = rank_within_sector(
-                values * direction, universe["sector"]
+
+        frame = frame.copy()
+        for metric in RANKED_METRICS:
+            values = frame.get(
+                metric,
+                pd.Series(np.nan, index=frame.index, dtype=float),
             )
-        score_column = f"quality_{pillar}_score"
-        percentile_frame = pd.DataFrame(metric_percentiles, index=universe.index)
-        valid_count = percentile_frame.notna().sum(axis=1)
-        score = percentile_frame.mean(axis=1, skipna=True)
-        universe[score_column] = score.where(
-            valid_count >= QUALITY_PILLAR_MINIMUMS[pillar]
-        )
+            if metric in _VALUATION_MULTIPLES:
+                values = pd.to_numeric(values, errors="coerce").where(
+                    lambda value: value > 0
+                )
+            frame[f"{metric}_sector_pct"] = cls.rank_within_sector(
+                values,
+                frame["sector"],
+            )
+        return frame
 
-    pillar_columns = [f"quality_{p}_score" for p in QUALITY_PILLAR_METRICS.keys()]
-    universe["valid_quality_pillars"] = universe[pillar_columns].notna().sum(axis=1)
-    universe["quality_composite_score"] = universe[pillar_columns].mean(
-        axis=1, skipna=True
+    @classmethod
+    def _calculate_growth(cls, arq: pd.DataFrame) -> pd.DataFrame:
+        rows = []
+        for ticker, group in arq.groupby("ticker"):
+            group = group.sort_values("datekey")
+            if len(group) < 5:
+                continue
+
+            latest = group.iloc[-1]
+            prior = group.iloc[-5]
+            rows.append(
+                {
+                    "ticker": ticker,
+                    "revenue_growth_yoy": cls.safe_growth(
+                        latest["revenue"],
+                        prior["revenue"],
+                    ),
+                    "eps_growth_yoy": cls.safe_growth(
+                        latest["eps"],
+                        prior["eps"],
+                    ),
+                    "grossmargin_change_yoy": (
+                        latest["grossmargin"] - prior["grossmargin"]
+                        if pd.notna(latest["grossmargin"])
+                        and pd.notna(prior["grossmargin"])
+                        else np.nan
+                    ),
+                    "opinc_growth_yoy": cls.safe_growth(
+                        latest["opinc"],
+                        prior["opinc"],
+                    ),
+                }
+            )
+
+        if not rows:
+            return pd.DataFrame(columns=list(GROWTH_COLUMNS))
+        return pd.DataFrame(rows).set_index("ticker")
+
+    @classmethod
+    def _calculate_history_features(cls, ary: pd.DataFrame) -> pd.DataFrame:
+        if ary.empty:
+            return pd.DataFrame(columns=list(QUALITY_HISTORY_COLUMNS))
+
+        ary = ary.copy()
+        ary["gross_profitability"] = cls.safe_div(ary["gp"], ary["assets"])
+        ary["cfo_to_assets"] = cls.safe_div(ary["ncfo"], ary["assets"])
+        ary["calendardate"] = pd.to_datetime(ary["calendardate"])
+        ary["datekey"] = pd.to_datetime(ary["datekey"])
+        rows = []
+
+        for ticker, group in ary.groupby("ticker"):
+            group = group.dropna(subset=["calendardate"])
+            group = group.sort_values(["calendardate", "datekey"])
+            group = group.drop_duplicates("calendardate", keep="last")
+            if group.empty:
+                continue
+
+            latest = group.iloc[-1]
+            cutoff = latest["calendardate"] - pd.DateOffset(
+                years=QUALITY_HISTORY_TARGET_YEARS
+            )
+            window = group[group["calendardate"] >= cutoff]
+            prior = window.iloc[0] if not window.empty else None
+            observations = len(window)
+            complete_history = observations >= MIN_QUALITY_HISTORY_OBSERVATIONS
+            rows.append(
+                {
+                    "ticker": ticker,
+                    "gross_profitability_change_5y": cls._history_change(
+                        latest,
+                        prior,
+                        complete_history,
+                        "gross_profitability",
+                    ),
+                    "roa_change_5y": cls._history_change(
+                        latest,
+                        prior,
+                        complete_history,
+                        "roa",
+                    ),
+                    "roic_change_5y": cls._history_change(
+                        latest,
+                        prior,
+                        complete_history,
+                        "roic",
+                    ),
+                    "cfo_to_assets_change_5y": cls._history_change(
+                        latest,
+                        prior,
+                        complete_history,
+                        "cfo_to_assets",
+                    ),
+                    "grossmargin_change_5y": cls._history_change(
+                        latest,
+                        prior,
+                        complete_history,
+                        "grossmargin",
+                    ),
+                    "share_dilution_5y": (
+                        cls.safe_growth(latest["shareswa"], prior["shareswa"])
+                        if prior is not None and complete_history
+                        else np.nan
+                    ),
+                    "de_change_5y": cls._history_change(
+                        latest,
+                        prior,
+                        complete_history,
+                        "de",
+                    ),
+                    "roe_volatility_5y": cls._history_volatility(
+                        window,
+                        complete_history,
+                        "roe",
+                    ),
+                    "grossmargin_volatility_5y": cls._history_volatility(
+                        window,
+                        complete_history,
+                        "grossmargin",
+                    ),
+                    "quality_history_observations": observations,
+                    "complete_multi_year_history": complete_history,
+                }
+            )
+
+        return pd.DataFrame(rows).set_index("ticker")
+
+    @staticmethod
+    def _history_change(latest, prior, complete_history, column) -> float:
+        if prior is None or not complete_history:
+            return float("nan")
+        now, then = latest[column], prior[column]
+        if pd.isna(now) or pd.isna(then):
+            return float("nan")
+        return now - then
+
+    @staticmethod
+    def _history_volatility(
+        window: pd.DataFrame,
+        complete_history: bool,
+        column: str,
+    ) -> float:
+        if not complete_history:
+            return np.nan
+        values = pd.to_numeric(window[column], errors="coerce").dropna()
+        if len(values) < 3:
+            return np.nan
+        return values.std(ddof=0)
+
+
+if __name__ == "__main__":
+    as_of = pd.Timestamp("2024-06-30")
+    signals = FundamentalSignals.get_signals(
+        ["AAPL", "MSFT", "GOOG", "AMZN", "TSLA"],
+        as_of,
     )
-    # Composite requires at least these three pillars to be non-null.
-    required_pillars = ["profitability", "growth", "safety", "capital_discipline"]
-    required = [f"quality_{p}_score" for p in required_pillars]
-    universe.loc[universe[required].isna().any(axis=1), "quality_composite_score"] = (
-        np.nan
-    )
-    universe["quality_composite_percentile"] = rank_within_sector(
-        universe["quality_composite_score"], universe["sector"]
-    )
-    return universe
-
-
-def build_fundamental_signals(
-    tickers: list[str] | None, signal_day: pd.Timestamp
-) -> pd.DataFrame:
-    """Build point-in-time growth, value, and quality signals."""
-    signal_day = pd.Timestamp(signal_day)
-    universe = fundamentals_repo.get_latest_rows(None, "ART", signal_day)
-    if universe.empty:
-        return pd.DataFrame()
-
-    universe = attach_sectors(universe.set_index("ticker"))
-
-    history_start = signal_day - pd.DateOffset(years=6)
-    annual_history = fundamentals_repo.get(
-        tickers=None,
-        dimension="ARY",
-        start_date=str(history_start.date()),
-        end_date=str(signal_day.date()),
-    )
-    annual_history = annual_history[
-        pd.to_datetime(annual_history["datekey"]) <= signal_day
-    ]
-    history = calculate_history_features(annual_history)
-
-    universe = calculate_value(universe)
-    universe = calculate_quality(universe, history)
-
-    growth_start = signal_day - pd.Timedelta(days=730)
-    arq = fundamentals_repo.get(
-        tickers=universe.index.astype(str).tolist(),
-        dimension="ARQ",
-        start_date=str(growth_start.date()),
-        end_date=str(signal_day.date()),
-    )
-    arq = arq[pd.to_datetime(arq["datekey"]) <= signal_day]
-    growth = calculate_growth(arq)
-    growth["revenue_growth_percentile"] = (
-        growth["revenue_growth_yoy"].rank(pct=True) * 100
-    )
-    universe = universe.join(growth, how="left")
-
-    if tickers is None:
-        return universe
-    present = [ticker for ticker in tickers if ticker in universe.index]
-    return universe.loc[present]
-
-
-@dataclass
-class FundamentalsSnapshot:
-    ticker: str
-    signal_day: pd.Timestamp
-
-    sector: str
-    marketcap: float
-
-    earnings_yield: float
-    fcf_yield: float
-    ebitda_yield: float
-    book_yield: float
-    sales_yield: float
-    valid_value_metrics: int
-    value_composite_score: float
-    value_composite_percentile: float
-
-    quality_profitability_score: float
-    quality_growth_score: float
-    quality_safety_score: float
-    quality_capital_discipline_score: float
-    valid_quality_pillars: int
-    quality_composite_score: float
-    quality_composite_percentile: float
-
-    roe: float
-    roa: float
-    roic: float
-    de: float
-    currentratio: float
-    roe_percentile: float
-    de_percentile: float
-    currentratio_percentile: float
-
-    ncfo: float
-    fcf: float
-    netinc: float
-    netmargin: float
-    grossmargin: float
-    gross_profitability: float
-    cfo_to_assets: float
-    accrual_quality: float
-    interest_coverage: float
-    net_payout_yield: float
-    divyield: float
-
-    revenue_growth_yoy: float
-    eps_growth_yoy: float
-    grossmargin_change_yoy: float
-    opinc_growth_yoy: float
-    revenue_growth_percentile: float
-
-    gross_profitability_change_5y: float
-    roa_change_5y: float
-    roic_change_5y: float
-    cfo_to_assets_change_5y: float
-    grossmargin_change_5y: float
-    share_dilution_5y: float
-    de_change_5y: float
-    roe_volatility_5y: float
-    grossmargin_volatility_5y: float
-    quality_history_observations: int
-    complete_multi_year_history: bool
-
-    def risk_flags(self) -> dict[str, bool]:
-        return fundamental_risk_flags(self)
-
-
-class FundamentalsModel:
-    def __init__(self, signal_day: pd.Timestamp, tickers: list[str] | None):
-        self.signal_day = pd.Timestamp(signal_day)
-        self.tickers = tickers
-        self.data = None
-        self.load_data()
-
-    def load_data(self) -> None:
-        self.data = build_fundamental_signals(self.tickers, self.signal_day)
-
-    def get(self, ticker: str, col: str):
-        if ticker not in self.data.index:
-            raise ValueError(f"Ticker {ticker} not in fundamentals data")
-        if col not in self.data.columns:
-            raise ValueError(f"Column {col} not in fundamentals data")
-        return self.data.loc[ticker, col]
-
-    def build_snapshot(self, ticker: str) -> FundamentalsSnapshot:
-        if ticker not in self.data.index:
-            raise ValueError(f"Ticker {ticker} not in fundamentals data")
-        row = self.data.loc[ticker]
-        return FundamentalsSnapshot(
-            ticker=ticker,
-            signal_day=self.signal_day,
-            sector=row["sector"],
-            marketcap=row["marketcap"],
-            earnings_yield=row["earnings_yield"],
-            fcf_yield=row["fcf_yield"],
-            ebitda_yield=row["ebitda_yield"],
-            book_yield=row["book_yield"],
-            sales_yield=row["sales_yield"],
-            valid_value_metrics=row["valid_value_metrics"],
-            value_composite_score=row["value_composite_score"],
-            value_composite_percentile=row["value_composite_percentile"],
-            quality_profitability_score=row["quality_profitability_score"],
-            quality_growth_score=row["quality_growth_score"],
-            quality_safety_score=row["quality_safety_score"],
-            quality_capital_discipline_score=row[
-                "quality_capital_discipline_score"
-            ],
-            valid_quality_pillars=row["valid_quality_pillars"],
-            quality_composite_score=row["quality_composite_score"],
-            quality_composite_percentile=row["quality_composite_percentile"],
-            roe=row["roe"],
-            roa=row["roa"],
-            roic=row["roic"],
-            de=row["de"],
-            currentratio=row["currentratio"],
-            roe_percentile=row["roe_percentile"],
-            de_percentile=row["de_percentile"],
-            currentratio_percentile=row["currentratio_percentile"],
-            ncfo=row["ncfo"],
-            fcf=row["fcf"],
-            netinc=row["netinc"],
-            netmargin=row["netmargin"],
-            grossmargin=row["grossmargin"],
-            gross_profitability=row["gross_profitability"],
-            cfo_to_assets=row["cfo_to_assets"],
-            accrual_quality=row["accrual_quality"],
-            interest_coverage=row["interest_coverage"],
-            net_payout_yield=row["net_payout_yield"],
-            divyield=row["divyield"],
-            revenue_growth_yoy=row["revenue_growth_yoy"],
-            eps_growth_yoy=row["eps_growth_yoy"],
-            grossmargin_change_yoy=row["grossmargin_change_yoy"],
-            opinc_growth_yoy=row["opinc_growth_yoy"],
-            revenue_growth_percentile=row["revenue_growth_percentile"],
-            gross_profitability_change_5y=row["gross_profitability_change_5y"],
-            roa_change_5y=row["roa_change_5y"],
-            roic_change_5y=row["roic_change_5y"],
-            cfo_to_assets_change_5y=row["cfo_to_assets_change_5y"],
-            grossmargin_change_5y=row["grossmargin_change_5y"],
-            share_dilution_5y=row["share_dilution_5y"],
-            de_change_5y=row["de_change_5y"],
-            roe_volatility_5y=row["roe_volatility_5y"],
-            grossmargin_volatility_5y=row["grossmargin_volatility_5y"],
-            quality_history_observations=row["quality_history_observations"],
-            complete_multi_year_history=row["complete_multi_year_history"],
-        )
-
-
-def fundamental_risk_flags(snap: FundamentalsSnapshot) -> dict[str, bool]:
-    """Return the fundamental risk gates consumed by the strategies."""
-    return {
-        "high_leverage": snap.de > 2.0,
-        "negative_fcf": snap.fcf < 0,
-        "losing_money": snap.netmargin < 0,
-        "revenue_declining": snap.revenue_growth_yoy < -0.05,
-        "eps_declining": snap.eps_growth_yoy < -0.10,
-        "interest_at_risk": 0 < snap.interest_coverage < 1.5,
-        "extreme_sector_leverage": snap.de_percentile >= 90,
-        "weak_sector_liquidity": snap.currentratio_percentile < 10,
-        "negative_ocf": snap.ncfo < 0,
-        "cash_burn": snap.ncfo < 0 and snap.fcf < 0,
-        "combined_deterioration": (
-            snap.revenue_growth_yoy < -0.10
-            and snap.grossmargin_change_yoy < 0
-            and snap.opinc_growth_yoy < 0
-        ),
-    }
+    signals = FundamentalSignals.attach_sectors(signals)
+    signals = FundamentalSignals.attach_history_features(signals, as_of)
+    signals = FundamentalSignals.attach_ratios(signals)
+    signals = FundamentalSignals.attach_growth(signals, as_of)
+    signals = FundamentalSignals.attach_sector_ranks(signals)
+    print(signals)

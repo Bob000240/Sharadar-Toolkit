@@ -24,7 +24,7 @@ import pandas as pd
 import nasdaqdatalink
 from dotenv import load_dotenv
 
-from set_up.config import get_stock_symbols, BENCHMARK_SYMBOLS
+from set_up.config import BENCHMARK_SYMBOLS
 from data.macro_data import MacroData
 from data.indicators import compute_indicators
 
@@ -65,7 +65,8 @@ _CHUNK = 200_000
 
 
 def _export(code: str, dest: str, date_field: str | None, tickers: list | None) -> list[str]:
-    # Datatables bulk export (qopts.export) runs on the table-API entitlement,    filters: dict = {}
+    # Datatables bulk export (qopts.export) runs on the table-API entitlement.
+    filters: dict = {}
     if date_field:
         filters[date_field] = {"gte": START_DATE}
     if tickers:
@@ -109,11 +110,7 @@ def load_sharadar_bulk() -> None:
 
 
 def load_indicators() -> None:
-    # Compute indicators for EVERY ticker in equity_prices, incl. delisted — not
-    # get_stock_symbols() (the current tradeable universe). Curating here is what
-    # bakes survivorship bias into every backtest: delisted names would have
-    # prices but no technicals, so a historical screen never sees the losers.
-    # The universe is narrowed point-in-time at screen time instead.
+    # Compute indicators for EVERY ticker in equity_prices, incl. delisted
     print("Computing indicators from equity prices (all tickers)...")
     symbols = equity_repo.get_latest_dates()["ticker"].tolist()
     total = 0
@@ -146,8 +143,6 @@ def main() -> None:
     print("=== QuorumNexus full load ===")
     print(f"Date range: {START_DATE} → {END_DATE}\n")
     load_sharadar_bulk()
-    print(f"\nScreening universe (current, liquid): {len(get_stock_symbols())} stocks")
-    print("(indicators are computed for all tickers, not just this universe)\n")
     load_indicators()
     load_macro()
     print("\n=== Load complete ===")

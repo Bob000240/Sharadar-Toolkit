@@ -1,5 +1,3 @@
-from functools import lru_cache
-
 BENCHMARK_SYMBOLS = [
     "SPY",
     "XLK",
@@ -50,49 +48,3 @@ def cap_bucket(marketcap) -> str | None:
     if marketcap >= _MID_CAP_FLOOR:
         return "mid"
     return "small"
-
-
-@lru_cache(maxsize=2)
-def get_stock_symbols(
-    signal_day: "str | None" = None, include_delisted: bool = False
-) -> list[str]:
-    import pandas as pd
-    from datetime import date
-    from sqlalchemy import text
-
-    from database.db_connection import get_connection
-
-    as_of = signal_day if signal_day is not None else date.today().isoformat()
-    delisted_filter = "" if include_delisted else "AND t.isdelisted = 'N'"
-    query = text(f"""
-        SELECT t.ticker
-        FROM tickers AS t
-        JOIN LATERAL (
-            SELECT
-                PERCENTILE_CONT(0.5) WITHIN GROUP (
-                    ORDER BY prices.dollar_volume
-                ) AS median_dollar_volume_20d
-            FROM (
-                SELECT ep.close * ep.volume AS dollar_volume
-                FROM equity_prices AS ep
-                WHERE ep.ticker = t.ticker
-                  AND ep.date <= :as_of
-                  AND ep.close > 0
-                  AND ep.volume >= 0
-                ORDER BY ep.date DESC
-                LIMIT 20
-            ) AS prices
-            HAVING COUNT(*) >= 15
-        ) AS liquidity ON TRUE
-        WHERE t.table_code = 'SEP'
-          {delisted_filter}
-          AND t.currency = 'USD'
-          AND t.exchange IN ('NYSE', 'NASDAQ')
-          AND t.category LIKE 'Domestic Common Stock%'
-          AND t.category NOT LIKE '%Secondary%'
-          AND liquidity.median_dollar_volume_20d >= 5000000
-        ORDER BY t.ticker
-    """)
-    return pd.read_sql_query(
-        query, get_connection(), params={"as_of": as_of}
-    )["ticker"].tolist()

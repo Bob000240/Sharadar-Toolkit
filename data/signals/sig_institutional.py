@@ -1,151 +1,163 @@
+"""Point-in-time institutional holding rows and optional holding facts."""
+
+from __future__ import annotations
+
+import numpy as np
 import pandas as pd
-from dataclasses import dataclass
 
 import database.market.institutional_repo as institutional_repo
-
-# 13F filings are due 45 days after quarter end — use this offset for point-in-time safety.
-_FILING_DELAY_DAYS = 45
-_SHARE_TYPE = "SHR"
+from data.signals.sig import Signals
 
 
-@dataclass
-class InstitutionalSnapshot:
-    ticker: str
-    signal_day: pd.Timestamp
-    quarter_end: pd.Timestamp | None
-    assumed_available_from: pd.Timestamp | None
-    stale_days: int | None
-    availability_is_estimated: bool
+# 13F reports are due 45 days after quarter end. The database does not retain
+# each filing's actual accepted timestamp, so this conservative availability
+# estimate prevents future quarter holdings from leaking into a signal day.
+FILING_DELAY_DAYS = 45
+SHARE_SECURITY_TYPE = "SHR"
 
-    # Most recent conservatively available reported quarter
-    total_holders: int
-    total_value_b: float  # USD billions
-    total_units: float  # shares held
-
-    # Quarter-over-quarter changes
-    holders_change: int
-    value_change_pct: float  # NaN if no prior quarter
-    units_change_pct: float  # NaN if no prior quarter
-    new_holders: int  # institutions that opened new positions
-    closed_positions: int  # institutions that fully exited
-
-    def risk_flags(self) -> dict[str, bool]:
-        return {
-            "stale_filing": self.stale_days is not None and self.stale_days > 150,
-            "holder_exodus": self.closed_positions >= 5,
-            "heavy_selling": self.value_change_pct is not None
-            and not pd.isna(self.value_change_pct)
-            and self.value_change_pct < -0.20,
-        }
+HOLDING_FACT_COLUMNS = (
+    "quarter_end",
+    "assumed_available_from",
+    "stale_days",
+    "availability_is_estimated",
+    "total_holders",
+    "total_value_b",
+    "total_units",
+    "holders_change",
+    "value_change_pct",
+    "units_change_pct",
+    "new_holders",
+    "closed_positions",
+)
 
 
-class InstitutionalModel:
-    def __init__(
-        self,
+class InstitutionalSignals(Signals):
+    """SQL-backed 13F rows with opt-in ticker-level fact attachments."""
+
+    @classmethod
+    def get_signals(
+        cls,
+        tickers: list[str] | None,
         signal_day: pd.Timestamp,
-        tickers: list[str],
-    ):
-        self.signal_day = signal_day
-        self.tickers = tickers
-        self.data: dict[str, pd.DataFrame] = {}
-        self.load_data()
-
-    def load_data(self) -> None:
-        # 45-day filing delay: latest visible quarter end is signal_day - 45d
-        cutoff = self.signal_day - pd.Timedelta(days=_FILING_DELAY_DAYS)
-        # Fetch ~2 quarters of history to compute QoQ changes
-        start = cutoff - pd.Timedelta(days=200)
-        df = institutional_repo.get(
-            tickers=self.tickers,
+        history_days: int = 200,
+    ) -> pd.DataFrame:
+        """Return raw holdings from conservatively available report quarters."""
+        signal_day = pd.Timestamp(signal_day)
+        available_quarter_cutoff = signal_day - pd.Timedelta(
+            days=FILING_DELAY_DAYS
+        )
+        start = available_quarter_cutoff - pd.Timedelta(days=history_days)
+        frame = institutional_repo.get(
+            tickers=tickers,
             start_date=str(start.date()),
-            end_date=str(cutoff.date()),
+            end_date=str(available_quarter_cutoff.date()),
         )
-        if df.empty:
-            return
-        df["calendardate"] = pd.to_datetime(df["calendardate"])
-        df = df[df["securitytype"] == _SHARE_TYPE]
-        for tkr, grp in df.groupby("ticker"):
-            self.data[tkr] = grp.reset_index(drop=True)
+        if frame.empty:
+            return frame.copy()
 
-    def _agg(self, tkr: str) -> dict:
-        _empty = dict(
-            quarter_end=None,
-            assumed_available_from=None,
-            stale_days=None,
-            availability_is_estimated=True,
-            total_holders=0,
-            total_value_b=0.0,
-            total_units=0.0,
-            holders_change=0,
-            value_change_pct=float("nan"),
-            units_change_pct=float("nan"),
-            new_holders=0,
-            closed_positions=0,
+        frame = frame.copy()
+        frame["calendardate"] = pd.to_datetime(frame["calendardate"])
+        return frame
+
+    @classmethod
+    def attach_holding_facts(
+        cls,
+        frame: pd.DataFrame,
+        tickers: list[str],
+        signal_day: pd.Timestamp,
+    ) -> pd.DataFrame:
+        """Aggregate raw 13F rows into latest-quarter and QoQ facts."""
+        signal_day = pd.Timestamp(signal_day)
+        if frame.empty:
+            grouped: dict[str, pd.DataFrame] = {}
+        else:
+            holdings = frame.copy()
+            holdings["calendardate"] = pd.to_datetime(holdings["calendardate"])
+            holdings = holdings[holdings["securitytype"] == SHARE_SECURITY_TYPE]
+            grouped = {
+                str(ticker): group
+                for ticker, group in holdings.groupby("ticker", sort=False)
+            }
+
+        rows = [
+            {
+                "ticker": ticker,
+                **cls._aggregate_ticker(grouped.get(str(ticker)), signal_day),
+            }
+            for ticker in tickers
+        ]
+        if not rows:
+            return pd.DataFrame(columns=HOLDING_FACT_COLUMNS).rename_axis("ticker")
+        return pd.DataFrame(rows).set_index("ticker")
+
+    @classmethod
+    def _aggregate_ticker(
+        cls,
+        frame: pd.DataFrame | None,
+        signal_day: pd.Timestamp,
+    ) -> dict:
+        empty = {
+            "quarter_end": None,
+            "assumed_available_from": None,
+            "stale_days": None,
+            "availability_is_estimated": True,
+            "total_holders": 0,
+            "total_value_b": 0.0,
+            "total_units": 0.0,
+            "holders_change": 0,
+            "value_change_pct": np.nan,
+            "units_change_pct": np.nan,
+            "new_holders": 0,
+            "closed_positions": 0,
+        }
+        if frame is None or frame.empty:
+            return empty
+
+        quarters = sorted(frame["calendardate"].dropna().unique())
+        if not quarters:
+            return empty
+
+        latest_quarter = pd.Timestamp(quarters[-1])
+        current = frame[frame["calendardate"] == latest_quarter]
+        current_holders = current["investorname"].nunique()
+        current_value = float(
+            pd.to_numeric(current["value"], errors="coerce").fillna(0).sum()
         )
-        grp = self.data.get(tkr)
-        if grp is None or grp.empty:
-            return _empty
-
-        quarters = sorted(grp["calendardate"].unique())
-        if len(quarters) == 0:
-            return _empty
-
-        latest_q = pd.Timestamp(quarters[-1])
-        available_from = latest_q + pd.Timedelta(days=_FILING_DELAY_DAYS)
-        stale_days = int((self.signal_day.normalize() - latest_q).days)
-        curr = grp[grp["calendardate"] == latest_q]
-
-        curr_holders = curr["investorname"].nunique()
-        curr_value = float(curr["value"].fillna(0).sum())
-        curr_units = float(curr["units"].fillna(0).sum())
-
-        if len(quarters) >= 2:
-            prior_q = quarters[-2]
-            prev = grp[grp["calendardate"] == prior_q]
-
-            prev_holders = prev["investorname"].nunique()
-            prev_value = float(prev["value"].fillna(0).sum())
-            prev_units = float(prev["units"].fillna(0).sum())
-
-            curr_names = set(curr["investorname"])
-            prev_names = set(prev["investorname"])
-
-            return dict(
-                quarter_end=latest_q,
-                assumed_available_from=available_from,
-                stale_days=stale_days,
-                availability_is_estimated=True,
-                total_holders=curr_holders,
-                total_value_b=curr_value / 1e9,
-                total_units=curr_units,
-                holders_change=curr_holders - prev_holders,
-                value_change_pct=(curr_value - prev_value) / prev_value
-                if prev_value != 0
-                else float("nan"),
-                units_change_pct=(curr_units - prev_units) / prev_units
-                if prev_units != 0
-                else float("nan"),
-                new_holders=len(curr_names - prev_names),
-                closed_positions=len(prev_names - curr_names),
-            )
-
-        return dict(
-            quarter_end=latest_q,
-            assumed_available_from=available_from,
-            stale_days=stale_days,
-            availability_is_estimated=True,
-            total_holders=curr_holders,
-            total_value_b=curr_value / 1e9,
-            total_units=curr_units,
-            holders_change=0,
-            value_change_pct=float("nan"),
-            units_change_pct=float("nan"),
-            new_holders=0,
-            closed_positions=0,
+        current_units = float(
+            pd.to_numeric(current["units"], errors="coerce").fillna(0).sum()
         )
+        facts = {
+            **empty,
+            "quarter_end": latest_quarter,
+            "assumed_available_from": latest_quarter
+            + pd.Timedelta(days=FILING_DELAY_DAYS),
+            "stale_days": int(
+                (signal_day.normalize() - latest_quarter.normalize()).days
+            ),
+            "total_holders": int(current_holders),
+            "total_value_b": current_value / 1e9,
+            "total_units": current_units,
+        }
+        if len(quarters) < 2:
+            return facts
 
-    def build_snapshot(self, ticker: str) -> InstitutionalSnapshot:
-        m = self._agg(ticker)
-        return InstitutionalSnapshot(ticker=ticker, signal_day=self.signal_day, **m)
-
-
+        prior = frame[frame["calendardate"] == pd.Timestamp(quarters[-2])]
+        prior_holders = prior["investorname"].nunique()
+        prior_value = float(
+            pd.to_numeric(prior["value"], errors="coerce").fillna(0).sum()
+        )
+        prior_units = float(
+            pd.to_numeric(prior["units"], errors="coerce").fillna(0).sum()
+        )
+        current_names = set(current["investorname"].dropna())
+        prior_names = set(prior["investorname"].dropna())
+        facts.update(
+            {
+                "holders_change": int(current_holders - prior_holders),
+                "value_change_pct": cls.safe_growth(current_value, prior_value),
+                "units_change_pct": cls.safe_growth(current_units, prior_units),
+                "new_holders": len(current_names - prior_names),
+                "closed_positions": len(prior_names - current_names),
+            }
+        )
+        return facts

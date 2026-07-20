@@ -1,108 +1,136 @@
+"""Point-in-time corporate event rows and optional ticker-level facts."""
+
+from __future__ import annotations
+
 import pandas as pd
-from dataclasses import dataclass
 
 import database.market.event_repo as event_repo
+from data.signals.sig import Signals
 
 
-def _has_code(series: pd.Series, code: str) -> pd.Series:
-    return series.apply(
-        lambda x: (
-            code in [c.strip() for c in str(x).split("|")] if pd.notna(x) else False
-        )
-    )
+# Sharadar EVENTS codes (separated by "|" in eventcodes).
+EARNINGS_CODE = "22"
+ACTIVIST_13D_CODE = "35"
+
+EVENT_FACT_COLUMNS = (
+    "days_since_last_earnings",
+    "days_since_last_activist_13d",
+    "recent_event_codes",
+)
 
 
-# Sharadar EVENTS codes (separated by | in eventcodes)
-_EARNINGS_CODE = "22"  # Results of Operations and Financial Condition
-_ACTIVIST_CODE = "35"  # Schedule 13D (activist investor ≥5%)
-_DELISTING_CODE = "31"  # Notice of Delisting or Failure to Satisfy Listing Rule
-_RESTATE_CODE = "42"  # Non-Reliance on Previously Issued Financial Statements
-_BANKRUPT_CODE = "13"  # Bankruptcy or Receivership
-_LATE_FILE_CODE = "36"  # Inability to Timely File 10-K or 10-Q
-_IMPAIRMENT_CODE = "26"  # Material Impairments
+class EventSignals(Signals):
+    """SQL-backed event rows with opt-in ticker-level fact attachments."""
 
-
-@dataclass
-class EventsSnapshot:
-    ticker: str
-    signal_day: pd.Timestamp
-
-    days_since_last_earnings: int | None
-    days_since_last_activist_13d: int | None
-
-    recent_event_codes: list[str]
-
-    def risk_flags(self) -> dict[str, bool]:
-        ds = self.days_since_last_earnings
-        all_codes = set(self.recent_event_codes)
-        return {
-            "just_reported": ds is not None and ds <= 3,
-            "post_earnings": ds is not None and ds <= 7,
-            "delisting_risk": _DELISTING_CODE in all_codes,
-            "restatement": _RESTATE_CODE in all_codes,
-            "bankruptcy": _BANKRUPT_CODE in all_codes,
-            "late_filing": _LATE_FILE_CODE in all_codes,
-            "material_impairment": _IMPAIRMENT_CODE in all_codes,
-        }
-
-class EventsModel:
-    def __init__(
-        self,
+    @classmethod
+    def get_signals(
+        cls,
+        tickers: list[str] | None,
         signal_day: pd.Timestamp,
-        tickers: list[str],
         lookback_days: int = 20,
-    ):
-        self.signal_day = signal_day
-        self.tickers = tickers
-        self.lookback_days = lookback_days
-        self.data: dict[str, pd.DataFrame] = {}
-        self.load_data()
-
-    def load_data(self) -> None:
-        start = self.signal_day - pd.Timedelta(days=self.lookback_days)
-        df = event_repo.get(
-            tickers=self.tickers,
+    ) -> pd.DataFrame:
+        """Return event rows available in the requested point-in-time window."""
+        signal_day = pd.Timestamp(signal_day)
+        start = signal_day - pd.Timedelta(days=lookback_days)
+        frame = event_repo.get(
+            tickers=tickers,
             start_date=str(start.date()),
-            end_date=str(self.signal_day.date()),
+            end_date=str(signal_day.date()),
         )
-        df["date"] = pd.to_datetime(df["date"])
-        for tkr, grp in df.groupby("ticker"):
-            self.data[tkr] = grp.reset_index(drop=True)
+        if frame.empty:
+            return frame.copy()
 
-    def _days_since_code(self, tkr: str, code: str) -> int | None:
-        grp = self.data.get(tkr)
-        if grp is None:
-            return None
-        past = grp[
-            (grp["date"] <= self.signal_day) & _has_code(grp["eventcodes"], code)
-        ]
-        if past.empty:
-            return None
-        return int((self.signal_day - past["date"].max()).days)
+        frame = frame.copy()
+        frame["date"] = pd.to_datetime(frame["date"])
+        return frame
 
-    def _event_codes_in_window(
-        self, tkr: str, start: pd.Timestamp, end: pd.Timestamp
-    ) -> list[str]:
-        grp = self.data.get(tkr)
-        if grp is None:
+    @classmethod
+    def attach_event_facts(
+        cls,
+        frame: pd.DataFrame,
+        tickers: list[str],
+        signal_day: pd.Timestamp,
+        lookback_days: int = 20,
+    ) -> pd.DataFrame:
+        """Aggregate raw event rows into objective facts for every ticker.
+
+        Tickers with no events remain present with ``None`` recencies and an
+        empty code list. Whether any code is good, bad, or disqualifying belongs
+        to the consuming strategy.
+        """
+        signal_day = pd.Timestamp(signal_day)
+        recent_start = signal_day - pd.Timedelta(days=lookback_days)
+        rows = []
+
+        if frame.empty:
+            grouped: dict[str, pd.DataFrame] = {}
+        else:
+            history = frame.copy()
+            history["date"] = pd.to_datetime(history["date"])
+            history = history[
+                (history["date"] >= recent_start)
+                & (history["date"] <= signal_day)
+            ]
+            grouped = {
+                str(ticker): group
+                for ticker, group in history.groupby("ticker", sort=False)
+            }
+
+        for ticker in tickers:
+            group = grouped.get(str(ticker))
+            rows.append(
+                {
+                    "ticker": ticker,
+                    "days_since_last_earnings": cls._days_since_code(
+                        group,
+                        EARNINGS_CODE,
+                        signal_day,
+                    ),
+                    "days_since_last_activist_13d": cls._days_since_code(
+                        group,
+                        ACTIVIST_13D_CODE,
+                        signal_day,
+                    ),
+                    "recent_event_codes": cls._event_codes(group),
+                }
+            )
+
+        if not rows:
+            return pd.DataFrame(columns=EVENT_FACT_COLUMNS).rename_axis("ticker")
+        return pd.DataFrame(rows).set_index("ticker")
+
+    @staticmethod
+    def _has_code(series: pd.Series, code: str) -> pd.Series:
+        return series.apply(
+            lambda value: (
+                code in {item.strip() for item in str(value).split("|")}
+                if pd.notna(value)
+                else False
+            )
+        )
+
+    @classmethod
+    def _days_since_code(
+        cls,
+        frame: pd.DataFrame | None,
+        code: str,
+        signal_day: pd.Timestamp,
+    ) -> int | None:
+        if frame is None or frame.empty:
+            return None
+        matches = frame.loc[cls._has_code(frame["eventcodes"], code), "date"]
+        if matches.empty:
+            return None
+        return int((signal_day - matches.max()).days)
+
+    @staticmethod
+    def _event_codes(frame: pd.DataFrame | None) -> list[str]:
+        if frame is None or frame.empty:
             return []
-        window = grp[(grp["date"] >= start) & (grp["date"] <= end)]
-        codes = set()
-        for raw in window["eventcodes"].dropna():
-            for code in str(raw).split("|"):
-                codes.add(code.strip())
+        codes = {
+            code.strip()
+            for value in frame["eventcodes"].dropna()
+            for code in str(value).split("|")
+            if code.strip()
+        }
         return sorted(codes)
-
-    def build_snapshot(self, ticker: str) -> EventsSnapshot:
-        recent_start = self.signal_day - pd.Timedelta(days=self.lookback_days)
-        return EventsSnapshot(
-            ticker=ticker,
-            signal_day=self.signal_day,
-            days_since_last_earnings=self._days_since_code(ticker, _EARNINGS_CODE),
-            days_since_last_activist_13d=self._days_since_code(ticker, _ACTIVIST_CODE),
-            recent_event_codes=self._event_codes_in_window(
-                ticker, recent_start, self.signal_day
-            ),
-        )
-
-

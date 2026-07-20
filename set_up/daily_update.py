@@ -1,13 +1,6 @@
 """
 Daily incremental update. Run each market day after close.
-
     uv run python -m set_up.daily_update
-
-Fetches everything updated since the last load, across ALL tickers — Sharadar
-returns every ticker when no ticker filter is passed. No universe curation here:
-delisted and newly-listed names stay covered so backtests aren't survivorship-
-biased. The tradeable universe (get_stock_symbols) is narrowed point-in-time at
-screen time, not at load time.
 """
 
 import pandas as pd

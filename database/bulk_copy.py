@@ -39,7 +39,7 @@ def copy_insert(
     raw = get_connection().raw_connection()
     try:
         cur = raw.cursor()
-        cur.execute(f"DROP TABLE IF EXISTS _bulk_stg")
+        cur.execute("DROP TABLE IF EXISTS _bulk_stg")
         cur.execute(f"CREATE TEMP TABLE _bulk_stg (LIKE {table}) ON COMMIT DROP")
         cur.copy_expert(
             f"COPY _bulk_stg ({collist}) FROM STDIN WITH (FORMAT csv, NULL '')", buf

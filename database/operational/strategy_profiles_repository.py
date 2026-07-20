@@ -21,24 +21,14 @@ DEFAULT_CONVICTION = {
 
 STRATEGY_PROFILES = (
     {
-        "name": "momentum",
-        "description": "Relative-strength / trend-continuation on liquid US equities.",
+        "name": "sector_leaders",
+        "description": (
+            "Each sector's strongest healthy trend: liquid, profitable, "
+            "mid-cap+ names in confirmed uptrends, ranked within sector; "
+            "top-5-per-sector menu for the agent."
+        ),
         "max_position_pct": 0.05,
         "max_loss_pct": 0.10,
-        "conviction_size_multipliers": DEFAULT_CONVICTION,
-    },
-    {
-        "name": "value",
-        "description": "Sector-relative deep value with a Piotroski trap filter.",
-        "max_position_pct": 0.05,
-        "max_loss_pct": 0.15,
-        "conviction_size_multipliers": DEFAULT_CONVICTION,
-    },
-    {
-        "name": "quality",
-        "description": "High-quality compounders on liquid US equities (late-cycle tilt).",
-        "max_position_pct": 0.06,
-        "max_loss_pct": 0.12,
         "conviction_size_multipliers": DEFAULT_CONVICTION,
     },
 )
