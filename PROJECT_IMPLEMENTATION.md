@@ -1,6 +1,6 @@
 # QuorumNexus — Project Implementation
 
-Last reconciled with the repository: **2026-07-20**
+Last reconciled with the repository: **2026-07-21**
 
 ## Purpose
 
@@ -9,8 +9,9 @@ pipeline:
 
 1. deterministic data and signal services expose facts;
 2. deterministic strategies turn those facts into candidate and exit packets;
-3. a bounded portfolio-management agent chooses only from valid candidates;
-4. deterministic risk validates sizing and portfolio constraints;
+3. a bounded portfolio-management agent chooses from valid candidates and sizes them
+   through a portfolio-manager tool (risk-based allocation, not a strategy parameter);
+4. deterministic risk validates that sizing against hard portfolio constraints;
 5. execution opens or closes positions; and
 6. completed trades become searchable decision memory.
 
@@ -27,10 +28,10 @@ This document describes what exists now and clearly separates it from planned wo
 |---|---|---|
 | PostgreSQL market data | Implemented | Sharadar/FRED tables and repositories exist. |
 | Initial and incremental loading | Implemented | Bulk load and daily update modules exist; operational runs still require credentials and monitoring. |
-| Technical indicators | Implemented | Computed locally and stored in `indicators`. |
+| Technical features | Implemented | Computed locally and stored in `technical_features`. |
 | Signal layer | Implemented | Six stateless DataFrame services with raw `get_signals()` methods and opt-in `attach_*()` transformations. |
 | Deterministic strategies | Partial | Only `sector_leaders` remains active. Its eligibility and exits work, but final ranking and top-five-per-sector selection are TODO. |
-| Strategy profiles | Implemented | One seeded profile: `sector_leaders`. |
+| Strategy profiles | Implemented | Thin `{name, description, active}` registry; `sector_leaders` registered via `pipeline.main register`. |
 | Candidate orchestration | Not implemented | There is no registry/runner that coordinates strategies and agent handoff. |
 | Agentic PM | Not implemented | `pm_agent.py` contains commented legacy code; only a thin LLM client remains active. |
 | Deterministic portfolio risk | Not implemented | Profile limits exist, but no portfolio-level validator applies them. |
@@ -67,10 +68,17 @@ The architectural boundary is:
 
 - repositories retrieve and store database rows;
 - signal services expose raw point-in-time rows and optional derived facts;
-- strategies decide whether facts are desirable, risky, or disqualifying;
-- the future agent chooses among strategy-approved candidates;
-- deterministic risk owns hard portfolio and sizing constraints; and
+- strategies own their full pipeline **as code** — eligibility (prefilter), gates,
+  selection/ranking, and exit rules — including every threshold, kept as named
+  `CALIBRATION` constants next to the research that justifies them;
+- the future agent chooses among strategy-approved candidates and expresses conviction;
+- a portfolio-manager tool (called by the agent) owns sizing and allocation: it turns
+  the chosen candidates plus conviction into position weights and caps;
+- deterministic risk enforces hard portfolio constraints on what the PM proposes; and
 - execution owns broker mutations.
+
+A strategy decides *what* to buy and *when its thesis is broken*; it does not decide
+*how much*. Sizing is not a strategy parameter — it is the portfolio manager's job.
 
 Signal services must not contain strategy verdicts such as “buy,” “hostile regime,”
 “heavy selling,” or “delisting risk.” They may calculate objective values such as an
@@ -83,16 +91,16 @@ The consumer interprets those values.
 |---|---|
 | `data/sharadar_data.py` | Sharadar API access for incremental loads. |
 | `data/macro_data.py` | FRED ingestion and point-in-time release alignment. |
-| `data/indicators.py` | Local technical-indicator calculation. |
+| `data/technical_features.py` | Local OHLCV-derived technical-feature calculation. |
 | `data/live_equity.py` | Alpaca historical/intraday market-data adapter. |
 | `data/signals/` | Stateless signal DataFrame services. |
-| `database/market/` | Market-data table creation, insert/upsert, and read repositories. |
-| `database/operational/` | Strategy profiles and completed-trade decision memory. |
-| `decision_layer/strategy/` | Active deterministic entry and exit logic. |
-| `decision_layer/agentic_layer/` | Future bounded PM layer; currently mostly a placeholder. |
-| `set_up/setup_db.py` | Database extensions and table creation. |
-| `set_up/load_data.py` | Initial bulk Sharadar load, indicators, and macro load. |
-| `set_up/daily_update.py` | Incremental market-data and indicator updates. |
+| `database/source/` | Market-data table creation, insert/upsert, and read repositories. |
+| `database/state/` | Strategy profiles and completed-trade decision memory. |
+| `decision/strategies/` | Active deterministic entry and exit logic. |
+| `decision/agent/` | Future bounded PM layer; currently mostly a placeholder. |
+| `pipeline/setup_db.py` | Database extensions and table creation. |
+| `pipeline/load_data.py` | Initial bulk Sharadar load, technical features, and macro load. |
+| `pipeline/daily_update.py` | Incremental market-data and technical-feature updates. |
 | `schwab/` | Schwab authentication, market data, and trading adapter. |
 
 Legacy momentum, value, quality, sector-rotation, screening-feature, and universe-cache
@@ -105,30 +113,30 @@ referenced as current strategy components.
 
 | Domain | Source | PostgreSQL table | Repository |
 |---|---|---|---|
-| Equity OHLCV | Sharadar SEP | `equity_prices` | `database/market/equity_repo.py` |
-| Fund/ETF OHLCV | Sharadar SFP | `fund_prices` | `database/market/fund_repo.py` |
-| Company metadata | Sharadar TICKERS | `tickers` | `database/market/tickers_repo.py` |
-| Fundamentals | Sharadar SF1 | `fundamentals` | `database/market/fundamentals_repo.py` |
-| Insider transactions | Sharadar SF2 | `insider_transactions` | `database/market/insider_repo.py` |
-| Institutional holdings | Sharadar SF3 | `institutional_holdings` | `database/market/institutional_repo.py` |
-| Corporate events | Sharadar EVENTS | `events` | `database/market/event_repo.py` |
-| Technical indicators | Locally calculated | `indicators` | `database/market/indicators_repo.py` |
-| Macro history | FRED | `macro` | `database/market/macro_repo.py` |
+| Equity OHLCV | Sharadar SEP | `equity_prices` | `database/source/equity_repo.py` |
+| Fund/ETF OHLCV | Sharadar SFP | `fund_prices` | `database/source/fund_repo.py` |
+| Company metadata | Sharadar TICKERS | `tickers` | `database/source/tickers_repo.py` |
+| Fundamentals | Sharadar SF1 | `fundamentals` | `database/source/fundamentals_repo.py` |
+| Insider transactions | Sharadar SF2 | `insider_transactions` | `database/source/insider_repo.py` |
+| Institutional holdings | Sharadar SF3 | `institutional_holdings` | `database/source/institutional_repo.py` |
+| Corporate events | Sharadar EVENTS | `events` | `database/source/event_repo.py` |
+| Technical features | Locally calculated from OHLCV | `technical_features` | `database/source/technical_features_repo.py` |
+| Macro history | FRED | `macro` | `database/source/macro_repo.py` |
 
-The initial history begins at `2016-01-01`. `set_up/load_data.py` bulk-exports
-Sharadar tables, loads them into PostgreSQL, computes indicators for every ticker
+The initial history begins at `2016-01-01`. `pipeline/load_data.py` bulk-exports
+Sharadar tables, loads them into PostgreSQL, computes technical features for every ticker
 with price history (including delisted names), and then loads macro history.
 
-`set_up/daily_update.py` incrementally updates prices, indicators, fundamentals,
+`pipeline/daily_update.py` incrementally updates prices, technical features, fundamentals,
 insider transactions, events, ticker metadata, institutional holdings, and macro data.
 
 ### Database setup
 
-`set_up/setup_db.py` enables pgvector and creates:
+`pipeline/setup_db.py` enables pgvector and creates:
 
 - `equity_prices`
 - `fund_prices`
-- `indicators`
+- `technical_features`
 - `tickers`
 - `fundamentals`
 - `insider_transactions`
@@ -187,7 +195,7 @@ desirable.
 
 | Service | Raw `get_signals()` output | Optional attachments |
 |---|---|---|
-| `TechnicalSignals` | Latest indicator row per ticker, indexed by ticker. | Market return percentiles; sector medians/ranks/relative returns; SPY or other benchmark excess returns. |
+| `TechnicalSignals` | Latest technical-feature row per ticker, indexed by ticker. | Market return percentiles; sector medians/ranks/relative returns; SPY or other benchmark excess returns. |
 | `FundamentalSignals` | Latest available ART fundamental row per ticker, indexed by ticker. | Quarterly YoY growth; annual five-year history/change/volatility; calculated ratios; sector-relative metric percentiles. |
 | `EventSignals` | Event rows inside the requested lookback window. | One row per requested ticker with earnings/13D recency and parsed recent event codes. |
 | `InsiderSignals` | Filing-date-safe raw insider transactions with enough history to classify repeated purchases. | Purchase classification; ticker-level 30/90-day activity facts; market-cap normalization. |
@@ -241,7 +249,7 @@ Every strategy and signal query must use only information available on or before
 
 Current protections include:
 
-- latest indicator rows are constrained to `date <= signal_day`;
+- latest technical-feature rows are constrained to `date <= signal_day`;
 - the active universe requires a trade within ten calendar days of `signal_day`,
   preventing stale delisted “zombie” rows;
 - fundamentals use `datekey <= signal_day`;
@@ -268,7 +276,7 @@ Known limitations:
 
 ### `sector_leaders`
 
-`decision_layer/strategy/strat_sector_leaders.py` is the only active strategy.
+`decision/strategies/strat_sector_leaders.py` is the only active strategy.
 It contains:
 
 - `SLEntryScreener`
@@ -276,33 +284,31 @@ It contains:
 - `CandidateSnapshot`
 - `ExitSnapshot`
 
-The seeded `sector_leaders` profile currently specifies:
+The strategy exposes `NAME` and `DESCRIPTION` module constants; these are the source of
+truth for its profile row. Sizing and conviction weighting are **not** the strategy's
+concern; they belong to the portfolio-manager tool. Exit thresholds (max loss, trailing
+stop) live in the strategy file as named `CALIBRATION` constants, not in the profile.
 
-- maximum position: `5%`
-- maximum loss: `10%`
-- conviction multipliers:
-  - `HIGH_CONVICTION`: `1.0`
-  - `CONVICTION`: `0.6`
-  - `LOW_CONVICTION`: `0.3`
-
-These limits are stored but are not yet connected to a portfolio-level risk validator.
+The `sector_leaders` profile row is a thin descriptor — `{name, description, active}`.
+It is written by `pipeline.main register` from the strategy's constants, not seeded at
+setup. `SLEntryScreener` refuses to run if the profile is missing or `active = false`;
+`SLExitMonitor` requires only that the row exists (a retired strategy must still exit its
+open positions).
 
 ### Entry pipeline
 
-The SQL prefilter requires:
+The SQL prefilter defines **eligibility** — who the strategy may buy — point-in-time as of
+the signal day. Every condition and why it is there:
 
-- Sharadar SEP ticker;
-- USD currency;
-- NYSE or NASDAQ;
-- domestic common stock;
-- not a secondary share class;
-- at least 15 valid observations among the latest 20 price rows;
-- median 20-row dollar volume of at least `$5,000,000`;
-- latest trade no more than ten calendar days before the signal date;
-- latest point-in-time ART market cap of at least `$1,000,000,000`;
-- positive common net income;
-- positive 60-day return; and
-- positive 252-day return.
+| Condition | Threshold | Source | Why |
+|---|---|---|---|
+| Listing & type | Sharadar SEP · USD · NYSE/NASDAQ · domestic common, non-secondary | `tickers` | Tradeable US common equity only — excludes ADRs, funds, secondary classes, OTC. |
+| Liquidity | median 20-session dollar volume ≥ `$5M`, ≥15 of the last 20 rows present | `equity_prices` | Exitable without moving the price (Amihud illiquidity); the 15-row floor drops sparse / just-listed names. |
+| Recency | last trade within 10 calendar days of the signal day | `equity_prices` | Point-in-time correctness — the name actually traded near the signal day. This, not an `isdelisted` flag, keeps names alive at a past date (no survivorship bias) and drops stale "zombie" rows. |
+| Size | PIT market cap ≥ `$1B` | `fundamentals` (SF1 ART, by `datekey`) | Mid-cap-and-up only ("play it safe") — cuts small/micro blow-up, illiquidity, and fraud tail risk. From the ART filing, never current-state `scalemarketcap` (avoids look-ahead). |
+| Profitability | trailing common net income > 0 | `fundamentals` (SF1 ART) | Screens out froth-era story stocks (~35% of liquid mid-caps in mid-2021). Momentum + *profitability*, not + cheapness (Novy-Marx 2013; Piotroski F #1). |
+| Absolute uptrend | `return_60d > 0` and `return_252d > 0` | `technical_features` | Winner over intermediate and long horizons (time-series momentum, Moskowitz-Ooi-Pedersen 2012); an *absolute* floor (not just a percentile) cuts crash exposure. |
+| Primary uptrend | `close > sma_200` | `technical_features` | Still above the 200-day — catches "was a winner, now rolling over" names the return floors miss (Faber 2007 trend filter). |
 
 The strategy then explicitly attaches technical sectors, return percentiles, and sector
 features. It parses recent event facts and excludes:
@@ -315,10 +321,8 @@ features. It parses recent event facts and excludes:
 | `36` | late filing |
 | `26` | material impairment |
 
-The final required price gates are:
-
-- `close > sma_200`; and
-- `trend_slope_60d * r_squared_60d > 0`.
+`close > sma_200` now lives in the prefilter (above). The remaining per-candidate gate
+before ranking is `trend_slope_60d * r_squared_60d > 0` (trend confirmed upward).
 
 Non-disqualifying context flags include overbought RSI, low liquidity, deep drawdown,
 loose consolidation, high volatility, elevated ATR, recent earnings, and mega-cap
@@ -336,21 +340,70 @@ top five per sector. That ranking is **not implemented**:
 
 This is the highest-priority deterministic implementation gap.
 
+### Ranking signals
+
+Eligible names are scored by a within-sector composite of five sleeves. Signals are
+direction-tagged (`+1` higher-is-better, `-1` lower-is-better — the strategy applies the
+flip); within a sleeve, signals are equal-weighted. The **between-sleeve weights are the
+deliberate tuning knob and are not yet fixed**, and the composite is not yet wired (see the
+ranking gap above). Only evidenced factors are used — chart-reading indicators (RSI, MACD,
+OBV, EMA crossovers, short-horizon returns) are deliberately excluded from ranking.
+
+**Technical — momentum quality** (the strategy's lead thesis)
+
+| Signal | Dir | Why |
+|---|---|---|
+| `vol_adjusted_momentum` | +1 | Volatility-scaled momentum; halves momentum crashes and lifts Sharpe (Barroso & Santa-Clara 2015). |
+| `r_squared_60d` | +1 | Trend smoothness — gradual trends persist, jumpy ones revert ("frog in the pan", Da-Gurun-Warachka 2014). |
+| `pct_from_52w_high` | +1 | 52-week-high momentum, a distinct published signal (George & Hwang 2004). |
+
+**Value** — cheapness (Fama-French HML; composited across multiples per Asness)
+
+| Signal | Dir | Why |
+|---|---|---|
+| `pe` | -1 | Earnings multiple (Basu 1977); low = cheap. |
+| `ps` | -1 | Sales multiple; harder to manipulate than earnings. |
+| `evebitda` | -1 | EV/EBITDA; debt-aware, operating-earnings based (Loughran-Wellman 2011). |
+| `fcf_yield` | +1 | Free-cash-flow yield; cash-based, hard to fake; high = cheap. |
+
+**Profitability — quality**
+
+| Signal | Dir | Why |
+|---|---|---|
+| `gross_profitability` | +1 | Gross profits / assets — the profitability factor, "the other side of value" (Novy-Marx 2013). |
+| `accruals` | -1 | Sloan accrual (net income − CFO); cash-backed earnings beat accrual-heavy ones (Sloan 1996). |
+| `roic` | +1 | Capital efficiency; unlike ROE it is not leverage-distorted. |
+
+**Growth** — profitability *improvement*, not revenue growth (QMJ growth pillar; raw revenue growth underperforms, Lakonishok-Shleifer-Vishny 1994)
+
+| Signal | Dir | Why |
+|---|---|---|
+| `gross_profitability_change_5y` | +1 | 5-year improvement in gross profitability. |
+| `roic_change_5y` | +1 | 5-year improvement in capital efficiency. |
+| `cfo_to_assets_change_5y` | +1 | 5-year improvement in cash generation (cash-distinct from the margin deltas). |
+
+**Capital discipline**
+
+| Signal | Dir | Why |
+|---|---|---|
+| `net_payout_yield` | +1 | Shareholder yield (dividends + buybacks); firms returning cash outperform (Boudoukh et al. 2007). |
+| `share_dilution_5y` | -1 | Net share issuance; issuers underperform, repurchasers outperform (Pontiff-Woodgate 2008). |
+
 ### Exit pipeline
 
 `SLExitMonitor` applies rules in precedence order:
 
-1. `MAXIMUM_LOSS_BREACH` when return from entry is at or below the profile's
-   `max_loss_pct` (`-10%` for `sector_leaders`);
+1. `MAXIMUM_LOSS_BREACH` when return from entry is at or below the strategy's
+   `_MAX_LOSS_PCT` constant (`-10%`);
 2. `THESIS_INVALIDATED` when drawdown from the stored high-water mark is at or below
    `-20%`; or
 3. `THESIS_INVALIDATED` when price falls below the 200-day moving average.
 
-If current indicator data is unavailable, the monitor holds rather than fabricating an
+If current technical-feature data is unavailable, the monitor holds rather than fabricating an
 exit. `CONCERNING_EVENTS` remains an allowed decision-memory exit reason, but no active
 agent watchlist currently produces it.
 
-## Phase 2 — Candidate runner and decision memory
+## Candidate runner and decision memory
 
 Phase 2 connects deterministic candidate packets to open-position state and, after
 exit, completed-trade memory. The database contracts already exist; the runner and
@@ -358,28 +411,35 @@ position lifecycle do not.
 
 ### `strategy_profiles`
 
-The table is a seeded, read-only registry during normal runs. It identifies a strategy
-and supplies deterministic maximum position, maximum loss, and conviction-size
-multipliers. Executable strategy selection remains code-owned.
+The table is a registry, read during normal runs. It identifies a strategy, gives it a
+human/agent-readable description, and tracks whether it is active. It holds **no** sizing,
+loss, or conviction parameters — exit thresholds are code constants in the strategy, and
+sizing is owned by the portfolio-manager tool.
 
-Only `sector_leaders` is currently seeded.
+Rows are written by CLI, sourced from each strategy's `NAME`/`DESCRIPTION` constants —
+`pipeline.main` create/setup makes the empty table; population is a separate step:
+
+- `python -m pipeline.main register <module>` — upsert the row (idempotent; reactivates a
+  retired strategy). `<module>` is a dotted path or file, e.g.
+  `decision.strategies.strat_sector_leaders`.
+- `python -m pipeline.main retire <name>` — soft-retire (set `active = false`). The row is
+  **kept** — it anchors the strategy's historical `decision_memory` trades via foreign key,
+  so it must outlive them. A hard delete is intentionally not offered.
+
+Only `sector_leaders` is currently registered.
 
 #### Strategy-profile contract
 
-| Key | `profile_id` | `name` | `description` |
+| Key | `name` | `description` | `active` |
 |---|---|---|---|
-| Explanation | Database identity for the seeded profile. | Unique code-owned strategy name; currently `sector_leaders`. | Human-readable description of the strategy and intended menu. |
-| Consumer | Profile lookup and inspection. | Strategy lookup, `decision_memory`, position state, retrieval, and exit-policy lookup. | Agent context and operator inspection. |
-| Datatype | `SERIAL PRIMARY KEY` | `VARCHAR(64) NOT NULL UNIQUE` | `TEXT` |
+| Explanation | Database identity | Human-readable description of the strategy and its menu. | Whether the strategy may open new positions. |
+| Consumer | Strategy lookup, `decision_memory` FK, retrieval. | Agent context and operator inspection. | `SLEntryScreener` (refuses when false). |
+| Datatype | `VARCHAR(64) PRIMARY KEY` | `TEXT` | `BOOLEAN NOT NULL DEFAULT TRUE` |
 
-| Key | `max_position_pct` | `max_loss_pct` | `conviction_size_multipliers` |
-|---|---|---|---|
-| Explanation | Maximum portfolio allocation allowed for a position produced by the strategy. | Maximum loss allowed before `MAXIMUM_LOSS_BREACH` fires. | Maps each accepted conviction tier to a fraction of the strategy's maximum position size. |
-| Consumer | Future deterministic position-sizing and portfolio-risk validator. | `SLExitMonitor`, future position state, and risk validator. | Future deterministic position-sizing validator. |
-| Datatype | `NUMERIC(6,4) NOT NULL` | `NUMERIC(6,4) NOT NULL` | `JSONB NOT NULL` |
-
-A profile row identifies and configures a strategy; it does not dynamically import or
-execute Python code. Strategy registration remains explicit in the future orchestrator.
+The conditions themselves (prefilter, gates, selection, exits) are **not** stored here as
+data; they are the strategy class's code. A profile row is a descriptor, not a config
+blob — it does not dynamically import or execute Python. Strategy registration remains
+explicit in the future orchestrator.
 
 ### `decision_memory`
 
@@ -489,7 +549,7 @@ with atomic replacement. Neither the file nor its typed reader/writer currently 
 
 ### Agentic layer
 
-`decision_layer/agentic_layer/llm_client.py` is a thin Chat Completions wrapper for an
+`decision/agent/llm_client.py` is a thin Chat Completions wrapper for an
 OpenAI model or local Ollama endpoint.
 
 `pm_agent.py` is commented legacy code and is not an active implementation. There is no:
@@ -555,11 +615,14 @@ Missing:
 - hand the final candidate menu to the agent once; and
 - keep rejected candidates transient.
 
-### 3. Build deterministic risk validation
+### 3. Build the portfolio-manager tool and risk validation
 
-- validate candidate provenance;
-- map conviction to a profile multiplier;
-- enforce position, capital, sector, and portfolio constraints; and
+- portfolio-manager tool (agent-called): turn the chosen candidates plus conviction into
+  position weights using **risk-based sizing** — inverse-volatility / vol-target under a
+  max-position cap — rather than fixed fractions or return-forecast mean-variance
+  optimization (which needs expected returns the system does not have);
+- risk validator: validate candidate provenance and enforce hard position, capital,
+  sector, and portfolio constraints on what the PM proposes; and
 - emit only bounded validated orders.
 
 ### 4. Build the position lifecycle
@@ -604,8 +667,8 @@ Current local checks:
 
 ```bash
 PYTHONPATH=. .venv/bin/pytest -q
-.venv/bin/ruff check data/signals decision_layer/strategy tests
-.venv/bin/python -m compileall -q data/signals decision_layer/strategy set_up database
+.venv/bin/ruff check data/signals decision/strategies tests
+.venv/bin/python -m compileall -q data/signals decision/strategies pipeline database
 ```
 
 As of 2026-07-20:

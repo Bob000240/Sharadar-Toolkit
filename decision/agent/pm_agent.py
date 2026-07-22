@@ -8,8 +8,8 @@
 # from alpaca.trading.client import TradingClient
 # from alpaca.trading.requests import MarketOrderRequest
 # from alpaca.trading.enums import OrderSide, TimeInForce
-# from decision_layer.det_layer.pre_filter import AgentVerdict
-# from decision_layer.agentic_layer.llm_client import call_llm_analyze, REMOTE_MODEL
+# from decision.det_layer.pre_filter import AgentVerdict
+# from decision.agent.llm_client import call_llm_analyze, REMOTE_MODEL
 
 # _RUNS_ROOT = Path(__file__).parent.parent.parent / "data_agentic" / "runs"
 # _POSITIONS_BOOK_PATH = _RUNS_ROOT / "positions_book.json"
@@ -244,7 +244,7 @@
 #         self.analysts_model = model
 
 #     def buy(self) -> None:
-#         from decision_layer.det_layer.pre_RS import RSMomentumAgent
+#         from decision.det_layer.pre_RS import RSMomentumAgent
 
 #         analyst = RSMomentumAgent(analysis_model=self.analysts_model)
 #         candidates = analyst.prefilter()

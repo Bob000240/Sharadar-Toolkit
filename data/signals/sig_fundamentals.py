@@ -3,48 +3,9 @@
 import numpy as np
 import pandas as pd
 
-import database.market.fundamentals_repo as fundamentals_repo
+import database.source.fundamentals_repo as fundamentals_repo
 from data.signals.sig import Signals
 
-
-# Direction-free sector percentiles. Strategies decide whether high or low is
-# desirable and how, if at all, to combine these facts.
-RANKED_METRICS = (
-    # value
-    "pe",
-    "pb",
-    "ps",
-    "evebitda",
-    "fcf_yield",
-    # profitability
-    "gross_profitability",
-    "roa",
-    "roic",
-    "cfo_to_assets",
-    "grossmargin",
-    "accrual_quality",
-    "roe",
-    # safety / leverage
-    "de",
-    "currentratio",
-    "interest_coverage",
-    "roe_volatility_5y",
-    "grossmargin_volatility_5y",
-    # five-year trend
-    "gross_profitability_change_5y",
-    "roa_change_5y",
-    "roic_change_5y",
-    "cfo_to_assets_change_5y",
-    "grossmargin_change_5y",
-    "de_change_5y",
-    # capital discipline
-    "net_payout_yield",
-    "share_dilution_5y",
-    # growth
-    "revenue_growth_yoy",
-)
-
-_VALUATION_MULTIPLES = ("pe", "pb", "ps", "evebitda")
 
 GROWTH_COLUMNS = (
     "revenue_growth_yoy",
@@ -143,8 +104,8 @@ class FundamentalSignals(Signals):
         frame["interest_coverage"] = cls.safe_div(frame["ebit"], frame["intexp"])
         frame["gross_profitability"] = cls.safe_div(frame["gp"], frame["assets"])
         frame["cfo_to_assets"] = cls.safe_div(frame["ncfo"], frame["assets"])
-        frame["accrual_quality"] = cls.safe_div(
-            frame["ncfo"] - frame["netinc"],
+        frame["accruals"] = cls.safe_div(
+            frame["netinc"] - frame["ncfo"],
             frame["assets"],
         )
         payout = frame[["ncfcommon", "ncfdiv"]].sum(axis=1, min_count=1)
@@ -152,30 +113,6 @@ class FundamentalSignals(Signals):
             -payout,
             frame["marketcap"].where(frame["marketcap"] > 0),
         )
-        return frame
-
-    @classmethod
-    def attach_sector_ranks(cls, frame: pd.DataFrame) -> pd.DataFrame:
-        """Attach `{metric}_sector_pct` for every direction-free ranked metric."""
-        if "sector" not in frame.columns:
-            raise ValueError(
-                "sector is required; call FundamentalSignals.attach_sectors() first"
-            )
-
-        frame = frame.copy()
-        for metric in RANKED_METRICS:
-            values = frame.get(
-                metric,
-                pd.Series(np.nan, index=frame.index, dtype=float),
-            )
-            if metric in _VALUATION_MULTIPLES:
-                values = pd.to_numeric(values, errors="coerce").where(
-                    lambda value: value > 0
-                )
-            frame[f"{metric}_sector_pct"] = cls.rank_within_sector(
-                values,
-                frame["sector"],
-            )
         return frame
 
     @classmethod
@@ -337,5 +274,9 @@ if __name__ == "__main__":
     signals = FundamentalSignals.attach_history_features(signals, as_of)
     signals = FundamentalSignals.attach_ratios(signals)
     signals = FundamentalSignals.attach_growth(signals, as_of)
-    signals = FundamentalSignals.attach_sector_ranks(signals)
+    signals = FundamentalSignals.attach_sector_ranks(
+        signals,
+        {"pe": -1, "roic": 1, "fcf_yield": 1},
+        positive_only=("pe",),
+    )
     print(signals)

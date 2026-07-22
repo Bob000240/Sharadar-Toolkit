@@ -1,0 +1,93 @@
+"""
+QuorumNexus pipeline entrypoint.
+
+Usage:
+    uv run python -m pipeline.main <command>
+
+Commands:
+    setup                Enable pgvector and create all tables
+    load                 Run the initial full data load
+    update               Run the daily incremental update
+    register <name>      Register/update a strategy from its NAME/DESCRIPTION.
+    retire <name>        Soft-retire a strategy (no new entries; row kept for history).
+
+<name> is the strategy name, e.g. sector_leaders (-> decision.strategies.strat_sector_leaders).
+"""
+
+import sys
+
+_STRATEGY_PKG = "decision.strategies"
+
+
+def _load_strategy(name: str):
+    """Import strategy `name` (decision.strategies.strat_<name>) and return its
+    module. Exits if it lacks NAME/DESCRIPTION."""
+    import importlib
+
+    module = importlib.import_module(f"{_STRATEGY_PKG}.strat_{name}")
+    if not hasattr(module, "NAME") or not hasattr(module, "DESCRIPTION"):
+        sys.exit(f"{name} has no NAME/DESCRIPTION constants")
+    return module
+
+
+def main():
+    if len(sys.argv) < 2:
+        print(__doc__)
+        sys.exit(1)
+
+    cmd = sys.argv[1].lower()
+
+    if cmd == "setup":
+        from pipeline.setup_db import enable_pgvector, drop_all, create_all
+
+        enable_pgvector()
+        drop_all()
+        create_all()
+
+    elif cmd == "load":
+        from pipeline import load_data
+
+        load_data.main()
+
+    elif cmd == "update":
+        from pipeline import daily_update
+
+        sh = daily_update.SharadarData()
+        daily_update.update_equity_prices(sh)
+        daily_update.update_fund_prices(sh)
+        daily_update.update_technical_features()
+        daily_update.update_fundamentals(sh)
+        daily_update.update_insider(sh)
+        daily_update.update_events(sh)
+        daily_update.update_macro()
+        daily_update.update_tickers(sh)
+        daily_update.update_institutional(sh)
+
+    elif cmd == "register":
+        if len(sys.argv) < 3:
+            sys.exit("usage: register <name>")
+        import database.state.strategy_profiles_repository as profiles_repo
+
+        module = _load_strategy(sys.argv[2])
+        profiles_repo.upsert_profile(module.NAME, module.DESCRIPTION)
+        print(f"registered {module.NAME}")
+
+    elif cmd == "retire":
+        if len(sys.argv) < 3:
+            sys.exit("usage: retire <name>")
+        import database.state.strategy_profiles_repository as profiles_repo
+
+        name = sys.argv[2]
+        if profiles_repo.retire_profile(name):
+            print(f"retired {name} (row kept as decision_memory anchor)")
+        else:
+            print(f"no profile named {name}")
+
+    else:
+        print(f"Unknown command: {cmd}")
+        print(__doc__)
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

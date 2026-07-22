@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-import database.market.insider_repo as insider_repo
+import database.source.insider_repo as insider_repo
 from data.signals.sig import Signals
 
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-import database.market.tickers_repo as tickers_repo
+import database.source.tickers_repo as tickers_repo
 
 
 class Signals:
@@ -15,13 +15,6 @@ class Signals:
     classes provide their own SQL-backed ``get_signals()`` method and optional
     domain-specific ``attach_*()`` transformations.
     """
-
-    @staticmethod
-    def python_scalar(value):
-        """Convert a NumPy scalar to a native Python scalar."""
-        if isinstance(value, np.generic):
-            return value.item()
-        return value
 
     @staticmethod
     def safe_div(
@@ -86,6 +79,50 @@ class Signals:
             .rank(pct=True, method="average")
             .mul(100)
         )
+
+    @classmethod
+    def attach_sector_ranks(
+        cls,
+        frame: pd.DataFrame,
+        signals: dict[str, int] | list[str],
+        positive_only: tuple = (),
+        negative_only: tuple = (),
+    ) -> pd.DataFrame:
+        """Attach `{metric}_sector_pct` for each requested metric, direction-free.
+
+        `signals` is the CALLER's own metric list (or {metric: direction} dict —
+        only the keys are used here) — which metrics matter is a strategy
+        decision, not this module's. A metric absent from `frame` yields an
+        all-NaN rank rather than raising.
+
+        `positive_only` names metrics where a non-positive value is UNDEFINED
+        (e.g. a loss-maker's PE), not merely extreme, and is masked out of the
+        rank rather than ranked as "cheapest".
+        """
+        if "sector" not in frame.columns:
+            raise ValueError(
+                f"sector is required; call {cls.__name__}.attach_sectors() first"
+            )
+
+        frame = frame.copy()
+        for metric in signals:
+            values = frame.get(
+                metric,
+                pd.Series(np.nan, index=frame.index, dtype=float),
+            )
+            if metric in positive_only:
+                values = pd.to_numeric(values, errors="coerce").where(
+                    lambda value: value > 0
+                )
+            if metric in negative_only:
+                values = pd.to_numeric(values, errors="coerce").where(
+                    lambda value: value < 0
+                )
+            frame[f"{metric}_sector_pct"] = cls.rank_within_sector(
+                values,
+                frame["sector"],
+            )
+        return frame
 
     @staticmethod
     def attach_sectors(frame: pd.DataFrame) -> pd.DataFrame:

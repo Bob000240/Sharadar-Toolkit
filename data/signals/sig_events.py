@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-import database.market.event_repo as event_repo
+import database.source.event_repo as event_repo
 from data.signals.sig import Signals
 
 

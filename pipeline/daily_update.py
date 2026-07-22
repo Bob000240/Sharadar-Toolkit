@@ -1,24 +1,24 @@
 """
 Daily incremental update. Run each market day after close.
-    uv run python -m set_up.daily_update
+    uv run python -m pipeline.daily_update
 """
 
 import pandas as pd
-from set_up.config import BENCHMARK_SYMBOLS
-from set_up.load_data import START_DATE
+from pipeline.config import BENCHMARK_SYMBOLS
+from pipeline.load_data import START_DATE
 from data.sharadar_data import SharadarData
 from data.macro_data import MacroData
-from data.indicators import compute_indicators
+from data.technical_features import compute_technical_features
 
-import database.market.equity_repo as equity_repo
-import database.market.fund_repo as fund_repo
-import database.market.indicators_repo as indicators_repo
-import database.market.tickers_repo as tickers_repo
-import database.market.fundamentals_repo as fundamentals_repo
-import database.market.insider_repo as insider_repo
-import database.market.institutional_repo as institutional_repo
-import database.market.event_repo as event_repo
-import database.market.macro_repo as macro_repo
+import database.source.equity_repo as equity_repo
+import database.source.fund_repo as fund_repo
+import database.source.technical_features_repo as technical_features_repo
+import database.source.tickers_repo as tickers_repo
+import database.source.fundamentals_repo as fundamentals_repo
+import database.source.insider_repo as insider_repo
+import database.source.institutional_repo as institutional_repo
+import database.source.event_repo as event_repo
+import database.source.macro_repo as macro_repo
 
 TODAY = pd.Timestamp.today().strftime("%Y-%m-%d")
 
@@ -90,17 +90,17 @@ def update_fund_prices(sh: SharadarData):
     print(f"Fund prices: {len(df):,} rows upserted")
 
 
-# ── indicators (computed locally from equity_prices) ───────────────────────────
+# ── technical features (computed locally from equity_prices) ──────────────────
 
 
-def update_indicators(batch_size: int = 200):
-    ind_latest = indicators_repo.get_latest_dates()
-    if ind_latest.empty:
-        print("Indicators: no base data")
+def update_technical_features(batch_size: int = 200):
+    feature_latest = technical_features_repo.get_latest_dates()
+    if feature_latest.empty:
+        print("Technical features: no base data")
         return
-    missing = indicators_repo.get_missing_price_dates()
+    missing = technical_features_repo.get_missing_feature_dates()
     if missing.empty:
-        print("Indicators: up to date")
+        print("Technical features: up to date")
         return
     missing["date"] = pd.to_datetime(missing["date"])
     missing_dates = {
@@ -120,16 +120,19 @@ def update_indicators(batch_size: int = 200):
             continue
         new_parts = []
         for tk, g in df.sort_values(["ticker", "date"]).groupby("ticker", sort=False):
-            ind = compute_indicators(g.reset_index(drop=True))
-            ind["date"] = pd.to_datetime(ind["date"])
-            wanted = ind["date"].isin(missing_dates[tk])
-            new_parts.append(ind[wanted])
+            features = compute_technical_features(g.reset_index(drop=True))
+            features["date"] = pd.to_datetime(features["date"])
+            wanted = features["date"].isin(missing_dates[tk])
+            new_parts.append(features[wanted])
         new_rows = pd.concat(new_parts, ignore_index=True)
         if not new_rows.empty:
-            indicators_repo.insert(new_rows)
+            technical_features_repo.insert(new_rows)
             total += len(new_rows)
-        print(f"  indicators batch {i // batch_size + 1}/{n_batches}  (+{total:,} rows)")
-    print(f"Indicators: {total:,} new rows ({len(symbols):,} tickers)")
+        print(
+            f"  technical features batch {i // batch_size + 1}/{n_batches}  "
+            f"(+{total:,} rows)"
+        )
+    print(f"Technical features: {total:,} new rows ({len(symbols):,} tickers)")
 
 
 # ── fundamentals / ownership / events (all tickers, by date) ───────────────────
@@ -197,7 +200,7 @@ if __name__ == "__main__":
 
     update_equity_prices(sh)
     update_fund_prices(sh)
-    update_indicators()
+    update_technical_features()
     update_fundamentals(sh)
     update_insider(sh)
     update_events(sh)

@@ -1,3 +1,5 @@
+"""Persistence for daily OHLCV-derived technical features."""
+
 from database.db_connection import get_connection
 import numpy as np
 import pandas as pd
@@ -50,7 +52,32 @@ def create_table():
     with get_connection().begin() as conn:
         conn.execute(
             text("""
-            CREATE TABLE IF NOT EXISTS indicators (
+            DO $$
+            BEGIN
+                IF to_regclass('technical_features') IS NOT NULL
+                   AND to_regclass('indicators') IS NOT NULL THEN
+                    RAISE EXCEPTION
+                        'Both technical_features and legacy indicators tables exist';
+                ELSIF to_regclass('technical_features') IS NULL
+                      AND to_regclass('indicators') IS NOT NULL THEN
+                    ALTER TABLE indicators RENAME TO technical_features;
+                END IF;
+
+                IF to_regclass('technical_features') IS NOT NULL
+                   AND EXISTS (
+                       SELECT 1
+                       FROM pg_constraint
+                       WHERE conrelid = 'technical_features'::regclass
+                         AND conname = 'indicators_pkey'
+                   ) THEN
+                    ALTER TABLE technical_features
+                        RENAME CONSTRAINT indicators_pkey
+                        TO technical_features_pkey;
+                END IF;
+            END
+            $$;
+
+            CREATE TABLE IF NOT EXISTS technical_features (
                 ticker TEXT NOT NULL,
                 date DATE NOT NULL,
                 close DOUBLE PRECISION,
@@ -96,6 +123,7 @@ def create_table():
 
 def drop_table():
     with get_connection().begin() as conn:
+        conn.execute(text("DROP TABLE IF EXISTS technical_features CASCADE"))
         conn.execute(text("DROP TABLE IF EXISTS indicators CASCADE"))
 
 
@@ -107,7 +135,7 @@ def insert(df: pd.DataFrame):
     with get_connection().begin() as conn:
         conn.execute(
             text(
-                f"INSERT INTO indicators ({_COL_LIST}) VALUES ({_BIND_LIST}) ON CONFLICT DO NOTHING"
+                f"INSERT INTO technical_features ({_COL_LIST}) VALUES ({_BIND_LIST}) ON CONFLICT DO NOTHING"
             ),
             records,
         )
@@ -118,7 +146,7 @@ def get(
     start_date: str | None = None,
     end_date: str | None = None,
 ) -> pd.DataFrame:
-    q = "SELECT * FROM indicators WHERE TRUE"
+    q = "SELECT * FROM technical_features WHERE TRUE"
     params = {}
     if tickers is not None:
         params["tickers"] = [tickers] if isinstance(tickers, str) else tickers
@@ -134,7 +162,7 @@ def get(
 
 
 def get_latest_dates(tickers: str | list[str] | None = None) -> pd.DataFrame:
-    q = "SELECT ticker, MAX(date) AS latest_date FROM indicators"
+    q = "SELECT ticker, MAX(date) AS latest_date FROM technical_features"
     params = {}
     if tickers is not None:
         params["tickers"] = [tickers] if isinstance(tickers, str) else tickers
@@ -143,15 +171,15 @@ def get_latest_dates(tickers: str | list[str] | None = None) -> pd.DataFrame:
     return pd.read_sql_query(text(q), get_connection(), params=params)
 
 
-def get_missing_price_dates() -> pd.DataFrame:
-    """Return equity-price keys that do not yet have a matching indicator row."""
+def get_missing_feature_dates() -> pd.DataFrame:
+    """Return equity-price keys without a matching technical-feature row."""
     q = text("""
         SELECT ep.ticker, ep.date
         FROM equity_prices ep
-        LEFT JOIN indicators i
-          ON i.ticker = ep.ticker
-         AND i.date = ep.date
-        WHERE i.ticker IS NULL
+        LEFT JOIN technical_features tf
+          ON tf.ticker = ep.ticker
+         AND tf.date = ep.date
+        WHERE tf.ticker IS NULL
         ORDER BY ep.ticker, ep.date
     """)
     return pd.read_sql_query(q, get_connection())
@@ -169,7 +197,7 @@ def get_latest_rows(
         ticker_clause = "AND ticker = ANY(:tickers)"
     q = text(f"""
         SELECT DISTINCT ON (ticker) *
-        FROM indicators
+        FROM technical_features
         WHERE date <= :signal_day
           {ticker_clause}
         ORDER BY ticker, date DESC

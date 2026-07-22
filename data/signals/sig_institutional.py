@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-import database.market.institutional_repo as institutional_repo
+import database.source.institutional_repo as institutional_repo
 from data.signals.sig import Signals
 
 

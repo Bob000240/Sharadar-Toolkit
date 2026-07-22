@@ -1,3 +1,5 @@
+"""Generate daily technical features from ticker OHLCV history."""
+
 import pandas as pd
 import numpy as np
 from numpy.lib.stride_tricks import sliding_window_view
@@ -7,7 +9,7 @@ def _rolling_trend(close: pd.Series, window: int = 60) -> tuple[pd.Series, pd.Se
     """Vectorized 60-day trend quality: R^2 and annualized slope of a linear fit of
     close vs time. Closed-form rolling regression — replaces per-window
     rolling.apply(corrcoef/polyfit), which ran a Python callable on every window of
-    every ticker and dominated indicator runtime. Same values (leading window-1 rows
+    every ticker and dominated feature-generation runtime. Same values (leading window-1 rows
     and any NaN-containing window are NaN, matching rolling(window).apply)."""
     y = close.to_numpy(dtype=float)
     n = y.size
@@ -78,7 +80,7 @@ def _obv(close: pd.Series, volume: pd.Series) -> pd.Series:
     return (direction * volume).cumsum()
 
 
-def compute_indicators(df: pd.DataFrame):
+def compute_technical_features(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
 
     df["return_1d"] = df["close"].pct_change()

@@ -1,16 +1,16 @@
 """
 Full data load. Run once after setup_db.py.
 
-    uv run python -m set_up.load_data        # NDL_APIKEY + FRED_API_KEY from .env
+    uv run python -m pipeline.load_data        # NDL_APIKEY + FRED_API_KEY from .env
 
 Three stages:
   1. Raw Sharadar tables  -> bulk-exported as zipped CSV (Nasdaq datatables export,
      which runs on the table-API entitlement) and COPY'd into Postgres
      (fast + reproducible; includes delisted tickers).
-  2. `indicators`         -> computed locally from equity_prices.
+  2. `technical_features` -> computed locally from equity_prices.
   3. `macro`              -> pulled from FRED.
 
-The incremental delta (API-based) lives in set_up/daily_update.py.
+The incremental delta (API-based) lives in pipeline/daily_update.py.
 """
 
 import glob
@@ -24,19 +24,19 @@ import pandas as pd
 import nasdaqdatalink
 from dotenv import load_dotenv
 
-from set_up.config import BENCHMARK_SYMBOLS
+from pipeline.config import BENCHMARK_SYMBOLS
 from data.macro_data import MacroData
-from data.indicators import compute_indicators
+from data.technical_features import compute_technical_features
 
-import database.market.equity_repo as equity_repo
-import database.market.fund_repo as fund_repo
-import database.market.indicators_repo as indicators_repo
-import database.market.tickers_repo as tickers_repo
-import database.market.fundamentals_repo as fundamentals_repo
-import database.market.insider_repo as insider_repo
-import database.market.institutional_repo as institutional_repo
-import database.market.event_repo as event_repo
-import database.market.macro_repo as macro_repo
+import database.source.equity_repo as equity_repo
+import database.source.fund_repo as fund_repo
+import database.source.technical_features_repo as technical_features_repo
+import database.source.tickers_repo as tickers_repo
+import database.source.fundamentals_repo as fundamentals_repo
+import database.source.insider_repo as insider_repo
+import database.source.institutional_repo as institutional_repo
+import database.source.event_repo as event_repo
+import database.source.macro_repo as macro_repo
 from database.bulk_copy import copy_insert
 
 load_dotenv()
@@ -106,12 +106,12 @@ def load_sharadar_bulk() -> None:
         load_sharadar_table(code)
 
 
-# ── Stage 2: indicators computed from equity_prices ──────────────────────
+# ── Stage 2: technical features computed from equity_prices ──────────────
 
 
-def load_indicators() -> None:
-    # Compute indicators for EVERY ticker in equity_prices, incl. delisted
-    print("Computing indicators from equity prices (all tickers)...")
+def load_technical_features() -> None:
+    # Compute features for EVERY ticker in equity_prices, including delisted.
+    print("Computing technical features from equity prices (all tickers)...")
     symbols = equity_repo.get_latest_dates()["ticker"].tolist()
     total = 0
     for i in range(0, len(symbols), 50):
@@ -120,12 +120,22 @@ def load_indicators() -> None:
         if df.empty:
             continue
         parts = [
-            compute_indicators(g.reset_index(drop=True))
+            compute_technical_features(g.reset_index(drop=True))
             for _, g in df.sort_values(["ticker", "date"]).groupby("ticker", sort=False)
         ]
-        ind_df = pd.concat(parts, ignore_index=True).replace([np.inf, -np.inf], np.nan)
-        total += copy_insert("indicators", indicators_repo._COLUMNS, ind_df)
-        print(f"  batch {i // 50 + 1}/{-(-len(symbols) // 50)}: {len(ind_df):,} rows")
+        feature_frame = pd.concat(parts, ignore_index=True).replace(
+            [np.inf, -np.inf],
+            np.nan,
+        )
+        total += copy_insert(
+            "technical_features",
+            technical_features_repo._COLUMNS,
+            feature_frame,
+        )
+        print(
+            f"  batch {i // 50 + 1}/{-(-len(symbols) // 50)}: "
+            f"{len(feature_frame):,} rows"
+        )
     print(f"  total: {total:,} rows  ({len(symbols):,} tickers)")
 
 
@@ -143,7 +153,7 @@ def main() -> None:
     print("=== QuorumNexus full load ===")
     print(f"Date range: {START_DATE} → {END_DATE}\n")
     load_sharadar_bulk()
-    load_indicators()
+    load_technical_features()
     load_macro()
     print("\n=== Load complete ===")
 
