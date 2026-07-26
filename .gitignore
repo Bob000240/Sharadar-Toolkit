@@ -1,10 +1,9 @@
 # Hidden files
-.*
+.env
+.venv
 
 # Python
 __pycache__/
-
-tests/
 
 SHARADAR_KEYS.csv
 PROJECT_CONCEPTS.md
