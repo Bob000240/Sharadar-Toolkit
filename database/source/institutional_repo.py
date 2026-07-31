@@ -31,7 +31,6 @@ def create_table():
                 units DOUBLE PRECISION,
                 price DOUBLE PRECISION,
                 securitytype TEXT,
-                lastupdated DATE,
                 PRIMARY KEY (ticker, investorname, calendardate, securitytype)
             );
             CREATE INDEX IF NOT EXISTS idx_institutional_date ON institutional_holdings (calendardate);

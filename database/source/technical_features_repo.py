@@ -46,6 +46,8 @@ _COLUMNS = [
 ]
 _COL_LIST = ", ".join(_COLUMNS)
 _BIND_LIST = ", ".join(f":{c}" for c in _COLUMNS)
+_NON_PK = [c for c in _COLUMNS if c not in ("ticker", "date")]
+_UPDATE_SET = ", ".join(f"{c} = EXCLUDED.{c}" for c in _NON_PK)
 
 
 def create_table():
@@ -135,7 +137,8 @@ def insert(df: pd.DataFrame):
     with get_connection().begin() as conn:
         conn.execute(
             text(
-                f"INSERT INTO technical_features ({_COL_LIST}) VALUES ({_BIND_LIST}) ON CONFLICT DO NOTHING"
+                f"INSERT INTO technical_features ({_COL_LIST}) VALUES ({_BIND_LIST}) "
+                f"ON CONFLICT (ticker, date) DO UPDATE SET {_UPDATE_SET}"
             ),
             records,
         )
@@ -161,14 +164,13 @@ def get(
     return pd.read_sql_query(text(q), get_connection(), params=params)
 
 
-def get_latest_dates(tickers: str | list[str] | None = None) -> pd.DataFrame:
-    q = "SELECT ticker, MAX(date) AS latest_date FROM technical_features"
-    params = {}
-    if tickers is not None:
-        params["tickers"] = [tickers] if isinstance(tickers, str) else tickers
-        q += " WHERE ticker = ANY(:tickers)"
-    q += " GROUP BY ticker"
-    return pd.read_sql_query(text(q), get_connection(), params=params)
+def is_empty() -> bool:
+    """Whether any features have been computed yet. EXISTS short-circuits on the
+    first row, unlike a per-ticker GROUP BY over the whole table."""
+    with get_connection().connect() as conn:
+        return conn.execute(
+            text("SELECT NOT EXISTS (SELECT 1 FROM technical_features)")
+        ).scalar()
 
 
 def get_missing_feature_dates() -> pd.DataFrame:
@@ -183,6 +185,19 @@ def get_missing_feature_dates() -> pd.DataFrame:
         ORDER BY ep.ticker, ep.date
     """)
     return pd.read_sql_query(q, get_connection())
+
+
+def get_stale_feature_tickers() -> list[str]:
+    q = text("""
+        SELECT DISTINCT ep.ticker
+        FROM equity_prices ep
+        JOIN technical_features tf
+          ON tf.ticker = ep.ticker
+         AND tf.date = ep.date
+        WHERE ep.close IS DISTINCT FROM tf.close
+        ORDER BY ep.ticker
+    """)
+    return pd.read_sql_query(q, get_connection())["ticker"].tolist()
 
 
 def get_latest_rows(

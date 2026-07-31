@@ -39,6 +39,12 @@ class SharadarData:
             r["lte"] = end
         return r or None
 
+    # `lastupdated_since` below filters on the sync watermark: the date Sharadar
+    # last WROTE the row, which is not the row's own date. It is the only filter
+    # that surfaces revisions to old periods (SF1 restatements, SEP split
+    # re-adjustments). Available on SEP/SFP/SF1/TICKERS only — SF2/SF3/EVENTS
+    # don't expose it. Passing None omits the filter entirely.
+
     # -------------------------------------------------------------------------
     # SF1 -- income statement, balance sheet, and cash flow data for US equities,
     #        sourced from SEC filings (10-K, 10-Q).
@@ -50,6 +56,7 @@ class SharadarData:
         dimension: str | list[str] | None = None,
         start_date: str | None = None,
         end_date: str | None = None,
+        lastupdated_since: str | None = None,
         paginate=True,
     ) -> pd.DataFrame:
         return nasdaqdatalink.get_table(
@@ -58,6 +65,7 @@ class SharadarData:
                 ticker=tickers,
                 dimension=dimension,
                 calendardate=self._date_range(start_date, end_date),
+                lastupdated=self._date_range(lastupdated_since, None),
             ),
             paginate=paginate,
         )
@@ -109,11 +117,16 @@ class SharadarData:
         tickers: str | list[str] | None = None,
         start_date: str | None = None,
         end_date: str | None = None,
+        lastupdated_since: str | None = None,
         paginate=True,
     ) -> pd.DataFrame:
         return nasdaqdatalink.get_table(
             "SHARADAR/SEP",
-            **self._params(ticker=tickers, date=self._date_range(start_date, end_date)),
+            **self._params(
+                ticker=tickers,
+                date=self._date_range(start_date, end_date),
+                lastupdated=self._date_range(lastupdated_since, None),
+            ),
             paginate=paginate,
         )
 
@@ -127,11 +140,16 @@ class SharadarData:
         table: str = "SEP",
         tickers: str | list[str] | None = None,
         is_delisted: bool | None = None,
+        lastupdated_since: str | None = None,
         paginate=True,
     ) -> pd.DataFrame:
         df = nasdaqdatalink.get_table(
             "SHARADAR/TICKERS",
-            **self._params(table=table, ticker=tickers),
+            **self._params(
+                table=table,
+                ticker=tickers,
+                lastupdated=self._date_range(lastupdated_since, None),
+            ),
             paginate=paginate,
         )
         if is_delisted is not None:
@@ -165,11 +183,16 @@ class SharadarData:
         tickers: str | list[str] | None = None,
         start_date: str | None = None,
         end_date: str | None = None,
+        lastupdated_since: str | None = None,
         paginate=True,
     ) -> pd.DataFrame:
         return nasdaqdatalink.get_table(
             "SHARADAR/SFP",
-            **self._params(ticker=tickers, date=self._date_range(start_date, end_date)),
+            **self._params(
+                ticker=tickers,
+                date=self._date_range(start_date, end_date),
+                lastupdated=self._date_range(lastupdated_since, None),
+            ),
             paginate=paginate,
         )
 

@@ -18,7 +18,6 @@ import database.source.institutional_repo as institutional_repo
 import database.source.event_repo as event_repo
 import database.source.macro_repo as macro_repo
 import database.state.strategy_profiles_repository as profiles_repo
-import database.state.decision_memory_repository as memory_repo
 
 
 def enable_pgvector():
@@ -29,7 +28,6 @@ def enable_pgvector():
 
 def drop_all():
     tables = [
-        "decision_memory",
         "strategy_profiles",
         "events",
         "institutional_holdings",
@@ -37,7 +35,6 @@ def drop_all():
         "fundamentals",
         "tickers",
         "technical_features",
-        "indicators",  # Legacy name; clean either schema during destructive setup.
         "fund_prices",
         "equity_prices",
         "macro",
@@ -73,8 +70,6 @@ def create_all():
     # Operational
     profiles_repo.create_table()
     print("  created strategy_profiles (empty; register strategies via pipeline.main register)")
-    memory_repo.create_table()
-    print("  created decision_memory")
 
     print("All tables created")
 

@@ -313,3 +313,9 @@ def get_latest_rows(
         ORDER BY ticker, datekey DESC
     """)
     return pd.read_sql_query(q, get_connection(), params=params)
+
+
+def get_sync_cursor() -> str | None:
+    with get_connection().connect() as conn:
+        result = conn.execute(text("SELECT MAX(lastupdated) FROM fundamentals")).scalar()
+        return str(result) if result else None

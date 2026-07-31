@@ -1,7 +1,5 @@
 # Hidden files
-.env
-.venv
-
+.*
 # Python
 __pycache__/
 
@@ -10,3 +8,5 @@ PROJECT_CONCEPTS.md
 PROJECT_IMPLEMENTATION.md
 
 QN/
+
+tests/

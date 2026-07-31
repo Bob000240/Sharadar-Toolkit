@@ -79,7 +79,7 @@ def main():
 
         name = sys.argv[2]
         if profiles_repo.retire_profile(name):
-            print(f"retired {name} (row kept as decision_memory anchor)")
+            print(f"retired {name} (row kept in registry; re-register to reactivate)")
         else:
             print(f"no profile named {name}")
 

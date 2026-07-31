@@ -120,3 +120,9 @@ def get(
         q += " AND isdelisted = :delisted"
     q += " ORDER BY ticker"
     return pd.read_sql_query(text(q), get_connection(), params=params)
+
+
+def get_sync_cursor() -> str | None:
+    with get_connection().connect() as conn:
+        result = conn.execute(text("SELECT MAX(lastupdated) FROM tickers")).scalar()
+        return str(result) if result else None

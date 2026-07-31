@@ -1,10 +1,11 @@
 """Strategy-profile descriptor rows: {name, description, active}.
 
-A profile is a thin registry entry — the FK anchor for decision_memory and a
-human/agent-readable label. It holds no strategy logic or sizing: conditions are
-the strategy's code, sizing is the portfolio manager's. Rows are written by
-`pipeline.main register/retire` from each strategy's NAME/DESCRIPTION constants,
-not seeded here.
+A profile is a thin registry entry — the record of which strategies exist and
+whether they're active, plus a human-readable label. It holds no strategy logic
+or sizing: conditions are the strategy's code, sizing is the portfolio manager's.
+A strategy refuses to run unless its profile exists and is active. Rows are
+written by `pipeline.main register/retire` from each strategy's NAME/DESCRIPTION
+constants, not seeded here.
 """
 
 from __future__ import annotations
@@ -46,9 +47,9 @@ def upsert_profile(name: str, description: str) -> None:
 
 
 def retire_profile(name: str) -> bool:
-    """Soft-retire: mark inactive so no new entries run. The row is kept — it
-    anchors the strategy's historical decision_memory trades, so it must outlive
-    them. Returns False if no such profile exists."""
+    """Soft-retire: mark inactive so no new entries run. The row is kept so the
+    strategy can be reactivated (via upsert) and stays in the registry's history
+    rather than vanishing. Returns False if no such profile exists."""
     sql = text("UPDATE strategy_profiles SET active = FALSE WHERE name = :name")
     with get_connection().begin() as conn:
         return conn.execute(sql, {"name": name}).rowcount > 0

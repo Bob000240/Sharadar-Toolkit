@@ -1,111 +1,144 @@
-# QuorumNexus — Project Implementation
+# QuorumNexus — Research Platform Implementation
 
-Last reconciled with the repository: **2026-07-21**
+Last reconciled with the repository: **2026-07-26**
 
 ## Purpose
 
-QuorumNexus is being built as an auditable, point-in-time portfolio-management
-pipeline:
+QuorumNexus is an auditable, point-in-time equity research platform.
 
-1. deterministic data and signal services expose facts;
-2. deterministic strategies turn those facts into candidate and exit packets;
-3. a bounded portfolio-management agent chooses from valid candidates and sizes them
-   through a portfolio-manager tool (risk-based allocation, not a strategy parameter);
-4. deterministic risk validates that sizing against hard portfolio constraints;
-5. execution opens or closes positions; and
-6. completed trades become searchable decision memory.
+It helps a researcher:
 
-The repository currently implements the data foundation, six signal services, one
-partially completed deterministic strategy, strategy profiles, and the completed-trade
-repository. The orchestration, agent-tool loop, risk validator, position store, and
-production execution path are not implemented.
+1. define a reproducible universe, filter set, and ranking model;
+2. discover and compare companies using information available on a chosen date;
+3. inspect the evidence behind every score, inclusion, and exclusion;
+4. replay the same research method historically;
+5. save a falsifiable thesis and monitor changes to its evidence; and
+6. learn from prior research without requiring an automated trade.
 
-This document describes what exists now and clearly separates it from planned work.
+The platform supports investment decisions. It does not manage a portfolio or place
+orders.
+
+## Product boundary
+
+### In scope
+
+- Point-in-time market, fundamental, event, ownership, and macro data
+- Declarative screens and ranking models
+- Explainable candidate lists and company dossiers
+- Saved and versioned research runs
+- Historical replay and model evaluation
+- Thesis notes, counterevidence, invalidation conditions, and research journals
+- Evidence-change alerts
+- An optional AI research assistant grounded in platform facts
+
+### Out of scope
+
+- Brokerage, custody, and order execution
+- Automated portfolio management
+- Position sizing and capital allocation
+- Broker reconciliation and fill handling
+- Stop-loss or automated exit execution
+- A trading agent that accepts candidates and submits orders
+- Open-position state and completed-trade memory
+
+Alpaca may remain a market-data provider. It is not part of an execution path.
 
 ## Current implementation status
 
 | Area | Status | Current reality |
 |---|---|---|
-| PostgreSQL market data | Implemented | Sharadar/FRED tables and repositories exist. |
-| Initial and incremental loading | Implemented | Bulk load and daily update modules exist; operational runs still require credentials and monitoring. |
-| Technical features | Implemented | Computed locally and stored in `technical_features`. |
-| Signal layer | Implemented | Six stateless DataFrame services with raw `get_signals()` methods and opt-in `attach_*()` transformations. |
-| Deterministic strategies | Partial | Only `sector_leaders` remains active. Its eligibility and exits work, but final ranking and top-five-per-sector selection are TODO. |
-| Strategy profiles | Implemented | Thin `{name, description, active}` registry; `sector_leaders` registered via `pipeline.main register`. |
-| Candidate orchestration | Not implemented | There is no registry/runner that coordinates strategies and agent handoff. |
-| Agentic PM | Not implemented | `pm_agent.py` contains commented legacy code; only a thin LLM client remains active. |
-| Deterministic portfolio risk | Not implemented | Profile limits exist, but no portfolio-level validator applies them. |
-| Open-position state | Not implemented | No `position.json` reader/writer or lifecycle exists. |
-| Execution | Partial, not integrated | Alpaca market data and Schwab adapters exist; neither is connected to the new strategy pipeline. |
-| Decision memory | Repository implemented | Schema and point-in-time retrieval functions exist; no live lifecycle writes to it yet. |
-| Automated tests | Passing locally | 52 tests pass; Ruff and compilation pass as of this reconciliation. |
+| PostgreSQL market data | Implemented | Sharadar and FRED tables and repositories exist. |
+| Initial and incremental loading | Implemented | Bulk load and daily update modules exist; operational use requires credentials and monitoring. |
+| Technical features | Implemented | Features are calculated locally and stored in `technical_features`. |
+| Point-in-time signal services | Implemented | Six stateless services expose technical, fundamental, event, insider, institutional, and macro facts. |
+| Generic field catalog | Branch work | `platform-pipeline` contains a declarative field registry intended to drive validation, ranking, and future UI controls. |
+| Generic filtering and ranking | Branch work | `platform-pipeline` contains parameterized filter, ranker, and screen orchestration modules. |
+| `sector_leaders` | Experimental | It exercises screening and ranking but has no reliable saved evidence of predictive value. It is a preset, not the architecture. |
+| Historical evaluation | Not active | The previous harness is deleted in the current worktree and must be replaced with an adjusted-return, experiment-oriented evaluator. |
+| Saved research runs | Not implemented | Screen results and their specifications are not persisted. |
+| Company dossiers | Not implemented | Facts exist, but there is no unified research-facing dossier contract. |
+| Thesis and journal storage | Not implemented | No research thesis lifecycle exists. |
+| API and user interface | Not implemented | The project is currently a Python/CLI research engine. |
+| Alerts | Not implemented | Evidence changes are not persisted or compared between runs. |
+| Automated tests | Passing | 52 tests pass locally; one third-party deprecation warning remains. |
 
-## Architecture
+## Target architecture
 
 ```text
-Sharadar / FRED / live market APIs
+Sharadar / FRED / market-data APIs
                  |
                  v
-        PostgreSQL repositories
+        PostgreSQL source repositories
                  |
                  v
-     stateless DataFrame signal services
+     point-in-time signal and feature services
                  |
                  v
-      deterministic strategy packets
-                 |
-        [not implemented yet]
-                 v
- agent selection -> risk validation -> execution
+        field catalog + ScreenSpec
                  |
                  v
- position state -> completed-trade decision memory
+      filter -> rank -> explain -> persist
+                 |
+        +--------+---------+
+        |                  |
+        v                  v
+ company dossier     historical evaluator
+        |                  |
+        +--------+---------+
+                 |
+                 v
+      thesis / journal / evidence alerts
+                 |
+                 v
+             API and UI
 ```
 
 ### Separation of responsibilities
 
-The architectural boundary is:
+- Source repositories retrieve and store vendor or calculated rows.
+- Signal services expose objective, point-in-time facts and derived measurements.
+- The field catalog describes which facts can be filtered or ranked, their units,
+  canonical direction where one exists, coverage limits, and research definitions.
+- A `ScreenSpec` is the complete serializable description of a research screen.
+- The screen engine assembles facts, applies filters, ranks candidates, and explains
+  attrition.
+- Research persistence freezes the specification, data cutoff, candidates, scores,
+  evidence, and model version for each run.
+- The evaluator replays saved specifications and measures them against explicit
+  baselines.
+- Dossiers organize evidence around one company without manufacturing a verdict.
+- Theses store the researcher's claims, counterevidence, catalysts, and invalidation
+  conditions.
+- The API and UI expose the same contracts used by replay and tests.
+- An AI assistant may summarize, compare, and challenge evidence, but it must cite
+  platform facts and may not silently alter a screen or score.
 
-- repositories retrieve and store database rows;
-- signal services expose raw point-in-time rows and optional derived facts;
-- strategies own their full pipeline **as code** — eligibility (prefilter), gates,
-  selection/ranking, and exit rules — including every threshold, kept as named
-  `CALIBRATION` constants next to the research that justifies them;
-- the future agent chooses among strategy-approved candidates and expresses conviction;
-- a portfolio-manager tool (called by the agent) owns sizing and allocation: it turns
-  the chosen candidates plus conviction into position weights and caps;
-- deterministic risk enforces hard portfolio constraints on what the PM proposes; and
-- execution owns broker mutations.
-
-A strategy decides *what* to buy and *when its thesis is broken*; it does not decide
-*how much*. Sizing is not a strategy parameter — it is the portfolio manager's job.
-
-Signal services must not contain strategy verdicts such as “buy,” “hostile regime,”
-“heavy selling,” or “delisting risk.” They may calculate objective values such as an
-event-code list, days since an event, percentile rank, or quarter-over-quarter change.
-The consumer interprets those values.
+Signal services must not contain verdicts such as `buy`, `sell`, `hostile regime`, or
+`heavy selling`. They may calculate objective values such as event codes, days since an
+event, percentile ranks, or quarter-over-quarter changes. A saved screen or researcher
+decides how those facts should be interpreted.
 
 ## Repository layout
 
 | Path | Responsibility |
 |---|---|
 | `data/sharadar_data.py` | Sharadar API access for incremental loads. |
-| `data/macro_data.py` | FRED ingestion and point-in-time release alignment. |
-| `data/technical_features.py` | Local OHLCV-derived technical-feature calculation. |
-| `data/live_equity.py` | Alpaca historical/intraday market-data adapter. |
-| `data/signals/` | Stateless signal DataFrame services. |
-| `database/source/` | Market-data table creation, insert/upsert, and read repositories. |
-| `database/state/` | Strategy profiles and completed-trade decision memory. |
-| `decision/strategies/` | Active deterministic entry and exit logic. |
-| `decision/agent/` | Future bounded PM layer; currently mostly a placeholder. |
-| `pipeline/setup_db.py` | Database extensions and table creation. |
-| `pipeline/load_data.py` | Initial bulk Sharadar load, technical features, and macro load. |
-| `pipeline/daily_update.py` | Incremental market-data and technical-feature updates. |
-| `schwab/` | Schwab authentication, market data, and trading adapter. |
+| `data/macro_data.py` | FRED ingestion and release-aware macro alignment. |
+| `data/technical_features.py` | OHLCV-derived technical feature calculation. |
+| `data/live_equity.py` | Alpaca market-data adapter. |
+| `data/signals/` | Stateless point-in-time signal and feature services. |
+| `database/source/` | Source table creation, ingestion, and read repositories. |
+| `database/state/` | Temporary home of the legacy strategy-preset registry; future research persistence belongs here or in a renamed research package. |
+| `decision/strategies/` | Experimental hard-coded screens awaiting migration to serializable presets. |
+| `decision/tools/` | Target location for the field registry, filters, ranker, and screen orchestration after branch work is merged. |
+| `pipeline/setup_db.py` | Database extension and table creation. |
+| `pipeline/load_data.py` | Initial Sharadar, technical-feature, and macro load. |
+| `pipeline/daily_update.py` | Incremental data and feature updates. |
+| `research/` | Target location for run persistence, replay, evaluation, dossiers, and thesis workflows. |
 
-Legacy momentum, value, quality, sector-rotation, screening-feature, and universe-cache
-implementations have been removed. They are not active architecture and should not be
-referenced as current strategy components.
+The legacy names `decision` and `strategy_profiles` may be renamed after the generic
+screen pipeline is stable. Renaming is lower priority than establishing clear research
+contracts.
 
 ## Data foundation
 
@@ -120,42 +153,25 @@ referenced as current strategy components.
 | Insider transactions | Sharadar SF2 | `insider_transactions` | `database/source/insider_repo.py` |
 | Institutional holdings | Sharadar SF3 | `institutional_holdings` | `database/source/institutional_repo.py` |
 | Corporate events | Sharadar EVENTS | `events` | `database/source/event_repo.py` |
-| Technical features | Locally calculated from OHLCV | `technical_features` | `database/source/technical_features_repo.py` |
+| Technical features | Calculated from OHLCV | `technical_features` | `database/source/technical_features_repo.py` |
 | Macro history | FRED | `macro` | `database/source/macro_repo.py` |
 
 The initial history begins at `2016-01-01`. `pipeline/load_data.py` bulk-exports
-Sharadar tables, loads them into PostgreSQL, computes technical features for every ticker
-with price history (including delisted names), and then loads macro history.
+Sharadar tables, loads PostgreSQL, calculates technical features for available price
+history, and loads macro history.
 
-`pipeline/daily_update.py` incrementally updates prices, technical features, fundamentals,
-insider transactions, events, ticker metadata, institutional holdings, and macro data.
+`pipeline/daily_update.py` incrementally updates prices, technical features,
+fundamentals, insider transactions, events, ticker metadata, institutional holdings,
+and macro data.
 
-### Database setup
-
-`pipeline/setup_db.py` enables pgvector and creates:
-
-- `equity_prices`
-- `fund_prices`
-- `technical_features`
-- `tickers`
-- `fundamentals`
-- `insider_transactions`
-- `institutional_holdings`
-- `events`
-- `macro`
-- `strategy_profiles`
-- `decision_memory`
-
-Running the module directly currently calls `drop_all()` before `create_all()`.
-It is destructive and must not be treated as a routine migration command.
+Running `pipeline.setup_db` currently drops tables before recreating them. It is a
+destructive bootstrap operation, not a routine migration command.
 
 ## Signal layer
 
-### Contract
-
 All concrete signal classes inherit from `data.signals.sig.Signals`.
 
-Each service follows this interface:
+The service contract is:
 
 ```python
 frame = SomeSignals.get_signals(..., signal_day)
@@ -164,502 +180,877 @@ frame = SomeSignals.attach_something(frame, ...)
 
 Rules:
 
-- `get_signals()` returns the default point-in-time rows from the relevant SQL
-  repository with only light shape/date normalization.
-- Derived features are opt-in `attach_*()` class methods.
-- Attachments return a copy or a new DataFrame; callers choose which ones to use.
-- Public domain methods are named `get_signals()` or `attach_*()`.
-- Calculation helpers use protected `_method` names.
-- Signal services hold no per-run instance state.
-- There are no signal-layer `Model` or `Snapshot` wrapper classes.
+- `get_signals()` returns point-in-time rows with light shape and date normalization.
+- Derived features are opt-in `attach_*()` methods.
+- Attachments return a copy or a new DataFrame.
+- Signal services retain no per-run instance state.
+- Percentile ranks are direction-free facts in `[0, 100]`.
+- Ranking direction and weights belong to a serializable research specification.
 
-`CandidateSnapshot` and `ExitSnapshot` still exist in the strategy module. Those are
-strategy boundary packets, not signal wrappers, so they do not violate this contract.
-They may eventually be renamed to `CandidatePacket` and `ExitPacket` for clarity.
-
-### Shared helpers
-
-`data/signals/sig.py` provides:
-
-- safe division and growth;
-- positive ratios;
-- market-wide percentile ranks;
-- within-sector percentile ranks; and
-- ticker-sector attachment from the metadata repository.
-
-Percentile methods produce values in `[0, 100]`. They are direction-free: a high
-percentile only means a high raw value. The strategy decides whether high or low is
-desirable.
-
-### Signal services
-
-| Service | Raw `get_signals()` output | Optional attachments |
-|---|---|---|
-| `TechnicalSignals` | Latest technical-feature row per ticker, indexed by ticker. | Market return percentiles; sector medians/ranks/relative returns; SPY or other benchmark excess returns. |
-| `FundamentalSignals` | Latest available ART fundamental row per ticker, indexed by ticker. | Quarterly YoY growth; annual five-year history/change/volatility; calculated ratios; sector-relative metric percentiles. |
-| `EventSignals` | Event rows inside the requested lookback window. | One row per requested ticker with earnings/13D recency and parsed recent event codes. |
-| `InsiderSignals` | Filing-date-safe raw insider transactions with enough history to classify repeated purchases. | Purchase classification; ticker-level 30/90-day activity facts; market-cap normalization. |
-| `InstitutionalSignals` | Raw holdings from conservatively available quarters. | Latest-quarter totals and quarter-over-quarter holder/value/unit changes. |
-| `MacroSignals` | Point-in-time macro history through the signal date. | Calendar-lookback directional changes and claims statistics. |
-
-Event, insider, and institutional source tables are one-to-many by ticker. Their raw
-frames retain that grain, while their aggregate attachments deliberately return one
-ticker-indexed row per requested ticker, including tickers with no matching source rows.
-
-### Signal composition examples
-
-Technical strategy facts:
-
-```python
-technicals = TechnicalSignals.get_signals(tickers, signal_day)
-technicals = TechnicalSignals.attach_sectors(technicals)
-technicals = TechnicalSignals.attach_return_percentiles(technicals)
-technicals = TechnicalSignals.attach_sector_features(technicals, signal_day)
-```
-
-Fundamental research facts:
-
-```python
-fundamentals = FundamentalSignals.get_signals(tickers, signal_day)
-fundamentals = FundamentalSignals.attach_sectors(fundamentals)
-fundamentals = FundamentalSignals.attach_growth(fundamentals, signal_day)
-fundamentals = FundamentalSignals.attach_history_features(
-    fundamentals,
-    signal_day,
-)
-fundamentals = FundamentalSignals.attach_ratios(fundamentals)
-fundamentals = FundamentalSignals.attach_sector_ranks(fundamentals)
-```
-
-One-to-many event facts:
-
-```python
-event_rows = EventSignals.get_signals(tickers, signal_day)
-event_facts = EventSignals.attach_event_facts(
-    event_rows,
-    tickers,
-    signal_day,
-)
-```
+| Service | Purpose |
+|---|---|
+| `TechnicalSignals` | Latest price-derived features and relative-return context. |
+| `FundamentalSignals` | Latest available fundamentals, calculated ratios, growth, and history features. |
+| `EventSignals` | Recent filing/event codes and event recency. |
+| `InsiderSignals` | Filing-safe transactions, purchase classification, and recent activity facts. |
+| `InstitutionalSignals` | Conservatively available holdings and quarter-over-quarter ownership changes. |
+| `MacroSignals` | Release-aware macro history, directional changes, and labor statistics. |
 
 ## Point-in-time requirements
 
-Every strategy and signal query must use only information available on or before its
+Every screen, dossier, and replay must use only information available on or before its
 `signal_day`.
 
 Current protections include:
 
-- latest technical-feature rows are constrained to `date <= signal_day`;
-- the active universe requires a trade within ten calendar days of `signal_day`,
-  preventing stale delisted “zombie” rows;
-- fundamentals use `datekey <= signal_day`;
-- insider transactions are filtered by `filingdate <= signal_day`;
-- events are filtered by event date through `signal_day`;
-- institutional holdings use a conservative 45-day post-quarter filing delay;
-- release-sensitive macro series are aligned to first-release availability dates; and
-- decision-memory retrieval requires `exit_date < decision_date`.
+- technical rows constrained to `date <= signal_day`;
+- a recent-trade requirement that prevents stale delisted rows from appearing active;
+- fundamentals constrained by `datekey <= signal_day`;
+- insider transactions constrained by filing date;
+- events constrained to dates visible by the signal day;
+- institutional holdings delayed by a conservative 45 days after quarter end; and
+- release-sensitive macro series aligned to first-release availability.
 
 Known limitations:
 
-1. `tickers` stores current sector labels rather than historically versioned labels.
-   Historical sector-relative ranks can therefore contain classification look-ahead.
-   Treat older sector backtests cautiously until sector history is sourced.
-2. Institutional data lacks actual filing acceptance dates. The universal 45-day delay
-   is conservative but approximate, so institutional facts remain research/evidence
-   context rather than deterministic gates.
-3. Sharadar revision/restatement storage semantics still need a targeted audit to prove
-   that revised historical fundamentals cannot overwrite what was known earlier.
-4. The event service defaults to a 20-day window. Its “days since” outputs therefore
-   mean days since an event found within that window, not unbounded historical recency.
+1. `tickers` contains current sector classifications rather than versioned sector
+   history. Historical sector-relative ranks may contain classification look-ahead.
+2. Institutional data does not retain every filing's actual acceptance timestamp. The
+   45-day availability estimate is conservative but approximate.
+3. Sharadar revision and restatement semantics require a focused audit to prove that
+   revised historical fundamentals cannot overwrite the earlier information set.
+4. Event lookback windows are bounded; a “days since” value means days since a matching
+   event inside that window.
+5. Five-year change features require roughly six years of annual history and are
+   sparsely populated in early replay periods.
 
-## Active deterministic strategy
+Every persisted research run must record:
 
-### `sector_leaders`
+- the requested signal date;
+- the actual source-data cutoff or freshness;
+- the full `ScreenSpec`;
+- a model/specification version;
+- coverage and missingness;
+- every filter's attrition; and
+- the evidence used to calculate each candidate score.
 
-`decision/strategies/strat_sector_leaders.py` is the only active strategy.
-It contains:
+## Generic screening contract
 
-- `SLEntryScreener`
-- `SLExitMonitor`
-- `CandidateSnapshot`
-- `ExitSnapshot`
+A research screen consists of:
 
-The strategy exposes `NAME` and `DESCRIPTION` module constants; these are the source of
-truth for its profile row. Sizing and conviction weighting are **not** the strategy's
-concern; they belong to the portfolio-manager tool. Exit thresholds (max loss, trailing
-stop) live in the strategy file as named `CALIBRATION` constants, not in the profile.
+- a structural universe;
+- zero or more elective filters;
+- optional ranking sleeves;
+- explicit cross-sleeve weights;
+- direction overrides for ambiguous fields;
+- an optional result cut such as top N by sector; and
+- a name, description, and version.
 
-The `sector_leaders` profile row is a thin descriptor — `{name, description, active}`.
-It is written by `pipeline.main register` from the strategy's constants, not seeded at
-setup. `SLEntryScreener` refuses to run if the profile is missing or `active = false`;
-`SLExitMonitor` requires only that the row exists (a retired strategy must still exit its
-open positions).
+The same serializable specification must be consumed by:
 
-### Entry pipeline
+- the interactive screen builder;
+- scheduled research runs;
+- historical replay;
+- saved-run inspection; and
+- the AI research assistant.
 
-The SQL prefilter defines **eligibility** — who the strategy may buy — point-in-time as of
-the signal day. Every condition and why it is there:
+This prevents the tested method from drifting away from the live screen.
 
-| Condition | Threshold | Source | Why |
-|---|---|---|---|
-| Listing & type | Sharadar SEP · USD · NYSE/NASDAQ · domestic common, non-secondary | `tickers` | Tradeable US common equity only — excludes ADRs, funds, secondary classes, OTC. |
-| Liquidity | median 20-session dollar volume ≥ `$5M`, ≥15 of the last 20 rows present | `equity_prices` | Exitable without moving the price (Amihud illiquidity); the 15-row floor drops sparse / just-listed names. |
-| Recency | last trade within 10 calendar days of the signal day | `equity_prices` | Point-in-time correctness — the name actually traded near the signal day. This, not an `isdelisted` flag, keeps names alive at a past date (no survivorship bias) and drops stale "zombie" rows. |
-| Size | PIT market cap ≥ `$1B` | `fundamentals` (SF1 ART, by `datekey`) | Mid-cap-and-up only ("play it safe") — cuts small/micro blow-up, illiquidity, and fraud tail risk. From the ART filing, never current-state `scalemarketcap` (avoids look-ahead). |
-| Profitability | trailing common net income > 0 | `fundamentals` (SF1 ART) | Screens out froth-era story stocks (~35% of liquid mid-caps in mid-2021). Momentum + *profitability*, not + cheapness (Novy-Marx 2013; Piotroski F #1). |
-| Absolute uptrend | `return_60d > 0` and `return_252d > 0` | `technical_features` | Winner over intermediate and long horizons (time-series momentum, Moskowitz-Ooi-Pedersen 2012); an *absolute* floor (not just a percentile) cuts crash exposure. |
-| Primary uptrend | `close > sma_200` | `technical_features` | Still above the 200-day — catches "was a winner, now rolling over" names the return floors miss (Faber 2007 trend filter). |
+Sector percentile ranks should be calculated over the structural comparison universe
+before elective filters. Otherwise a score changes meaning whenever a filter is added
+or removed.
 
-The strategy then explicitly attaches technical sectors, return percentiles, and sector
-features. It parses recent event facts and excludes:
+### Universe specification fields
 
-| Event code | Strategy interpretation |
-|---|---|
-| `31` | delisting risk |
-| `13` | bankruptcy |
-| `42` | restatement |
-| `36` | late filing |
-| `26` | material impairment |
+The universe specification controls the base security population. It contains
+categorical security-master choices and point-in-time activity requirements, not
+fundamental or technical opinions. The initial defaults reproduce a liquid US common
+stock research population without forcing a market-cap, profitability, or momentum
+view.
 
-`close > sma_200` now lives in the prefilter (above). The remaining per-candidate gate
-before ranking is `trend_slope_60d * r_squared_60d > 0` (trend confirmed upward).
-
-Non-disqualifying context flags include overbought RSI, low liquidity, deep drawdown,
-loose consolidation, high volatility, elevated ATR, recent earnings, and mega-cap
-crowding.
-
-### Current ranking gap
-
-The intended result is each sector's strongest healthy trends, ultimately retaining the
-top five per sector. That ranking is **not implemented**:
-
-- every candidate currently receives `setup_score = 0.0`;
-- the proposed trend-quality formula is still a TODO; and
-- `SLEntryScreener.run()` returns all passing candidates rather than a top-five-per-sector
-  menu.
-
-This is the highest-priority deterministic implementation gap.
-
-### Ranking signals
-
-Eligible names are scored by a within-sector composite of five sleeves. Signals are
-direction-tagged (`+1` higher-is-better, `-1` lower-is-better — the strategy applies the
-flip); within a sleeve, signals are equal-weighted. The **between-sleeve weights are the
-deliberate tuning knob and are not yet fixed**, and the composite is not yet wired (see the
-ranking gap above). Only evidenced factors are used — chart-reading indicators (RSI, MACD,
-OBV, EMA crossovers, short-horizon returns) are deliberately excluded from ranking.
-
-**Technical — momentum quality** (the strategy's lead thesis)
-
-| Signal | Dir | Why |
+| Name | Allowed values or range | Datatype |
 |---|---|---|
-| `vol_adjusted_momentum` | +1 | Volatility-scaled momentum; halves momentum crashes and lifts Sharpe (Barroso & Santa-Clara 2015). |
-| `r_squared_60d` | +1 | Trend smoothness — gradual trends persist, jumpy ones revert ("frog in the pan", Da-Gurun-Warachka 2014). |
-| `pct_from_52w_high` | +1 | 52-week-high momentum, a distinct published signal (George & Hwang 2004). |
+| `security_types` | One or more registered types; initially `common_stock` only. Future types may include `adr`, `preferred_stock`, `etf`, and `closed_end_fund` after their source coverage is validated. | `tuple[str, ...]` |
+| `exchanges` | One or more registered exchange codes; initially `NYSE` and `NASDAQ`. OTC must require an explicit choice. | `tuple[str, ...]` |
+| `include_tickers` | Zero or more normalized ticker symbols. Explicit includes must still satisfy point-in-time data-integrity rules. | `tuple[str, ...]` |
+| `exclude_tickers` | Zero or more normalized ticker symbols. Exclusion wins if a symbol appears in both include and exclude lists. | `tuple[str, ...]` |
+| `recent_trade_days` | Integer from `1` through `30`. Values above `10` should produce a stale-security warning. | `int` |
 
-**Value** — cheapness (Fama-French HML; composited across multiples per Asness)
+`countries`, `security_types`, and exchange values require a normalization layer over
+the vendor metadata. A value is not offered to users until its mapping and historical
+coverage have been validated.
 
-| Signal | Dir | Why |
+### Filter field catalog
+
+Every filter uses a registered field plus an operator and value. Numeric percentages
+and returns are stored as decimal ratios unless the field explicitly says
+“percentage points.” For example, `0.15` means 15%, while a 10-year Treasury yield of
+`4.25` means 4.25 percentage points.
+
+The common numeric operators are `<`, `<=`, `=`, `!=`, `>=`, `>`, and `between`.
+Categorical fields use `in` and `not_in`; collection fields use `contains_any`,
+`contains_all`, and `excludes_any`. Null handling must be explicit through `is_null` or
+`not_null`; missing values never silently pass a numeric filter.
+
+Fields marked † have source data and signal calculations but still need to be wired
+into the generic screen engine. Macro fields marked ‡ apply to the entire research run,
+not to individual companies: if the regime condition fails, the run has no candidates.
+
+| Name | Valid value range | Datatype |
 |---|---|---|
-| `pe` | -1 | Earnings multiple (Basu 1977); low = cheap. |
-| `ps` | -1 | Sales multiple; harder to manipulate than earnings. |
-| `evebitda` | -1 | EV/EBITDA; debt-aware, operating-earnings based (Loughran-Wellman 2011). |
-| `fcf_yield` | +1 | Free-cash-flow yield; cash-based, hard to fake; high = cheap. |
+| `sector` | A registered sector label or set of labels; current labels are not historically versioned. | `str or null` |
+| `industry` | A registered industry label or set of labels; current labels are not historically versioned. | `str or null` |
+| `close` | `(0, +∞)` USD for the latest point-in-time close. | `float or null` |
+| `marketcap` | `[0, +∞)` USD. | `float or null` |
+| `dollar_volume_20d_avg` | `[0, +∞)` USD per session. | `float or null` |
+| `volume_ratio` | `[0, +∞)`; current volume divided by its 50-session average. | `float or null` |
+| `return_5d` | `[-1, +∞)` decimal return. | `float or null` |
+| `return_20d` | `[-1, +∞)` decimal return. | `float or null` |
+| `return_60d` | `[-1, +∞)` decimal return. | `float or null` |
+| `return_252d` | `[-1, +∞)` decimal return. | `float or null` |
+| `trend_slope_60d` | `(-∞, +∞)` annualized decimal slope. | `float or null` |
+| `r_squared_60d` | `[0, 1]`. | `float or null` |
+| `pct_from_sma_20` | `[-1, +∞)` decimal distance from the moving average. | `float or null` |
+| `pct_from_sma_50` | `[-1, +∞)` decimal distance from the moving average. | `float or null` |
+| `pct_from_sma_200` | `[-1, +∞)` decimal distance; derived from `close / sma_200 - 1`. | `float or null` |
+| `pct_from_52w_high` | `[-1, 0]` decimal distance from the trailing high. | `float or null` |
+| `drawdown_from_recent_high` | `[-1, 0]` decimal drawdown from the 20-session high. | `float or null` |
+| `ema_crossover_days_ago` | `[0, +∞)` sessions. | `float or null` |
+| `vol_adjusted_momentum` | `(-∞, +∞)` score. | `float or null` |
+| `macd_hist` | `(-∞, +∞)` price-unit score. | `float or null` |
+| `rsi_14` | `[0, 100]`. | `float or null` |
+| `volatility_20` | `[0, +∞)` daily standard deviation. | `float or null` |
+| `atr_pct` | `[0, +∞)` decimal average true range divided by price. | `float or null` |
+| `consolidation_tightness` | `[0, +∞)` score; lower is tighter. | `float or null` |
+| `pe` | `(-∞, +∞)`; values `<= 0` are valid loss-maker facts but undefined for “cheap P/E” ranking. | `float or null` |
+| `ps` | `(-∞, +∞)`; positive values are required for conventional multiple ranking. | `float or null` |
+| `pb` | `(-∞, +∞)`; positive values are required for conventional multiple ranking. | `float or null` |
+| `evebitda` | `(-∞, +∞)`; positive values are required for conventional multiple ranking. | `float or null` |
+| `fcf_yield` | Intended `(-∞, +∞)` decimal yield; the current calculation masks non-positive FCF and must be corrected before negative-FCF filtering is enabled. | `float or null` |
+| `divyield` | `[0, +∞)` decimal yield. | `float or null` |
+| `netinccmnusd` | `(-∞, +∞)` USD. | `float or null` |
+| `gross_profitability` | `(-∞, +∞)`; gross profit divided by assets. | `float or null` |
+| `roic` | `(-∞, +∞)` decimal return on invested capital. | `float or null` |
+| `roe` | `(-∞, +∞)` decimal return on equity. | `float or null` |
+| `roa` | `(-∞, +∞)` decimal return on assets. | `float or null` |
+| `grossmargin` | `(-∞, +∞)` decimal margin. | `float or null` |
+| `netmargin` | `(-∞, +∞)` decimal margin. | `float or null` |
+| `ebitdamargin` | `(-∞, +∞)` decimal margin. | `float or null` |
+| `cfo_to_assets` | `(-∞, +∞)` decimal ratio. | `float or null` |
+| `accruals` | `(-∞, +∞)` decimal ratio; lower generally means more cash-backed earnings. | `float or null` |
+| `interest_coverage` | `(-∞, +∞)` EBIT divided by interest expense. | `float or null` |
+| `de` | `(-∞, +∞)` debt-to-equity ratio; negative equity can produce negative values. | `float or null` |
+| `currentratio` | `[0, +∞)` current-assets-to-current-liabilities ratio. | `float or null` |
+| `assetturnover` | `(-∞, +∞)` revenue-to-assets ratio. | `float or null` |
+| `payoutratio` | `(-∞, +∞)` decimal payout ratio. | `float or null` |
+| `roe_volatility_5y` | `[0, +∞)` five-year standard deviation; requires sufficient annual history. | `float or null` |
+| `grossmargin_volatility_5y` | `[0, +∞)` five-year standard deviation; requires sufficient annual history. | `float or null` |
+| `quality_history_observations` | `[0, +∞)` annual observations in the history window. | `int` |
+| `complete_multi_year_history` | `true` or `false`; currently means at least six annual observations. | `bool` |
+| `revenue_growth_yoy` | `(-∞, +∞)` decimal year-over-year growth. | `float or null` |
+| `eps_growth_yoy` | `(-∞, +∞)` decimal year-over-year growth. | `float or null` |
+| `opinc_growth_yoy` | `(-∞, +∞)` decimal year-over-year growth. | `float or null` |
+| `grossmargin_change_yoy` | `(-∞, +∞)` decimal-point change. | `float or null` |
+| `gross_profitability_change_5y` | `(-∞, +∞)` five-year ratio change; requires sufficient annual history. | `float or null` |
+| `roa_change_5y` | `(-∞, +∞)` five-year ratio change; requires sufficient annual history. | `float or null` |
+| `roic_change_5y` | `(-∞, +∞)` five-year ratio change; requires sufficient annual history. | `float or null` |
+| `cfo_to_assets_change_5y` | `(-∞, +∞)` five-year ratio change; requires sufficient annual history. | `float or null` |
+| `grossmargin_change_5y` | `(-∞, +∞)` five-year margin change; requires sufficient annual history. | `float or null` |
+| `de_change_5y` | `(-∞, +∞)` five-year debt-to-equity change; requires sufficient annual history. | `float or null` |
+| `net_payout_yield` | `(-∞, +∞)` decimal shareholder yield. | `float or null` |
+| `share_dilution_5y` | `[-1, +∞)` five-year change in weighted-average shares; requires sufficient annual history. | `float or null` |
+| `recent_event_codes` | Any subset of registered Sharadar event-code strings inside the configured lookback window. | `tuple[str, ...]` |
+| `days_since_last_earnings` | `[0, event_lookback_days]`, or null when no matching event is visible in the window. | `int or null` |
+| `days_since_last_activist_13d` | `[0, event_lookback_days]`, or null when no matching event is visible in the window. | `int or null` |
+| `buy_count_30d` † | `[0, +∞)` open-market purchase transactions. | `int` |
+| `buy_count_90d` † | `[0, +∞)` open-market purchase transactions. | `int` |
+| `buy_value_30d` † | `[0, +∞)` USD. | `float` |
+| `buy_value_90d` † | `[0, +∞)` USD. | `float` |
+| `sell_count_30d` † | `[0, +∞)` open-market sale transactions. | `int` |
+| `sell_count_90d` † | `[0, +∞)` open-market sale transactions. | `int` |
+| `sell_value_30d` † | `[0, +∞)` USD. | `float` |
+| `sell_value_90d` † | `[0, +∞)` USD. | `float` |
+| `unique_buyers_30d` † | `[0, +∞)` distinct normalized owners. | `int` |
+| `unique_sellers_30d` † | `[0, +∞)` distinct normalized owners. | `int` |
+| `unique_opportunistic_buyers_30d` † | `[0, +∞)` distinct owners whose purchases are classified as non-routine. | `int` |
+| `opportunistic_officer_buys_30d` † | `[0, +∞)` transactions. | `int` |
+| `opportunistic_director_buys_30d` † | `[0, +∞)` transactions. | `int` |
+| `opportunistic_buy_value_30d` † | `[0, +∞)` USD. | `float` |
+| `max_purchase_fraction_of_post_holdings_30d` † | `[0, 1]` decimal fraction when holdings data is valid. | `float or null` |
+| `opportunistic_value_to_marketcap` † | `[0, +∞)` decimal ratio. | `float or null` |
+| `net_buy_ratio_90d` † | `[-1, 1]`; net open-market activity divided by gross activity. | `float or null` |
+| `days_since_last_buy` † | `[0, +∞)` days, or null if no visible purchase exists. | `int or null` |
+| `days_since_last_sell` † | `[0, +∞)` days, or null if no visible sale exists. | `int or null` |
+| `institutional_stale_days` † | `[45, +∞)` days from the latest available quarter end. | `int or null` |
+| `institutional_total_holders` † | `[0, +∞)` reporting institutions. | `int` |
+| `institutional_total_value_b` † | `[0, +∞)` USD billions. | `float` |
+| `institutional_holders_change` † | `(-∞, +∞)` quarter-over-quarter holder count change. | `int` |
+| `institutional_value_change_pct` † | `[-1, +∞)` decimal quarter-over-quarter change. | `float or null` |
+| `institutional_units_change_pct` † | `[-1, +∞)` decimal quarter-over-quarter change. | `float or null` |
+| `institutional_new_holders` † | `[0, +∞)` institutions. | `int` |
+| `institutional_closed_positions` † | `[0, +∞)` institutions. | `int` |
+| `yield_curve_2_10` †‡ | `(-∞, +∞)` percentage-point spread. | `float or null` |
+| `real_yield_10y` †‡ | `(-∞, +∞)` percentage points. | `float or null` |
+| `fed_funds_rate` †‡ | `[0, +∞)` percentage points under normal data conventions. | `float or null` |
+| `spread_hy` †‡ | `[0, +∞)` percentage points. | `float or null` |
+| `spread_ig` †‡ | `[0, +∞)` percentage points. | `float or null` |
+| `cpi_yoy` †‡ | `(-∞, +∞)` percentage points. | `float or null` |
+| `unemployment_rate` †‡ | `[0, 100]` percentage points. | `float or null` |
+| `claims_4w_avg` †‡ | `[0, +∞)` claims. | `float or null` |
+| `claims_change_13w_pct` †‡ | `[-1, +∞)` decimal change. | `float or null` |
+| `vix` †‡ | `[0, +∞)` index points. | `float or null` |
+| `yield_curve_change_60d` †‡ | `(-∞, +∞)` percentage-point change. | `float or null` |
+| `real_yield_change_20d` †‡ | `(-∞, +∞)` percentage-point change. | `float or null` |
+| `spread_hy_change_20d` †‡ | `(-∞, +∞)` percentage-point change. | `float or null` |
+| `spread_ig_change_20d` †‡ | `(-∞, +∞)` percentage-point change. | `float or null` |
+| `vix_change_20d` †‡ | `(-∞, +∞)` index-point change. | `float or null` |
+| `cpi_yoy_change_3m` †‡ | `(-∞, +∞)` percentage-point change. | `float or null` |
 
-**Profitability — quality**
+The first implementation should expose the fields already present in the generic field
+registry, then add ownership fields, and add macro regime conditions last. Registering
+a field requires a definition, source, unit, allowed operators, null semantics,
+filterability, rankability, and coverage note; the UI must be generated from that same
+metadata rather than maintaining a separate filter list.
 
-| Signal | Dir | Why |
-|---|---|---|
-| `gross_profitability` | +1 | Gross profits / assets — the profitability factor, "the other side of value" (Novy-Marx 2013). |
-| `accruals` | -1 | Sloan accrual (net income − CFO); cash-backed earnings beat accrual-heavy ones (Sloan 1996). |
-| `roic` | +1 | Capital efficiency; unlike ROE it is not leverage-distorted. |
+### Generic ranking contract
 
-**Growth** — profitability *improvement*, not revenue growth (QMJ growth pillar; raw revenue growth underperforms, Lakonishok-Shleifer-Vishny 1994)
+The ranking engine answers one general question:
 
-| Signal | Dir | Why |
-|---|---|---|
-| `gross_profitability_change_5y` | +1 | 5-year improvement in gross profitability. |
-| `roic_change_5y` | +1 | 5-year improvement in capital efficiency. |
-| `cfo_to_assets_change_5y` | +1 | 5-year improvement in cash generation (cash-distinct from the margin deltas). |
+> Rank a population of entity X using one field Y or a weighted combination of fields
+> Z.
 
-**Capital discipline**
+It operates on a prepared entity-feature frame and does not retrieve or calculate
+entity-specific facts. Security, institution, and holding feature builders may produce
+different columns, but they use the same ranking algorithm.
 
-| Signal | Dir | Why |
-|---|---|---|
-| `net_payout_yield` | +1 | Shareholder yield (dividends + buybacks); firms returning cash outperform (Boudoukh et al. 2007). |
-| `share_dilution_5y` | -1 | Net share issuance; issuers underperform, repurchasers outperform (Pontiff-Woodgate 2008). |
+```python
+from dataclasses import dataclass
+from typing import Literal
 
-### Exit pipeline
 
-`SLExitMonitor` applies rules in precedence order:
+@dataclass(frozen=True)
+class RankMetric:
+    field: str
+    direction: Literal["ascending", "descending"]
+    weight: float = 1.0
+    normalization: Literal[
+        "percentile",
+        "zscore",
+        "robust_zscore",
+        "raw",
+    ] = "percentile"
 
-1. `MAXIMUM_LOSS_BREACH` when return from entry is at or below the strategy's
-   `_MAX_LOSS_PCT` constant (`-10%`);
-2. `THESIS_INVALIDATED` when drawdown from the stored high-water mark is at or below
-   `-20%`; or
-3. `THESIS_INVALIDATED` when price falls below the 200-day moving average.
 
-If current technical-feature data is unavailable, the monitor holds rather than fabricating an
-exit. `CONCERNING_EVENTS` remains an allowed decision-memory exit reason, but no active
-agent watchlist currently produces it.
-
-## Candidate runner and decision memory
-
-Phase 2 connects deterministic candidate packets to open-position state and, after
-exit, completed-trade memory. The database contracts already exist; the runner and
-position lifecycle do not.
-
-### `strategy_profiles`
-
-The table is a registry, read during normal runs. It identifies a strategy, gives it a
-human/agent-readable description, and tracks whether it is active. It holds **no** sizing,
-loss, or conviction parameters — exit thresholds are code constants in the strategy, and
-sizing is owned by the portfolio-manager tool.
-
-Rows are written by CLI, sourced from each strategy's `NAME`/`DESCRIPTION` constants —
-`pipeline.main` create/setup makes the empty table; population is a separate step:
-
-- `python -m pipeline.main register <module>` — upsert the row (idempotent; reactivates a
-  retired strategy). `<module>` is a dotted path or file, e.g.
-  `decision.strategies.strat_sector_leaders`.
-- `python -m pipeline.main retire <name>` — soft-retire (set `active = false`). The row is
-  **kept** — it anchors the strategy's historical `decision_memory` trades via foreign key,
-  so it must outlive them. A hard delete is intentionally not offered.
-
-Only `sector_leaders` is currently registered.
-
-#### Strategy-profile contract
-
-| Key | `name` | `description` | `active` |
-|---|---|---|---|
-| Explanation | Database identity | Human-readable description of the strategy and its menu. | Whether the strategy may open new positions. |
-| Consumer | Strategy lookup, `decision_memory` FK, retrieval. | Agent context and operator inspection. | `SLEntryScreener` (refuses when false). |
-| Datatype | `VARCHAR(64) PRIMARY KEY` | `TEXT` | `BOOLEAN NOT NULL DEFAULT TRUE` |
-
-The conditions themselves (prefilter, gates, selection, exits) are **not** stored here as
-data; they are the strategy class's code. A profile row is a descriptor, not a config
-blob — it does not dynamically import or execute Python. Strategy registration remains
-explicit in the future orchestrator.
-
-### `decision_memory`
-
-`decision_memory` is designed for completed trades only. It stores:
-
-- trade and strategy identity;
-- the frozen candidate packet;
-- agent conviction, rationale, evidence, and tool log;
-- actual entry facts;
-- actual exit facts and reason;
-- detailed exit context; and
-- a pgvector decision embedding.
-
-Repository operations exist for inserting a completed trade, fetching a trade, fetching
-prior trades, and similarity search.
-
-#### Decision-memory contract
-
-The following Markdown tables are column groups for one SQL table, not separate
-subtables. Normal SQL columns hold stable trade facts, JSONB holds flexible candidate
-and evidence payloads, and pgvector supports similar-completed-trade retrieval.
-
-| Key | `trade_id` | `symbol` | `strategy_name` | `candidate_snapshot` |
-|---|---|---|---|---|
-| Explanation | UUID generated when the position opens and retained when the completed trade is inserted. | Traded stock. | Strategy that produced the candidate. | Frozen copy of everything the strategy presented to the agent. |
-| Consumer | Position state, exit handoff, audit, and retrieval. | Position monitor and historical queries. | Strategy filtering and exit-rule lookup. | Thesis monitoring, audit, embedding generation, and future agent retrieval. |
-| Datatype | `UUID PRIMARY KEY` | `VARCHAR(16) NOT NULL` | `VARCHAR(64) NOT NULL REFERENCES strategy_profiles(name)` | `JSONB NOT NULL` |
-
-| Key | `conviction_tier` | `rationale` | `evidence` | `tool_call_log` |
-|---|---|---|---|---|
-| Explanation | Accepted trade's conviction tier, used for deterministic sizing. | Agent's concise reason for accepting the candidate. | Evidence references and summaries supporting the decision. | Tools used before acceptance and references to their results. |
-| Consumer | Position-size audit and future agent context. | Historical retrieval and review. | Audit, embedding generation, and future agent retrieval. | Debugging and audit. |
-| Datatype | `VARCHAR(24) NOT NULL` | `TEXT NOT NULL` | `JSONB` | `JSONB` |
-
-| Key | `entry_date` | `entry_price` | `position_size_pct` |
-|---|---|---|---|
-| Explanation | Actual date the position opened. | Actual executed entry price. | Actual fraction of the portfolio allocated to the position. |
-| Consumer | Holding-period and point-in-time calculations. | Maximum-loss monitoring and realized-return calculation. | Position and risk review. |
-| Datatype | `DATE NOT NULL` | `NUMERIC(12,4) NOT NULL` | `NUMERIC(6,4) NOT NULL` |
-
-| Key | `exit_date` | `exit_price` | `realized_pnl_pct` | `days_held` |
-|---|---|---|---|---|
-| Explanation | Date the position closed. | Actual executed exit price. | Final percentage return. | Number of days held. |
-| Consumer | Point-in-time memory filtering. | Realized-return audit. | Future agent context and reporting. | Future agent context. |
-| Datatype | `DATE NOT NULL` | `NUMERIC(12,4) NOT NULL` | `NUMERIC(10,6) NOT NULL` | `INT NOT NULL` |
-
-| Key | `exit_reason` | `exit_context` | `decision_embedding` |
-|---|---|---|---|
-| Explanation | Coarse condition that caused the exit. | Specific rule, trigger values, and—when applicable—the agent's cited source. | Vector representation used for similar-completed-trade retrieval. |
-| Consumer | Exit analysis and strategy reporting. | Exit debugging, audit, and future retrieval. | pgvector similarity search. |
-| Datatype | `VARCHAR(32) NOT NULL` | `JSONB` | `VECTOR NOT NULL` |
-
-Allowed conviction tiers are:
-
-- `HIGH_CONVICTION`
-- `CONVICTION`
-- `LOW_CONVICTION`
-
-Allowed exit reasons are:
-
-- `MAXIMUM_LOSS_BREACH`
-- `THESIS_INVALIDATED`
-- `CONCERNING_EVENTS`
-
-The SQL schema also enforces:
-
-- `exit_date >= entry_date`;
-- positive entry and exit prices;
-- `0 < position_size_pct <= 1`; and
-- non-negative `days_held`.
-
-`exit_context` carries the specific rule inside the coarse `exit_reason`; a separate
-`exit_policy` column is intentionally unnecessary. The future embedding must contain
-entry-side context only—not realized outcomes—because a fresh candidate has no outcome
-when it is used as a similarity query.
-
-The schema correctly prevents future-outcome leakage during retrieval:
-
-```sql
-WHERE exit_date < :before_date
+@dataclass(frozen=True)
+class RankSpec:
+    entity_type: Literal["ticker", "institution", "holding"]
+    metrics: tuple[RankMetric, ...]
+    group_by: tuple[str, ...] = ()
+    top_n: int | None = None
+    missing_policy: Literal["renormalize", "exclude"] = "renormalize"
+    minimum_coverage: float = 0.5
 ```
 
-Current limitations:
+A single-metric rank uses one `RankMetric`:
 
-- no position lifecycle writes completed trades yet;
-- embedding generation is not implemented;
-- embedding dimensionality has not been selected; and
-- `decision_embedding` is required, so a lifecycle cannot insert until the embedding
-  method is chosen or the schema is relaxed.
+```python
+RankSpec(
+    entity_type="ticker",
+    metrics=(RankMetric("roic", "descending"),),
+)
+```
 
-### Open positions
+A composite rank normalizes its inputs before applying weights:
 
-The intended store is a single-writer `position.json` managed by the future orchestrator
-with atomic replacement. Neither the file nor its typed reader/writer currently exists.
+```python
+RankSpec(
+    entity_type="ticker",
+    metrics=(
+        RankMetric("roic", "descending", weight=0.40),
+        RankMetric("fcf_yield", "descending", weight=0.30),
+        RankMetric("de", "ascending", weight=0.30),
+    ),
+    group_by=("sector",),
+    top_n=5,
+)
+```
 
-#### Storage lifecycle contract
+For percentile normalization, the composite score is:
 
-| Pipeline result | Storage action |
+```text
+score = sum(direction-adjusted percentile * weight)
+        ------------------------------------------------
+                 sum(available metric weights)
+```
+
+Ranking rules:
+
+- weights must be finite and nonnegative;
+- direction is independent of weight: lower-is-better uses `ascending`, never a
+  negative weight;
+- fields with incompatible units must be normalized before they are combined;
+- `raw` normalization is allowed only when every combined metric is already on a
+  commensurable scale;
+- percentile and z-score reference populations are established before the final
+  `top_n` cut;
+- `group_by=("sector",)` means normalize and rank within sector;
+- ties use a documented stable method and preserve the component values;
+- missing values never become zero;
+- `renormalize` divides by the weight actually available for an entity;
+- `exclude` removes an entity missing any requested metric; and
+- every result reports metric coverage even when it passes `minimum_coverage`.
+
+The generic ranker accepts a feature frame indexed by a stable entity identifier:
+
+```python
+rank(
+    frame: pd.DataFrame,
+    spec: RankSpec,
+    entity_id_column: str,
+) -> RankResult
+```
+
+Its result contains:
+
+```python
+@dataclass
+class RankResult:
+    frame: pd.DataFrame
+    spec: RankSpec
+    population_size: int
+    excluded_for_missingness: int
+```
+
+Every ranked row must expose:
+
+| Field | Meaning |
 |---|---|
-| Strategy candidate awaiting agent review | Keep only in the current run's memory. |
-| Agent rejects candidate | Discard it. |
-| Agent accepts but deterministic risk rejects it | Discard it. |
-| Validated position opens | Generate `trade_id`; write the frozen candidate, agent context, limits, and execution facts to `position.json`. |
-| Position exits | Add exit facts, `exit_reason`, `exit_context`, and embedding; insert one complete row into `decision_memory`; remove the position from `position.json`. |
+| `entity_id` | Stable ticker, institution ID, or institution-ticker holding ID. |
+| `rank` | Final ordinal rank inside the requested group. |
+| `score` | Final normalized composite score. |
+| `group` | Sector, industry, peer group, or null for a global rank. |
+| `raw_values` | Frozen metric values before normalization. |
+| `component_scores` | Direction-adjusted normalized value for every metric. |
+| `available_weight` | Sum of requested weights with non-missing values. |
+| `coverage` | Available weight divided by total requested weight. |
 
-## Agentic, risk, and execution layers
+#### Entity-specific feature frames
 
-### Agentic layer
+The ranker is entity-agnostic. Feature builders establish the grain of each input row:
 
-`decision/agent/llm_client.py` is a thin Chat Completions wrapper for an
-OpenAI model or local Ollama endpoint.
+| Entity type | Row grain | Example ranking questions |
+|---|---|---|
+| `ticker` | One row per security | Highest ROIC; cheapest valuation; strongest weighted quality-and-momentum score. |
+| `institution` | One row per reporting institution | Greatest exposure to a saved screen; most new positions; highest weighted quality of holdings. |
+| `holding` | One row per institution-ticker pair | Largest portfolio weights; largest additions; highest-conviction new positions. |
 
-`pm_agent.py` is commented legacy code and is not an active implementation. There is no:
+Institutional holdings form a relationship:
 
-- candidate/verdict schema shared across layers;
-- typed agent-data tool set;
-- structured tool-calling loop;
-- evidence audit trail;
-- accepted-verdict handoff; or
-- bounded PM orchestration.
+```text
+institution -> owns -> ticker
+```
 
-### Deterministic risk
+The same raw holdings can therefore be aggregated in three directions:
 
-There is no active portfolio-level risk validator. The future validator must enforce:
+1. **Rank institutions** by portfolio concentration, exposure to a saved ticker set,
+   new positions, or the weighted research scores of held companies.
+2. **Rank tickers** by holder growth, institutional accumulation, new holders, or
+   ownership by a selected institution set.
+3. **Rank holdings** to inspect an institution's largest or fastest-changing
+   institution-ticker positions.
 
-- candidate identity and strategy profile;
-- conviction tier;
-- maximum position size;
-- maximum loss;
-- available capital;
-- existing holdings and duplicate symbols;
-- liquidity and volatility limits;
-- sector concentration; and
-- overall portfolio/correlation constraints.
+A look-through institution score may use:
 
-The agent may reduce or reject risk. It must never increase limits or submit orders
-directly.
+```text
+institution_score =
+    sum(position_portfolio_weight * held_ticker_research_score)
+```
 
-### Execution
+That score must record the referenced ticker screen/run ID, its specification version,
+holding coverage, and the conservative institutional availability date. It may not use
+holdings that were unavailable on the ranking date.
 
-Existing pieces:
+An example institution rank is:
 
-- Alpaca market-data adapter in `data/live_equity.py`;
-- Schwab authentication and market/trading adapters under `schwab/`; and
-- the `alpaca-py` dependency.
+```python
+RankSpec(
+    entity_type="institution",
+    metrics=(
+        RankMetric("screen_overlap_pct", "descending", 0.40),
+        RankMetric("weighted_ticker_score", "descending", 0.35),
+        RankMetric("new_positions_in_screen", "descending", 0.25),
+    ),
+    top_n=25,
+)
+```
 
-Missing:
+The feature builders belong outside the ranking engine:
 
-- a validated order schema;
-- a broker-neutral execution interface used by the new pipeline;
-- fill reconciliation;
-- open-position persistence;
-- sell-side execution integration; and
-- paper-trading end-to-end tests.
+```text
+research/
+├── ranking.py
+└── features/
+    ├── securities.py
+    ├── institutions.py
+    └── holdings.py
+```
 
-## Build order from the current state
+`SLEntryScreener` currently combines responsibilities that the research platform keeps
+separate:
 
-### 1. Finish `sector_leaders`
+| Current responsibility | Generic research component |
+|---|---|
+| Eligible tickers | `research/universe.py` |
+| Signal and feature assembly | `research/features/securities.py` |
+| Entry gates | `research/filters.py` |
+| Sleeve and composite scoring | `research/ranking.py` |
+| Top five per sector | `RankSpec.group_by` and `RankSpec.top_n` |
+| Candidate snapshot | Persisted research-run result |
+| Exit monitoring | Removed |
 
-- define the trend-quality ranking formula;
-- rank within sector;
-- keep the intended top five per sector;
-- decide whether `CandidateSnapshot` should become `CandidatePacket`;
-- attach the profile ID/limits and explicit entry-thesis facts needed downstream; and
-- add focused entry and exit tests.
+The `platform-pipeline` ranker is the starting point, but its public contract should
+accept any entity-feature frame rather than assuming ticker rows and sector
+percentiles.
 
-### 2. Build shared schemas and orchestration
+### Holding policy contract
 
-- create typed candidate, agent-verdict, validated-order, position, and exit schemas;
-- create a code-owned strategy registry;
-- run exits before entries;
-- resolve duplicate symbols and current holdings;
-- hand the final candidate menu to the agent once; and
-- keep rejected candidates transient.
+A holding policy defines what happens after a candidate enters a historical
+simulation:
 
-### 3. Build the portfolio-manager tool and risk validation
+> Re-evaluate point-in-time conditions after entry and simulate a sale when the
+> configured condition triggers.
 
-- portfolio-manager tool (agent-called): turn the chosen candidates plus conviction into
-  position weights using **risk-based sizing** — inverse-volatility / vol-target under a
-  max-position cap — rather than fixed fractions or return-forecast mean-variance
-  optimization (which needs expected returns the system does not have);
-- risk validator: validate candidate provenance and enforce hard position, capital,
-  sector, and portfolio constraints on what the PM proposes; and
-- emit only bounded validated orders.
+It resembles the filter contract because it reuses registered fields, operators, and
+typed values. Its semantics are different:
 
-### 4. Build the position lifecycle
+- an entry filter is evaluated once on the screen date;
+- a holding condition is evaluated repeatedly after entry;
+- a condition observed using session T data cannot execute at that same session's
+  already-known close;
+- the earliest simulated sale is the configured execution point on the following
+  tradeable session; and
+- no broker order or real position is created.
 
-- implement the single-writer atomic `position.json` store;
-- record frozen candidate and agent context at entry;
-- maintain high-water marks;
-- feed positions to `SLExitMonitor`; and
-- close positions through the execution interface.
+```python
+from dataclasses import dataclass
+from typing import Literal
 
-### 5. Build typed agent tools
 
-Initial tools should provide:
+@dataclass(frozen=True)
+class HoldingCondition:
+    field: str
+    operator: str
+    value: object
+    consecutive_observations: int = 1
 
-- prior completed trades;
-- similar completed trades;
-- current portfolio exposure;
-- current candidate/signal context;
-- institutional research context; and
-- recent event context.
 
-Every tool result used in a decision must be auditable.
+@dataclass(frozen=True)
+class HoldingPolicy:
+    exit_conditions: tuple[HoldingCondition, ...]
+    combination: Literal["any", "all"] = "any"
+    maximum_holding_sessions: int = 252
+    minimum_holding_sessions: int = 0
+    exit_timing: Literal["next_open", "next_close"] = "next_open"
+```
 
-### 6. Complete decision memory
+Example:
 
-- choose one embedding model and fixed vector dimension;
-- generate embeddings from entry-side context only;
-- insert one complete record after each exit; and
-- verify retrieval never exposes outcomes unavailable at the decision date.
+```python
+HoldingPolicy(
+    exit_conditions=(
+        HoldingCondition(
+            field="pct_from_sma_200",
+            operator="<",
+            value=0,
+            consecutive_observations=2,
+        ),
+        HoldingCondition(
+            field="drawdown_from_entry_high",
+            operator="<=",
+            value=-0.20,
+        ),
+        HoldingCondition(
+            field="recent_event_codes",
+            operator="contains_any",
+            value=("13", "31", "42"),
+        ),
+    ),
+    combination="any",
+    maximum_holding_sessions=252,
+)
+```
 
-### 7. Integrate paper execution
+The first implementation should support:
 
-- choose the initial broker adapter;
-- implement buy/sell order submission behind the shared execution interface;
-- reconcile actual fills;
-- update position state atomically; and
-- run a fully isolated debug/paper path before enabling live mutations.
+| Policy type | Behavior |
+|---|---|
+| Fixed horizon | Exit after a configured number of trading sessions. This is the primary entry-quality test. |
+| Feature condition | Exit when one or more registered point-in-time fields cross configured thresholds. |
+| Rank condition | Exit when the security falls below a configured rank or percentile at a scheduled rerank. |
+| Scheduled rebalance | Exit securities no longer selected at the weekly, monthly, or quarterly screen. |
+| Earliest-of | Exit on the first configured condition or the maximum holding horizon, whichever arrives first. |
+
+Holding conditions may reference the shared filter catalog or registered
+evaluation-only state such as `days_held`, `return_from_entry`, and
+`drawdown_from_entry_high`. Evaluation-only fields must be clearly labeled because
+they depend on the simulated entry rather than source data alone.
+
+Each simulated exit records:
+
+| Field | Meaning |
+|---|---|
+| `entity_id` | Security being evaluated. |
+| `entry_date` | First permitted session after the screen cutoff. |
+| `entry_price` | Price established by the experiment's entry convention. |
+| `exit_signal_date` | Date on which the holding condition became observable. |
+| `exit_date` | Following tradeable session used for the simulated sale. |
+| `exit_price` | Adjusted price used by the return calculation. |
+| `exit_reason` | Stable condition or horizon identifier. |
+| `exit_context` | Observed field values, operators, thresholds, and persistence counts. |
+| `days_held` | Trading and calendar duration. |
+
+Point-in-time safeguards:
+
+- the holding evaluator sees only facts available on each observation date;
+- conditions using a close execute no earlier than the following session;
+- returns and drawdowns use split- and dividend-adjusted prices;
+- delisted securities remain in the outcome set;
+- missing condition data produces a warning or continued hold, never a fabricated
+  trigger;
+- the maximum horizon provides a deterministic fallback when conditional exits never
+  fire; and
+- the benchmark return uses the candidate's exact entry and exit interval.
+
+Fixed-horizon evaluation must be run before conditional holding policies are optimized.
+Otherwise, an elaborate exit rule can hide a universe or ranking model that adds no
+entry value.
+
+### Evaluation policy contract
+
+An evaluation policy defines how a completed historical simulation is aggregated,
+measured, and compared:
+
+> Report the strategy by calendar week, month, and year; calculate rolling one-,
+> three-, and five-year results; and compare every identical interval with buying and
+> holding SPY.
+
+```python
+@dataclass(frozen=True)
+class EvaluationPolicy:
+    benchmark: str = "SPY"
+    calendar_breakdowns: tuple[str, ...] = (
+        "week",
+        "month",
+        "year",
+    )
+    rolling_windows: tuple[str, ...] = (
+        "1y",
+        "3y",
+        "5y",
+    )
+    portfolio_weighting: Literal["equal_weight"] = "equal_weight"
+    rebalance_frequency: Literal[
+        "weekly",
+        "monthly",
+        "quarterly",
+    ] = "monthly"
+    exited_position_action: Literal[
+        "hold_cash",
+        "replace_next_rebalance",
+        "replace_immediately",
+    ] = "replace_next_rebalance"
+    transaction_cost_bps: float = 0.0
+```
+
+`RankSpec.top_n` establishes how many candidates enter. The initial deterministic
+simulation converts those candidates into a return series using this rule:
+
+```text
+select top N
+    -> allocate equal weight
+    -> rerun the saved screen monthly
+    -> apply holding conditions after every eligible observation
+    -> replace exits at the next monthly screen
+    -> hold unused allocation as cash
+```
+
+This is a research portfolio used to make a strategy-level comparison possible. It is
+not a recommended allocation, an automated portfolio manager, or an execution system.
+More complex weighting must not be introduced until the equal-weight baseline is
+understood.
+
+Calendar reports contain:
+
+```text
+Period      Strategy return    SPY return    Excess return
+2025-W01            +1.2%          +0.7%             +0.5%
+2025-01             +3.4%          +2.6%             +0.8%
+2025                +14.8%         +12.1%             +2.7%
+```
+
+Rolling reports contain:
+
+```text
+Window    Strategy CAGR    SPY CAGR    Excess CAGR
+1 year            13.4%       11.2%          +2.2%
+3 years           10.8%        9.7%          +1.1%
+5 years            9.6%       10.1%          -0.5%
+```
+
+Every calendar period and rolling window reports:
+
+- total return;
+- compound annual growth rate when the period is at least one year;
+- benchmark return over identical dates;
+- excess return;
+- annualized volatility;
+- maximum drawdown;
+- Sharpe ratio with its stated risk-free-rate assumption;
+- positive-period hit rate;
+- turnover;
+- number of entries and exits;
+- percentage of time and capital invested;
+- transaction-cost impact;
+- missing-data and delisting warnings; and
+- the number of independent and overlapping observations.
+
+The evaluator should also retain candidate-level outcomes—median return, dispersion,
+hit rate, sector-relative return, and score-to-forward-return correlation—so a model's
+selection quality is not hidden by portfolio construction.
+
+The complete saved research experiment is:
+
+```python
+@dataclass(frozen=True)
+class ExperimentSpec:
+    screen: ScreenSpec
+    holding: HoldingPolicy
+    evaluation: EvaluationPolicy
+```
+
+Its execution flow is:
+
+```text
+materialize UniverseSpec
+    -> apply entry filters
+    -> apply RankSpec
+    -> simulate equal-weight entries
+    -> observe HoldingPolicy conditions through time
+    -> simulate exits
+    -> build the strategy return series
+    -> report calendar week/month/year performance
+    -> report rolling 1/3/5-year performance
+    -> compare identical intervals with SPY buy-and-hold
+```
+
+Rolling three- and five-year windows overlap and are therefore not independent
+observations. Reports must show overlapping results for continuity and non-overlapping
+sample counts for statistical honesty. With source history beginning in 2016, five-year
+evidence is inherently limited and must not be presented as a large sample.
+
+## `sector_leaders`
+
+`sector_leaders` is an experimental research preset. It is not a validated strategy and
+must not be the platform's architectural center.
+
+Its current research question is:
+
+> Among liquid, profitable US companies already in an uptrend, which companies rank
+> strongest within their sectors across trend quality, valuation, profitability,
+> growth, and capital discipline?
+
+Useful parts:
+
+- a realistic end-to-end screen;
+- explicit eligibility gates;
+- sector-relative rankings;
+- explainable sleeve scores;
+- risk and event context; and
+- a baseline for testing generic screen infrastructure.
+
+Current problems:
+
+- no reliable saved benchmark or ablation results;
+- the previous evaluator used raw closes rather than adjusted total-return prices;
+- the documented `$1B` market-cap floor disagrees with the implemented `$10B` constant;
+- momentum appears in both eligibility and ranking;
+- top-five-per-sector can retain weak absolute candidates;
+- missing growth history changes the effective model over time;
+- sleeve weights are unvalidated; and
+- insider, institutional, and macro evidence are not integrated into its dossier.
+
+Migration plan:
+
+1. Express `sector_leaders_v0` as a serializable `ScreenSpec`.
+2. Mark it `experimental` or `rejected`, never validated by default.
+3. Verify candidate parity between the hard-coded implementation and generic engine on
+   representative dates.
+4. Remove trading-specific `ExitSnapshot` and `SLExitMonitor`.
+5. Delete the hard-coded strategy after parity tests pass.
+6. Preserve the preset and its evaluation history, including negative results.
+
+## Research persistence
+
+The first persistence model should contain four concepts.
+
+### Research run
+
+- run ID;
+- screen specification and version;
+- requested signal day;
+- source-data cutoff/freshness;
+- universe size and filter funnel;
+- run timestamp and status; and
+- coverage or data-quality warnings.
+
+### Candidate snapshot
+
+- run ID and symbol;
+- final rank and score;
+- component and sleeve scores;
+- passed filters;
+- missing fields;
+- risk/context flags; and
+- frozen evidence values and their effective dates.
+
+### Thesis
+
+- thesis ID and symbol;
+- author and timestamps;
+- claim and time horizon;
+- supporting evidence;
+- counterevidence;
+- catalysts;
+- invalidation conditions;
+- confidence; and
+- version history.
+
+### Evaluation
+
+- screen specification and version;
+- replay dates and horizons;
+- comparison universe and benchmarks;
+- adjusted candidate and benchmark returns;
+- coverage, turnover, and sample sizes;
+- aggregate and per-sector results; and
+- ablation or sensitivity results.
+
+Research persistence must never require an order, position, or completed trade.
+
+## Evaluation standards
+
+The evaluator answers whether a research method adds information, not whether a
+backtest can be optimized into an attractive chart.
+
+Required comparisons:
+
+1. structural universe versus market benchmark;
+2. filtered universe versus structural universe;
+3. ranked menu versus filtered universe;
+4. sector picks versus their sector benchmark; and
+5. each sleeve and filter versus the full specification.
+
+Required safeguards:
+
+- adjusted prices or total returns for candidates and benchmarks;
+- entry strictly after the signal cutoff;
+- delisted securities retained when they were historically eligible;
+- full-horizon dates only;
+- walk-forward or held-out evaluation;
+- median, hit rate, dispersion, and sample size before mean return;
+- turnover and coverage reporting;
+- no silent treatment of missing values as zero;
+- no parameter selection on the final evaluation period; and
+- saved results for unsuccessful experiments.
+
+A model should remain `experimental` until it shows stable incremental value over its
+filtered universe, not merely positive absolute returns during a rising market.
+
+## Product surfaces
+
+The first interface should contain:
+
+### Today
+
+- scheduled research runs;
+- newly qualifying and newly excluded companies;
+- material score and evidence changes;
+- coverage or stale-data warnings; and
+- thesis alerts.
+
+### Explore
+
+- screen builder generated from the field catalog;
+- filter funnel;
+- ranked results;
+- saved and versioned screen specifications; and
+- side-by-side company comparison.
+
+### Company
+
+- fundamental, technical, ownership, event, and macro/sector evidence;
+- current values and historical changes;
+- sector and universe percentiles;
+- source and effective dates;
+- inclusion/exclusion explanations; and
+- saved theses.
+
+### Lab
+
+- historical replay;
+- baseline and benchmark comparison;
+- sleeve/filter ablations;
+- coverage and turnover diagnostics; and
+- saved experiment results.
+
+## Build order
+
+### 1. Establish the generic screen engine
+
+- merge and test the field registry, filters, ranker, and orchestrator;
+- define a stable, serializable `ScreenSpec`;
+- separate structural universe rules from elective research filters;
+- produce an explicit filter funnel and missingness report; and
+- migrate `sector_leaders_v0` to a preset.
+
+### 2. Persist research runs
+
+- create research-run and candidate-snapshot repositories;
+- freeze specifications, scores, evidence, and effective dates;
+- version saved screens; and
+- make reruns idempotent for the same spec version and signal date.
+
+### 3. Build trustworthy evaluation
+
+- replace the deleted trading-oriented harness;
+- use adjusted candidate and benchmark returns;
+- measure filter lift separately from ranking lift;
+- add walk-forward, per-sector, turnover, coverage, and ablation reports; and
+- persist negative as well as positive results.
+
+### 4. Expose the first vertical slice
+
+- add a small API;
+- implement Today, Explore, and Company;
+- run and save one screen from the interface;
+- open a candidate dossier with score provenance; and
+- replay the exact saved specification from Lab.
+
+### 5. Add thesis and monitoring workflows
+
+- store versioned theses;
+- capture supporting and opposing evidence;
+- evaluate invalidation conditions against new runs;
+- show evidence changes rather than only price alerts; and
+- maintain a research journal.
+
+### 6. Add grounded AI assistance
+
+- let the assistant query registered fields and saved research;
+- require citations to evidence values and dates;
+- expose the exact generated `ScreenSpec` before execution;
+- separate objective facts from generated interpretation; and
+- prevent the assistant from claiming a model is validated without evaluation records.
 
 ## Verification
 
@@ -667,38 +1058,35 @@ Current local checks:
 
 ```bash
 PYTHONPATH=. .venv/bin/pytest -q
-.venv/bin/ruff check data/signals decision/strategies tests
-.venv/bin/python -m compileall -q data/signals decision/strategies pipeline database
+.venv/bin/ruff check data database decision pipeline tests
+.venv/bin/python -m compileall -q data database decision pipeline
 ```
 
-As of 2026-07-20:
+As of 2026-07-26:
 
 - `52 passed`;
-- Ruff passed;
-- compilation and imports passed; and
-- read-only PostgreSQL smoke tests passed for all six signal services.
+- one third-party `websockets.legacy` deprecation warning remains; and
+- the current sandbox could not connect to PostgreSQL for a historical replay.
 
-The only observed test warning is a third-party `websockets.legacy` deprecation warning.
+Required next tests:
 
-Required future integration tests:
-
-- entry screening produces correctly ranked and bounded candidate packets;
-- the agent cannot invent a candidate or loosen a deterministic limit;
-- risk validation rejects malformed or over-limit verdicts;
-- a validated paper order creates atomic open-position state;
-- exit monitoring produces the correct precedence and context;
-- an exited position becomes exactly one complete decision-memory row; and
-- retrieval never returns a trade whose exit was unknown at the requested date.
+- invalid fields and ambiguous ranking directions are rejected;
+- ranking percentiles are calculated over the intended comparison universe;
+- a serialized and deserialized `ScreenSpec` produces identical results;
+- a saved research run freezes the complete evidence used by every score;
+- historical replay uses adjusted returns and never future information;
+- filter lift and ranking lift are reported separately;
+- missing data and coverage are visible;
+- `sector_leaders_v0` parity holds before the hard-coded implementation is removed; and
+- thesis alerts cite the exact changed facts and effective dates.
 
 ## First milestone
 
 The first meaningful milestone is:
 
-> `sector_leaders` produces a correctly ranked candidate menu; a bounded structured
-> agent accepts or rejects candidates; deterministic risk validates position size and
-> portfolio constraints; paper execution records open positions atomically; exit rules
-> close them; and each completed trade becomes one searchable, point-in-time-safe row in
-> `decision_memory`.
+> A user chooses an as-of date, runs a saved screen, inspects a ranked and explainable
+> candidate list, opens a company dossier, saves a thesis, and replays the exact same
+> specification historically with point-in-time-safe evidence and adjusted benchmarks.
 
-Real-time trading, multiple strategy families, broad news ingestion, and formal factor
-evaluation are outside this first milestone.
+Real-time trading, brokerage integration, automated portfolio management, and execution
+are not part of this milestone or the target architecture.

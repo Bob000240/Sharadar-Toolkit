@@ -27,78 +27,97 @@ def _lookback(days: int) -> str:
     return (pd.Timestamp.today() - pd.Timedelta(days=days)).strftime("%Y-%m-%d")
 
 
-def _fetch_all(sh_fn, repo_insert, label: str, start_date: str, **kwargs) -> None:
-    """Fetch every ticker with data in [start_date, TODAY] (no ticker filter) and
-    upsert. Sharadar paginates the full cross-section in one logical call."""
-    df = sh_fn(start_date=start_date, end_date=TODAY, **kwargs)
+def _fetch(sh_fn, repo_insert, label: str, **filters) -> None:
+    """Fetch the whole cross-section matching `filters` and upsert it. Sharadar
+    paginates it in one logical call.
+
+    Callers pass `lastupdated_since=` where Sharadar exposes that watermark
+    (SEP/SFP/SF1/TICKERS) — the only filter that surfaces revisions to rows we
+    already hold. The rest can only window on the row's own date, which means
+    they lose anything that falls outside the window while we weren't looking.
+    """
+    df = sh_fn(**filters)
     if df.empty:
         print(f"{label}: up to date")
         return
     repo_insert(df)
-    print(f"{label}: {len(df):,} rows upserted")
+    scope = ", ".join(f"{k}={v}" for k, v in filters.items() if k != "tickers")
+    print(f"{label}: {len(df):,} rows upserted ({scope})")
 
 
 # ── prices ────────────────────────────────────────────────────────────────────
 
 
 def update_equity_prices(sh: SharadarData):
-    latest = equity_repo.get_latest_dates()
-    if latest.empty:
-        _fetch_all(sh.equity_prices, equity_repo.insert, "Equity prices", START_DATE)
-        return
-    latest["latest_date"] = pd.to_datetime(latest["latest_date"])
-
-    # Which tickers are still trading? A listed name gets a row every trading day,
-    # so anything more than ~10 days behind the most recent data is delisted/halted
-    # (no new data to fetch — and its old date must not drag the fetch back years).
-    max_date = latest["latest_date"].max()
-    active = latest[latest["latest_date"] >= max_date - pd.Timedelta(days=10)]
-
-    # Start from the OLDEST active latest date, not the newest, so a ticker that's
-    # behind isn't skipped — every active ticker gets every day after its own
-    # latest date. One no-filter fetch covers them all; ON CONFLICT DO NOTHING
-    # dedupes the recent days most tickers already have.
-    since = (active["latest_date"].min() + pd.Timedelta(days=1)).date()
-    if str(since) > TODAY:
-        print("Equity prices: up to date")
-        return
-    df = sh.equity_prices(start_date=str(since), end_date=TODAY)
-    if df.empty:
-        print("Equity prices: up to date")
-        return
-    equity_repo.insert(df)
-    print(f"Equity prices: {len(df):,} rows upserted (since {since})")
+    # Sync on `lastupdated`, not on `date`. A split makes Sharadar re-adjust the
+    # ticker's ENTIRE price history, and those rewritten rows keep their original
+    # (old) dates — a date cursor would never request them again, so the stale
+    # pre-split prices would persist forever and corrupt every technical feature
+    # derived from them. This also retires the old "which tickers are still
+    # trading" heuristic: a delisted name simply stops being re-stamped.
+    _fetch(
+        sh.equity_prices,
+        equity_repo.insert,
+        "Equity prices",
+        lastupdated_since=equity_repo.get_sync_cursor() or START_DATE,
+    )
 
 
 def update_fund_prices(sh: SharadarData):
     # Funds are a fixed curated set (benchmark + sector ETFs), not the equity
     # universe — fetch exactly those, incrementally.
-    latest = fund_repo.get_latest_dates(tickers=BENCHMARK_SYMBOLS)
-    since = (
-        str(latest["latest_date"].max() + pd.Timedelta(days=1))
-        if not latest.empty
-        else START_DATE
+    _fetch(
+        sh.fund_prices,
+        fund_repo.insert,
+        "Fund prices",
+        lastupdated_since=fund_repo.get_sync_cursor() or START_DATE,
+        tickers=BENCHMARK_SYMBOLS,
     )
-    if since > TODAY:
-        print("Fund prices: up to date")
-        return
-    df = sh.fund_prices(tickers=BENCHMARK_SYMBOLS, start_date=since, end_date=TODAY)
-    if df.empty:
-        print("Fund prices: up to date")
-        return
-    fund_repo.insert(df)
-    print(f"Fund prices: {len(df):,} rows upserted")
 
 
 # ── technical features (computed locally from equity_prices) ──────────────────
 
 
+def _recompute_history(symbols: list[str], batch_size: int) -> int:
+    """Rebuild these tickers' ENTIRE feature history from their current prices.
+    Every rolling window (SMA-200, 252d return, OBV) depends on the full series,
+    so a re-adjusted price invalidates the whole history, not just recent rows."""
+    total = 0
+    for i in range(0, len(symbols), batch_size):
+        batch = symbols[i : i + batch_size]
+        df = equity_repo.get(tickers=batch, start_date=START_DATE)
+        if df.empty:
+            continue
+        parts = [
+            compute_technical_features(g.reset_index(drop=True))
+            for _, g in df.sort_values(["ticker", "date"]).groupby("ticker", sort=False)
+        ]
+        rows = pd.concat(parts, ignore_index=True)
+        technical_features_repo.insert(rows)
+        total += len(rows)
+    return total
+
+
 def update_technical_features(batch_size: int = 200):
-    feature_latest = technical_features_repo.get_latest_dates()
-    if feature_latest.empty:
+    if technical_features_repo.is_empty():
         print("Technical features: no base data")
         return
+
+    # Two distinct repairs. Features computed from prices Sharadar has since
+    # re-adjusted are present but WRONG, so the missing-date scan below is blind
+    # to them — they have to be rebuilt from scratch first.
+    stale = technical_features_repo.get_stale_feature_tickers()
+    if stale:
+        rebuilt = _recompute_history(stale, batch_size)
+        print(
+            f"Technical features: rebuilt {rebuilt:,} rows for "
+            f"{len(stale):,} re-adjusted tickers"
+        )
+
     missing = technical_features_repo.get_missing_feature_dates()
+    if stale:
+        # The full rebuild above already covered these tickers end to end.
+        missing = missing[~missing["ticker"].isin(stale)].copy()
     if missing.empty:
         print("Technical features: up to date")
         return
@@ -139,36 +158,50 @@ def update_technical_features(batch_size: int = 200):
 
 
 def update_fundamentals(sh: SharadarData):
-    # calendardate lookback catches recent periods across all names (Sharadar's
-    # fundamentals endpoint filters on calendardate, not lastupdated).
-    since = _lookback(90)
-    for dim in ("ARY", "ARQ", "ART"):
-        _fetch_all(
-            sh.fundamentals,
-            fundamentals_repo.insert,
-            f"Fundamentals {dim}",
-            since,
-            dimension=dim,
-        )
+    # SF1 *does* expose `lastupdated` as a filter, and it is the only cursor that
+    # sees restatements: a 10-K/A filed today amending FY2019 carries
+    # calendardate=2019-12-31, so a recent-calendardate window can never contain
+    # it. Dropping the per-dimension loop also means MRQ/MRT/MRY get refreshed
+    # instead of only the as-reported three, and the delta is a few dozen rows.
+    _fetch(
+        sh.fundamentals,
+        fundamentals_repo.insert,
+        "Fundamentals",
+        lastupdated_since=fundamentals_repo.get_sync_cursor() or _lookback(90),
+    )
 
 
+# SF2/SF3/EVENTS expose no `lastupdated`, so these three can only window on the
+# row's own date. The window is relative to TODAY rather than to what we hold,
+# so skipping runs for longer than the window loses that data permanently.
 def update_insider(sh: SharadarData):
-    _fetch_all(
-        sh.insider_transactions, insider_repo.insert, "Insider", _lookback(14)
+    _fetch(
+        sh.insider_transactions,
+        insider_repo.insert,
+        "Insider",
+        start_date=_lookback(14),
+        end_date=TODAY,
     )
 
 
 def update_institutional(sh: SharadarData):
-    _fetch_all(
+    _fetch(
         sh.institutional_holdings,
         institutional_repo.insert,
         "Institutional",
-        _lookback(60),
+        start_date=_lookback(60),
+        end_date=TODAY,
     )
 
 
 def update_events(sh: SharadarData):
-    _fetch_all(sh.events, event_repo.insert, "Events", _lookback(7))
+    _fetch(
+        sh.events,
+        event_repo.insert,
+        "Events",
+        start_date=_lookback(7),
+        end_date=TODAY,
+    )
 
 
 # ── descriptors + macro ────────────────────────────────────────────────────────
@@ -176,10 +209,17 @@ def update_events(sh: SharadarData):
 
 def update_tickers(sh: SharadarData):
     # Include delisted — the descriptor table must know names that have died so
-    # historical/point-in-time lookups can resolve them.
-    equities = sh.tickers(table="SEP")
-    funds = sh.tickers(table="SFP", tickers=BENCHMARK_SYMBOLS)
+    # historical/point-in-time lookups can resolve them. `lastupdated` turns the
+    # daily full-table re-upsert (~22k rows) into the handful that actually
+    # changed; the resulting state is identical either way.
+    # A None cursor (empty table) falls through as an unfiltered full fetch.
+    since = tickers_repo.get_sync_cursor()
+    equities = sh.tickers(table="SEP", lastupdated_since=since)
+    funds = sh.tickers(table="SFP", tickers=BENCHMARK_SYMBOLS, lastupdated_since=since)
     df = pd.concat([equities, funds], ignore_index=True)
+    if df.empty:
+        print("Tickers: up to date")
+        return
     tickers_repo.insert(df)
     print(f"Tickers: {len(df):,} upserted")
 
