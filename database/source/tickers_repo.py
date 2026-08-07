@@ -34,11 +34,14 @@ _COLUMNS = [
 ]
 _COL_LIST = ", ".join(_COLUMNS)
 _BIND_LIST = ", ".join(f":{c}" for c in _COLUMNS)
+KEY_COLUMNS = ("ticker", "table_code")
 _UPDATE_SET = ", ".join(
     f"{column} = COALESCE(EXCLUDED.{column}, tickers.{column})"
     for column in _COLUMNS
-    if column not in ("ticker", "table_code")
+    if column not in KEY_COLUMNS
 )
+
+CONFLICT = f"ON CONFLICT (ticker, table_code) DO UPDATE SET {_UPDATE_SET}"
 
 
 def create_table():
@@ -94,10 +97,7 @@ def insert(df: pd.DataFrame):
     records = frame.where(frame.notna(), None).to_dict(orient="records")
     with get_connection().begin() as conn:
         conn.execute(
-            text(
-                f"INSERT INTO tickers ({_COL_LIST}) VALUES ({_BIND_LIST}) "
-                f"ON CONFLICT (ticker, table_code) DO UPDATE SET {_UPDATE_SET}"
-            ),
+            text(f"INSERT INTO tickers ({_COL_LIST}) VALUES ({_BIND_LIST}) {CONFLICT}"),
             records,
         )
 

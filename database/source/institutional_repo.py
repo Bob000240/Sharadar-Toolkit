@@ -13,10 +13,12 @@ _COLUMNS = [
 ]
 _COL_LIST = ", ".join(_COLUMNS)
 _BIND_LIST = ", ".join(f":{c}" for c in _COLUMNS)
-_KEY_COLUMNS = ("ticker", "investorname", "calendardate", "securitytype")
+KEY_COLUMNS = ("ticker", "investorname", "calendardate", "securitytype")
 _UPDATE_SET = ", ".join(
-    f"{column} = EXCLUDED.{column}" for column in _COLUMNS if column not in _KEY_COLUMNS
+    f"{column} = EXCLUDED.{column}" for column in _COLUMNS if column not in KEY_COLUMNS
 )
+
+CONFLICT = f"ON CONFLICT ({', '.join(KEY_COLUMNS)}) DO UPDATE SET {_UPDATE_SET}"
 
 
 def create_table():
@@ -53,8 +55,7 @@ def insert(df: pd.DataFrame):
             text(
                 f"INSERT INTO institutional_holdings ({_COL_LIST}) "
                 f"VALUES ({_BIND_LIST}) "
-                f"ON CONFLICT (ticker, investorname, calendardate, securitytype) "
-                f"DO UPDATE SET {_UPDATE_SET}"
+                f"{CONFLICT}"
             ),
             records,
         )

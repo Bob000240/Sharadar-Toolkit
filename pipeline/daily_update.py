@@ -3,6 +3,8 @@ Daily incremental update. Run each market day after close.
     uv run python -m pipeline.daily_update
 """
 
+import time
+
 import pandas as pd
 from pipeline.config import BENCHMARK_SYMBOLS
 from pipeline.load_data import START_DATE
@@ -27,34 +29,53 @@ def _lookback(days: int) -> str:
     return (pd.Timestamp.today() - pd.Timedelta(days=days)).strftime("%Y-%m-%d")
 
 
-def _fetch(sh_fn, repo_insert, label: str, **filters) -> None:
-    """Fetch the whole cross-section matching `filters` and upsert it. Sharadar
-    paginates it in one logical call.
-
-    Callers pass `lastupdated_since=` where Sharadar exposes that watermark
-    (SEP/SFP/SF1/TICKERS) — the only filter that surfaces revisions to rows we
-    already hold. The rest can only window on the row's own date, which means
-    they lose anything that falls outside the window while we weren't looking.
-    """
-    df = sh_fn(**filters)
-    if df.empty:
-        print(f"{label}: up to date")
-        return
-    repo_insert(df)
+def _fetch(sh_fn, repo_insert, label: str, batch_size: int = 0, **filters) -> None:
     scope = ", ".join(f"{k}={v}" for k, v in filters.items() if k != "tickers")
-    print(f"{label}: {len(df):,} rows upserted ({scope})")
 
+    if batch_size:
+        tickers = list(filters.pop("tickers"))
+        n_batches = -(-len(tickers) // batch_size)
+        print(
+            f"{label}: fetching {len(tickers):,} tickers "
+            f"in {n_batches} batches ({scope})...",
+            flush=True,
+        )
+        started = time.perf_counter()
+        total = 0
+        for i in range(0, len(tickers), batch_size):
+            df = sh_fn(tickers=tickers[i : i + batch_size], **filters)
+            if not df.empty:
+                repo_insert(df)
+                total += len(df)
+            print(
+                f"  {label} batch {i // batch_size + 1}/{n_batches} (+{total:,} rows)",
+                flush=True,
+            )
+        elapsed = time.perf_counter() - started
+        print(f"{label}: {total:,} rows upserted ({scope}) [{elapsed:.1f}s]")
+        return
 
-# ── prices ────────────────────────────────────────────────────────────────────
+    print(f"{label}: fetching ({scope})...", flush=True)
+    started = time.perf_counter()
+    df = sh_fn(**filters)
+    fetch_elapsed = time.perf_counter() - started
+    if df.empty:
+        print(f"{label}: up to date [{fetch_elapsed:.1f}s]")
+        return
+    print(
+        f"{label}: got {len(df):,} rows in {fetch_elapsed:.1f}s, upserting...",
+        flush=True,
+    )
+    insert_started = time.perf_counter()
+    repo_insert(df)
+    insert_elapsed = time.perf_counter() - insert_started
+    print(
+        f"{label}: {len(df):,} rows upserted ({scope}) "
+        f"[fetch {fetch_elapsed:.1f}s, insert {insert_elapsed:.1f}s]"
+    )
 
 
 def update_equity_prices(sh: SharadarData):
-    # Sync on `lastupdated`, not on `date`. A split makes Sharadar re-adjust the
-    # ticker's ENTIRE price history, and those rewritten rows keep their original
-    # (old) dates — a date cursor would never request them again, so the stale
-    # pre-split prices would persist forever and corrupt every technical feature
-    # derived from them. This also retires the old "which tickers are still
-    # trading" heuristic: a delisted name simply stops being re-stamped.
     _fetch(
         sh.equity_prices,
         equity_repo.insert,
@@ -64,8 +85,6 @@ def update_equity_prices(sh: SharadarData):
 
 
 def update_fund_prices(sh: SharadarData):
-    # Funds are a fixed curated set (benchmark + sector ETFs), not the equity
-    # universe — fetch exactly those, incrementally.
     _fetch(
         sh.fund_prices,
         fund_repo.insert,
@@ -73,9 +92,6 @@ def update_fund_prices(sh: SharadarData):
         lastupdated_since=fund_repo.get_sync_cursor() or START_DATE,
         tickers=BENCHMARK_SYMBOLS,
     )
-
-
-# ── technical features (computed locally from equity_prices) ──────────────────
 
 
 def _recompute_history(symbols: list[str], batch_size: int) -> int:
@@ -103,9 +119,6 @@ def update_technical_features(batch_size: int = 200):
         print("Technical features: no base data")
         return
 
-    # Two distinct repairs. Features computed from prices Sharadar has since
-    # re-adjusted are present but WRONG, so the missing-date scan below is blind
-    # to them — they have to be rebuilt from scratch first.
     stale = technical_features_repo.get_stale_feature_tickers()
     if stale:
         rebuilt = _recompute_history(stale, batch_size)
@@ -116,7 +129,6 @@ def update_technical_features(batch_size: int = 200):
 
     missing = technical_features_repo.get_missing_feature_dates()
     if stale:
-        # The full rebuild above already covered these tickers end to end.
         missing = missing[~missing["ticker"].isin(stale)].copy()
     if missing.empty:
         print("Technical features: up to date")
@@ -154,15 +166,7 @@ def update_technical_features(batch_size: int = 200):
     print(f"Technical features: {total:,} new rows ({len(symbols):,} tickers)")
 
 
-# ── fundamentals / ownership / events (all tickers, by date) ───────────────────
-
-
 def update_fundamentals(sh: SharadarData):
-    # SF1 *does* expose `lastupdated` as a filter, and it is the only cursor that
-    # sees restatements: a 10-K/A filed today amending FY2019 carries
-    # calendardate=2019-12-31, so a recent-calendardate window can never contain
-    # it. Dropping the per-dimension loop also means MRQ/MRT/MRY get refreshed
-    # instead of only the as-reported three, and the delta is a few dozen rows.
     _fetch(
         sh.fundamentals,
         fundamentals_repo.insert,
@@ -171,9 +175,6 @@ def update_fundamentals(sh: SharadarData):
     )
 
 
-# SF2/SF3/EVENTS expose no `lastupdated`, so these three can only window on the
-# row's own date. The window is relative to TODAY rather than to what we hold,
-# so skipping runs for longer than the window loses that data permanently.
 def update_insider(sh: SharadarData):
     _fetch(
         sh.insider_transactions,
@@ -189,6 +190,8 @@ def update_institutional(sh: SharadarData):
         sh.institutional_holdings,
         institutional_repo.insert,
         "Institutional",
+        batch_size=500,
+        tickers=tickers_repo.get(table_code="SEP")["ticker"].tolist(),
         start_date=_lookback(60),
         end_date=TODAY,
     )
@@ -204,15 +207,7 @@ def update_events(sh: SharadarData):
     )
 
 
-# ── descriptors + macro ────────────────────────────────────────────────────────
-
-
 def update_tickers(sh: SharadarData):
-    # Include delisted — the descriptor table must know names that have died so
-    # historical/point-in-time lookups can resolve them. `lastupdated` turns the
-    # daily full-table re-upsert (~22k rows) into the handful that actually
-    # changed; the resulting state is identical either way.
-    # A None cursor (empty table) falls through as an unfiltered full fetch.
     since = tickers_repo.get_sync_cursor()
     equities = sh.tickers(table="SEP", lastupdated_since=since)
     funds = sh.tickers(table="SFP", tickers=BENCHMARK_SYMBOLS, lastupdated_since=since)
@@ -246,7 +241,6 @@ if __name__ == "__main__":
     update_events(sh)
     update_macro()
 
-    # Slower cadence but upsert-safe to run daily
     update_tickers(sh)
     update_institutional(sh)
 

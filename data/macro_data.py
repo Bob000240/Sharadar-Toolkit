@@ -5,9 +5,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# FRED series ID -> column name
 SERIES = {
-    # --- Yields ---
     "DGS1MO": "yield_1m",
     "DGS3MO": "yield_3m",
     "DGS6MO": "yield_6m",
@@ -17,46 +15,34 @@ SERIES = {
     "DGS10": "yield_10y",
     "DGS20": "yield_20y",
     "DGS30": "yield_30y",
-    # --- Real yields (TIPS) ---
     "DFII5": "real_yield_5y",
     "DFII10": "real_yield_10y",
     "DFII20": "real_yield_20y",
-    # --- Breakeven inflation ---
     "T5YIE": "breakeven_5y",
     "T10YIE": "breakeven_10y",
-    # --- Policy rates ---
     "FEDFUNDS": "fed_funds_rate",
     "SOFR": "sofr",
-    # --- Credit spreads ---
     "BAMLH0A0HYM2": "spread_hy",
     "BAMLC0A0CM": "spread_ig",
     "BAMLH0A0HYM2EY": "yield_hy",
     "BAMLC0A0CMEY": "yield_ig",
-    # --- Inflation ---
     "CPIAUCSL": "cpi",
     "CPILFESL": "cpi_core",
     "PCEPI": "pce",
     "PCEPILFE": "pce_core",
-    # --- Labor ---
     "UNRATE": "unemployment_rate",
     "ICSA": "jobless_claims",
     "PAYEMS": "nonfarm_payrolls",
-    # --- Activity ---
     "INDPRO": "industrial_production",
     "RETAILSMNSA": "retail_sales",
     "GDP": "gdp",
-    # --- Money supply ---
     "M2SL": "m2",
-    # --- Housing ---
     "HOUST": "housing_starts",
     "CSUSHPISA": "case_shiller_hpi",
-    # --- Commodities ---
     "DCOILWTICO": "oil_wti",
-    # --- Dollar ---
     "DTWEXBGS": "dxy",
     "DEXUSEU": "eurusd",
     "DEXJPUS": "usdjpy",
-    # --- Volatility ---
     "VIXCLS": "vix",
 }
 
@@ -123,16 +109,16 @@ def _events_to_daily(
     expanded_index = index.union(published.index).sort_values()
     values = published["value"].reindex(expanded_index).ffill().reindex(index)
     available_dates = pd.Series(published.index, index=published.index)
-    available_dates = (
-        available_dates.reindex(expanded_index).ffill().reindex(index)
-    )
+    available_dates = available_dates.reindex(expanded_index).ffill().reindex(index)
     return values, available_dates
 
 
 def _yoy_events(events: pd.DataFrame, periods: int = 12) -> pd.DataFrame:
     """Calculate YoY changes at observation frequency before daily alignment."""
     result = events.sort_values("observation_date").copy()
-    result["value"] = result["value"].pct_change(periods=periods, fill_method=None) * 100
+    result["value"] = (
+        result["value"].pct_change(periods=periods, fill_method=None) * 100
+    )
     return result.dropna(subset=["value"])
 
 
@@ -148,7 +134,9 @@ class MacroData:
         self._fred = Fred(api_key=api_key)
 
     def _fetch_events(self, series_id: str, start: str, end: str) -> pd.DataFrame:
-        fetch_start = (pd.Timestamp(start) - pd.Timedelta(days=500)).strftime("%Y-%m-%d")
+        fetch_start = (pd.Timestamp(start) - pd.Timedelta(days=500)).strftime(
+            "%Y-%m-%d"
+        )
         if series_id in RELEASE_SENSITIVE_SERIES:
             releases = self._fred.get_series_all_releases(
                 series_id,
@@ -184,7 +172,6 @@ class MacroData:
             events_by_column[col] = events
             df[col], available[col] = _events_to_daily(events, idx)
 
-        # Derived fields
         df["yield_curve_2_10"] = df["yield_10y"] - df["yield_2y"]
         df["yield_curve_3m_10"] = df["yield_10y"] - df["yield_3m"]
         for source_col, output_col in (
@@ -197,9 +184,7 @@ class MacroData:
             )
 
         for output_col, source_cols in AVAILABILITY_COLUMNS.items():
-            source_dates = pd.concat(
-                [available[col] for col in source_cols], axis=1
-            )
+            source_dates = pd.concat([available[col] for col in source_cols], axis=1)
             df[output_col] = source_dates.min(axis=1)
 
         df.index.name = "date"

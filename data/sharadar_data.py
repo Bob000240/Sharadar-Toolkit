@@ -39,17 +39,6 @@ class SharadarData:
             r["lte"] = end
         return r or None
 
-    # `lastupdated_since` below filters on the sync watermark: the date Sharadar
-    # last WROTE the row, which is not the row's own date. It is the only filter
-    # that surfaces revisions to old periods (SF1 restatements, SEP split
-    # re-adjustments). Available on SEP/SFP/SF1/TICKERS only — SF2/SF3/EVENTS
-    # don't expose it. Passing None omits the filter entirely.
-
-    # -------------------------------------------------------------------------
-    # SF1 -- income statement, balance sheet, and cash flow data for US equities,
-    #        sourced from SEC filings (10-K, 10-Q).
-    # -------------------------------------------------------------------------
-
     def fundamentals(
         self,
         tickers: str | list[str] | None = None,
@@ -70,10 +59,6 @@ class SharadarData:
             paginate=paginate,
         )
 
-    # -------------------------------------------------------------------------
-    # SF2 -- Insider transactions (Form 4)
-    # -------------------------------------------------------------------------
-
     def insider_transactions(
         self,
         tickers: str | list[str] | None = None,
@@ -89,10 +74,6 @@ class SharadarData:
             paginate=paginate,
         )
 
-    # -------------------------------------------------------------------------
-    # SF3 -- Institutional holdings by ticker
-    # -------------------------------------------------------------------------
-
     def institutional_holdings(
         self,
         tickers: str | list[str] | None = None,
@@ -107,10 +88,6 @@ class SharadarData:
             ),
             paginate=paginate,
         )
-
-    # -------------------------------------------------------------------------
-    # SEP -- Stock equity prices (daily OHLCV, split-adjusted)
-    # -------------------------------------------------------------------------
 
     def equity_prices(
         self,
@@ -129,11 +106,6 @@ class SharadarData:
             ),
             paginate=paginate,
         )
-
-    # -------------------------------------------------------------------------
-    # TICKERS -- Company/fund descriptors
-    # table: "SEP" (equities), "SFP" (funds)
-    # -------------------------------------------------------------------------
 
     def tickers(
         self,
@@ -157,10 +129,6 @@ class SharadarData:
             df = df[df["isdelisted"] == flag]
         return df.reset_index(drop=True)
 
-    # -------------------------------------------------------------------------
-    # EVENTS -- Earnings and corporate event dates
-    # -------------------------------------------------------------------------
-
     def events(
         self,
         tickers: str | list[str] | None = None,
@@ -173,10 +141,6 @@ class SharadarData:
             **self._params(ticker=tickers, date=self._date_range(start_date, end_date)),
             paginate=paginate,
         )
-
-    # -------------------------------------------------------------------------
-    # SFP -- Fund/ETF prices (daily OHLCV)
-    # -------------------------------------------------------------------------
 
     def fund_prices(
         self,

@@ -12,7 +12,7 @@ _FUND_TABLE = "fund_prices"
 
 _MIN_HORIZON_SESSIONS = 2
 
-_CALENDAR_SLACK = 1.7
+_CALENDAR_SLACK = 1.7 #weeked, holidays, and other non-trading days
 _CALENDAR_PAD = 15
 
 _QUERY_TEMPLATE = """
@@ -55,8 +55,6 @@ class ForwardReturns:
 
     def __repr__(self) -> str:
         return f"ForwardReturns(horizon_sessions={self.horizon_sessions})"
-
-    # ── execution ────────────────────────────────────────────────────────────
 
     def run(self, tickers, signal_day) -> pd.DataFrame:
         return self._returns(_EQUITY_TABLE, tickers, signal_day)

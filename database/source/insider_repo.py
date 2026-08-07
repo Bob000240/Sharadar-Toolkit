@@ -30,6 +30,11 @@ _COLUMNS = [
 _COL_LIST = ", ".join(_COLUMNS)
 _BIND_LIST = ", ".join(f":{c}" for c in _COLUMNS)
 
+CONFLICT = (
+    "ON CONFLICT (ticker, filingdate, ownername, transactiondate, transactioncode) "
+    "DO NOTHING"
+)
+
 
 def create_table():
     with get_connection().begin() as conn:
@@ -79,7 +84,8 @@ def insert(df: pd.DataFrame):
     with get_connection().begin() as conn:
         conn.execute(
             text(
-                f"INSERT INTO insider_transactions ({_COL_LIST}) VALUES ({_BIND_LIST}) ON CONFLICT (ticker, filingdate, ownername, transactiondate, transactioncode) DO NOTHING"
+                f"INSERT INTO insider_transactions ({_COL_LIST}) "
+                f"VALUES ({_BIND_LIST}) {CONFLICT}"
             ),
             records,
         )

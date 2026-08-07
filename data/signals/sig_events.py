@@ -8,17 +8,13 @@ import database.source.event_repo as event_repo
 from data.signals.sig import Signals
 
 
-# Sharadar EVENTS codes (separated by "|" in eventcodes).
-EARNINGS_CODE = "22"              # Results of Operations and Financial Condition
-ACTIVIST_13D_CODE = "35"          # Schedule 13D Filing
-DELISTING_CODE = "31"             # Notice of Delisting or Failure to Satisfy a
-                                   # Continued Listing Rule or Standard
-BANKRUPTCY_CODE = "13"            # Bankruptcy or Receivership
-RESTATEMENT_CODE = "42"           # Non-Reliance on Previously Issued Financial
-                                   # Statements or a Related Audit Report
-LATE_FILING_CODE = "36"           # Notice under Rule 12b25 of inability to
-                                   # timely file a 10-K or 10-Q
-MATERIAL_IMPAIRMENT_CODE = "26"   # Material Impairments
+EARNINGS_CODE = "22"
+ACTIVIST_13D_CODE = "35"
+DELISTING_CODE = "31"
+BANKRUPTCY_CODE = "13"
+RESTATEMENT_CODE = "42"
+LATE_FILING_CODE = "36"
+MATERIAL_IMPAIRMENT_CODE = "26"
 
 EVENT_FACT_COLUMNS = (
     "days_since_last_earnings",
@@ -52,7 +48,7 @@ class EventSignals(Signals):
         empty code list. Whether any code is good, bad, or disqualifying belongs
         to the consuming strategy.
         """
-        signal_day = pd.Timestamp(signal_day) - pd.Timedelta(days=1)  # point-in-time
+        signal_day = pd.Timestamp(signal_day) - pd.Timedelta(days=1)
         start = signal_day - pd.Timedelta(days=lookback_days)
         frame = event_repo.get(
             tickers=tickers,

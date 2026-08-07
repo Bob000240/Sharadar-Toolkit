@@ -9,9 +9,6 @@ import database.source.institutional_repo as institutional_repo
 from data.signals.sig import Signals
 
 
-# 13F reports are due 45 days after quarter end. The database does not retain
-# each filing's actual accepted timestamp, so this conservative availability
-# estimate prevents future quarter holdings from leaking into a signal day.
 FILING_DELAY_DAYS = 45
 SHARE_SECURITY_TYPE = "SHR"
 
@@ -43,9 +40,7 @@ class InstitutionalSignals(Signals):
     ) -> pd.DataFrame:
         """Return raw holdings from conservatively available report quarters."""
         signal_day = pd.Timestamp(signal_day)
-        available_quarter_cutoff = signal_day - pd.Timedelta(
-            days=FILING_DELAY_DAYS
-        )
+        available_quarter_cutoff = signal_day - pd.Timedelta(days=FILING_DELAY_DAYS)
         start = available_quarter_cutoff - pd.Timedelta(days=history_days)
         frame = institutional_repo.get(
             tickers=tickers,

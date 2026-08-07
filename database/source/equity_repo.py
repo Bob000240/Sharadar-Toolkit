@@ -16,8 +16,11 @@ _COLUMNS = [
 ]
 _COL_LIST = ", ".join(_COLUMNS)
 _BIND_LIST = ", ".join(f":{c}" for c in _COLUMNS)
-_NON_PK = [c for c in _COLUMNS if c not in ("ticker", "date")]
+KEY_COLUMNS = ("ticker", "date")
+_NON_PK = [c for c in _COLUMNS if c not in KEY_COLUMNS]
 _UPDATE_SET = ", ".join(f"{c} = EXCLUDED.{c}" for c in _NON_PK)
+
+CONFLICT = f"ON CONFLICT (ticker, date) DO UPDATE SET {_UPDATE_SET}"
 
 
 def create_table():
@@ -55,7 +58,7 @@ def insert(df: pd.DataFrame):
         conn.execute(
             text(
                 f"INSERT INTO equity_prices ({_COL_LIST}) VALUES ({_BIND_LIST}) "
-                f"ON CONFLICT (ticker, date) DO UPDATE SET {_UPDATE_SET}"
+                f"{CONFLICT}"
             ),
             records,
         )
@@ -93,5 +96,7 @@ def get_latest_dates(tickers: str | list[str] | None = None) -> pd.DataFrame:
 
 def get_sync_cursor() -> str | None:
     with get_connection().connect() as conn:
-        result = conn.execute(text("SELECT MAX(lastupdated) FROM equity_prices")).scalar()
+        result = conn.execute(
+            text("SELECT MAX(lastupdated) FROM equity_prices")
+        ).scalar()
         return str(result) if result else None

@@ -54,8 +54,6 @@ def test_ticker_refresh_includes_delisted_rows(monkeypatch):
 
     daily_update.update_tickers(FakeSharadar())
 
-    # Both descriptor pulls sync on lastupdated, backed off one day from the
-    # stored watermark (see _overlap).
     assert calls[0] == {"table": "SEP", "lastupdated_since": "2026-07-20"}
     assert calls[1] == {
         "table": "SFP",
@@ -190,8 +188,6 @@ def test_fundamentals_sync_catches_restatements_of_old_periods(monkeypatch):
 
     daily_update.update_fundamentals(FakeSharadar())
 
-    # No calendardate window, and no dimension filter either — MRQ/MRT/MRY are
-    # refreshed alongside the as-reported dimensions.
     assert calls == [{"lastupdated_since": "2026-07-23"}]
 
 
@@ -241,7 +237,6 @@ def test_stale_tickers_rebuild_whole_history_not_just_missing_dates(monkeypatch)
 
     daily_update.update_technical_features()
 
-    # One rebuild pass covering BOTH dates — not a single-row gap fill.
     assert len(rebuilt) == 1
     assert rebuilt[0]["date"].tolist() == [date(2026, 6, 30), date(2026, 7, 1)]
 

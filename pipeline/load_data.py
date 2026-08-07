@@ -61,11 +61,9 @@ _ROW_FILTERS = {
 _CHUNK = 200_000
 
 
-# ── Stage 1: raw Sharadar tables (bulk CSV export -> COPY) ───────────────
-
-
-def _export(code: str, dest: str, date_field: str | None, tickers: list | None) -> list[str]:
-    # Datatables bulk export (qopts.export) runs on the table-API entitlement.
+def _export(
+    code: str, dest: str, date_field: str | None, tickers: list | None
+) -> list[str]:
     filters: dict = {}
     if date_field:
         filters[date_field] = {"gte": START_DATE}
@@ -106,11 +104,7 @@ def load_sharadar_bulk() -> None:
         load_sharadar_table(code)
 
 
-# ── Stage 2: technical features computed from equity_prices ──────────────
-
-
 def load_technical_features() -> None:
-    # Compute features for EVERY ticker in equity_prices, including delisted.
     print("Computing technical features from equity prices (all tickers)...")
     symbols = equity_repo.get_latest_dates()["ticker"].tolist()
     total = 0
@@ -139,13 +133,10 @@ def load_technical_features() -> None:
     print(f"  total: {total:,} rows  ({len(symbols):,} tickers)")
 
 
-# ── Stage 3: macro from FRED ─────────────────────────────────────────────
-
-
 def load_macro() -> None:
     print("Loading macro data (FRED)...")
     df = MacroData().get_macro(START_DATE, END_DATE)
-    macro_repo.insert(df)  # COALESCE upsert; keep repo.insert (small table)
+    macro_repo.insert(df)
     print(f"  {len(df):,} rows")
 
 

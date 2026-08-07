@@ -9,8 +9,6 @@ import database.source.insider_repo as insider_repo
 from data.signals.sig import Signals
 
 
-# Only transaction-code P purchases are positive purchase evidence. Grants,
-# option exercises, and tax withholding are plan-based transactions.
 BUY_CODES = {"P"}
 SELL_CODES = {"S"}
 ROUTINE_PATTERN_YEARS = 3
@@ -85,8 +83,8 @@ class InsiderSignals(Signals):
             return frame
 
         purchases = frame[frame["transactioncode"].isin(BUY_CODES)]
-        frame.loc[purchases.index, "purchase_classification"] = (
-            cls._classify_purchases(purchases)
+        frame.loc[purchases.index, "purchase_classification"] = cls._classify_purchases(
+            purchases
         )
         return frame
 
@@ -104,9 +102,7 @@ class InsiderSignals(Signals):
         if transactions.empty:
             grouped: dict[str, pd.DataFrame] = {}
         else:
-            transactions["filingdate"] = pd.to_datetime(
-                transactions["filingdate"]
-            )
+            transactions["filingdate"] = pd.to_datetime(transactions["filingdate"])
             transactions["transactiondate"] = pd.to_datetime(
                 transactions["transactiondate"]
             )
@@ -169,9 +165,7 @@ class InsiderSignals(Signals):
 
         purchases = purchases.copy()
         purchases["filingdate"] = pd.to_datetime(purchases["filingdate"])
-        purchases["transactiondate"] = pd.to_datetime(
-            purchases["transactiondate"]
-        )
+        purchases["transactiondate"] = pd.to_datetime(purchases["transactiondate"])
         purchases["_owner_key"] = (
             purchases["ownername"].fillna("").str.strip().str.casefold()
         )
@@ -190,8 +184,7 @@ class InsiderSignals(Signals):
                 & (purchases["transactiondate"] < transaction_date)
             ]
             prior_periods = {
-                (date.year, date.month)
-                for date in prior["transactiondate"].dropna()
+                (date.year, date.month) for date in prior["transactiondate"].dropna()
             }
             expected_periods = {
                 (transaction_date.year - years_ago, transaction_date.month)
@@ -248,13 +241,9 @@ class InsiderSignals(Signals):
         sells_period = sells[sells["filingdate"] > cutoff_period]
         buys_30d = buys_period[buys_period["filingdate"] > cutoff_30d]
         sells_30d = sells_period[sells_period["filingdate"] > cutoff_30d]
-        opportunistic = buys_30d[
-            buys_30d["purchase_classification"] == "opportunistic"
-        ]
+        opportunistic = buys_30d[buys_30d["purchase_classification"] == "opportunistic"]
         routine = buys_30d[buys_30d["purchase_classification"] == "routine"]
-        unclassified = buys_30d[
-            buys_30d["purchase_classification"] == "unclassified"
-        ]
+        unclassified = buys_30d[buys_30d["purchase_classification"] == "unclassified"]
 
         transaction_shares = pd.to_numeric(
             opportunistic["transactionshares"],
@@ -264,12 +253,8 @@ class InsiderSignals(Signals):
             opportunistic["sharesownedfollowingtransaction"],
             errors="coerce",
         )
-        purchase_fraction = transaction_shares / post_holdings.where(
-            post_holdings > 0
-        )
-        purchase_fraction = purchase_fraction.where(
-            purchase_fraction.between(0, 1)
-        )
+        purchase_fraction = transaction_shares / post_holdings.where(post_holdings > 0)
+        purchase_fraction = purchase_fraction.where(purchase_fraction.between(0, 1))
 
         total_transactions = len(buys_period) + len(sells_period)
         net_buy_ratio = (
@@ -289,9 +274,7 @@ class InsiderSignals(Signals):
             "sell_value_90d": cls._absolute_value_sum(sells_period),
             "unique_buyers_30d": cls._unique_owner_count(buys_30d),
             "unique_sellers_30d": cls._unique_owner_count(sells_30d),
-            "unique_opportunistic_buyers_30d": cls._unique_owner_count(
-                opportunistic
-            ),
+            "unique_opportunistic_buyers_30d": cls._unique_owner_count(opportunistic),
             "officer_buys_30d": int((buys_30d["isofficer"] == "Y").sum()),
             "director_buys_30d": int((buys_30d["isdirector"] == "Y").sum()),
             "opportunistic_officer_buys_30d": int(
@@ -303,9 +286,7 @@ class InsiderSignals(Signals):
             "opportunistic_buy_count_30d": len(opportunistic),
             "routine_buy_count_30d": len(routine),
             "unclassified_buy_count_30d": len(unclassified),
-            "opportunistic_buy_value_30d": cls._absolute_value_sum(
-                opportunistic
-            ),
+            "opportunistic_buy_value_30d": cls._absolute_value_sum(opportunistic),
             "max_purchase_fraction_of_post_holdings_30d": float(
                 purchase_fraction.max()
             ),

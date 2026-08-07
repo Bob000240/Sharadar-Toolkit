@@ -53,15 +53,32 @@ def main():
         from pipeline import daily_update
 
         sh = daily_update.SharadarData()
-        daily_update.update_equity_prices(sh)
-        daily_update.update_fund_prices(sh)
-        daily_update.update_technical_features()
-        daily_update.update_fundamentals(sh)
-        daily_update.update_insider(sh)
-        daily_update.update_events(sh)
-        daily_update.update_macro()
-        daily_update.update_tickers(sh)
-        daily_update.update_institutional(sh)
+        steps = [
+            ("Equity prices", lambda: daily_update.update_equity_prices(sh)),
+            ("Fund prices", lambda: daily_update.update_fund_prices(sh)),
+            ("Technical features", daily_update.update_technical_features),
+            ("Fundamentals", lambda: daily_update.update_fundamentals(sh)),
+            ("Insider", lambda: daily_update.update_insider(sh)),
+            ("Events", lambda: daily_update.update_events(sh)),
+            ("Macro", daily_update.update_macro),
+            ("Tickers", lambda: daily_update.update_tickers(sh)),
+            ("Institutional", lambda: daily_update.update_institutional(sh)),
+        ]
+        failed = []
+        for label, step in steps:
+            try:
+                step()
+            except Exception as exc:
+                failed.append(label)
+                print(f"{label}: FAILED — {type(exc).__name__}: {exc}")
+
+        if failed:
+            print(
+                f"\n=== {len(failed)}/{len(steps)} step(s) failed: "
+                f"{', '.join(failed)} ==="
+            )
+            sys.exit(1)
+        print(f"\n=== all {len(steps)} steps completed ===")
 
     elif cmd == "register":
         if len(sys.argv) < 3:

@@ -17,7 +17,6 @@ from sqlalchemy import text
 from database.db_connection import get_connection
 
 
-# ── sector_leaders ───────────────────────────────────────────────────────────
 _SL_MIN_DOLLAR_VOLUME = 5_000_000
 _SL_MIN_MARKET_CAP = 10_000_000_000
 _SL_MIN_RETURN_60D = 0

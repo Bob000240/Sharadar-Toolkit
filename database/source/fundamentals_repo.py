@@ -249,8 +249,11 @@ def drop_table():
         conn.execute(text("DROP TABLE IF EXISTS fundamentals CASCADE"))
 
 
-_NON_PK = [c for c in _COLUMNS if c not in ("ticker", "dimension", "datekey")]
+KEY_COLUMNS = ("ticker", "dimension", "datekey")
+_NON_PK = [c for c in _COLUMNS if c not in KEY_COLUMNS]
 _UPDATE_SET = ", ".join(f"{c} = EXCLUDED.{c}" for c in _NON_PK)
+
+CONFLICT = f"ON CONFLICT (ticker, dimension, datekey) DO UPDATE SET {_UPDATE_SET}"
 
 
 def insert(df: pd.DataFrame):
@@ -262,7 +265,7 @@ def insert(df: pd.DataFrame):
         conn.execute(
             text(
                 f"INSERT INTO fundamentals ({_COL_LIST}) VALUES ({_BIND_LIST}) "
-                f"ON CONFLICT (ticker, dimension, datekey) DO UPDATE SET {_UPDATE_SET}"
+                f"{CONFLICT}"
             ),
             records,
         )
@@ -317,5 +320,7 @@ def get_latest_rows(
 
 def get_sync_cursor() -> str | None:
     with get_connection().connect() as conn:
-        result = conn.execute(text("SELECT MAX(lastupdated) FROM fundamentals")).scalar()
+        result = conn.execute(
+            text("SELECT MAX(lastupdated) FROM fundamentals")
+        ).scalar()
         return str(result) if result else None

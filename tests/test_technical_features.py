@@ -28,9 +28,6 @@ from data.technical_features import (
 )
 
 
-# ---------------------------------------------------------------------------
-# Helper function tests
-# ---------------------------------------------------------------------------
 
 def test_sma_basic():
     """SMA with constant values should return that constant."""
@@ -43,8 +40,8 @@ def test_sma_length():
     """SMA produces first valid value at position length-1."""
     series = pd.Series([1.0, 2.0, 3.0, 4.0, 5.0])
     result = _sma(series, 3)
-    assert result.iloc[0] != result.iloc[0]  # NaN
-    assert np.isclose(result.iloc[2], 2.0)  # (1+2+3)/3
+    assert result.iloc[0] != result.iloc[0]
+    assert np.isclose(result.iloc[2], 2.0)
 
 
 def test_ema_basic():
@@ -123,9 +120,9 @@ def test_obv_basic():
     close = pd.Series([100.0, 101.0, 99.0, 102.0])
     volume = pd.Series([1000, 2000, 1500, 3000])
     result = _obv(close, volume)
-    assert result.iloc[0] == 0  # First value is 0 (no prior bar)
-    assert result.iloc[1] > result.iloc[0]  # Up day: volume added
-    assert result.iloc[2] < result.iloc[1]  # Down day: volume subtracted
+    assert result.iloc[0] == 0
+    assert result.iloc[1] > result.iloc[0]
+    assert result.iloc[2] < result.iloc[1]
 
 
 def test_obv_flat():
@@ -136,9 +133,6 @@ def test_obv_flat():
     assert (result == 0).all()
 
 
-# ---------------------------------------------------------------------------
-# Shared test data
-# ---------------------------------------------------------------------------
 
 def make_ohlcv(n: int, seed: int = 42) -> pd.DataFrame:
     """Synthetic OHLCV DataFrame with n business days.
@@ -172,9 +166,6 @@ def full_df():
     return make_ohlcv(400)
 
 
-# ---------------------------------------------------------------------------
-# Test 1 — look-ahead bias (the Phase 0 gate requirement)
-# ---------------------------------------------------------------------------
 
 def test_no_lookahead_bias(full_df):
     """
@@ -198,7 +189,6 @@ def test_no_lookahead_bias(full_df):
     full_features = compute_technical_features(full_df)
     short_features = compute_technical_features(short_df)
 
-    # Find the last date that both computations produced a row for.
     shared_dates = set(full_features["date"]) & set(short_features["date"])
     assert shared_dates, (
         "No overlapping dates between the two results.  "
@@ -216,9 +206,6 @@ def test_no_lookahead_bias(full_df):
             f"full={full_row[col]:.8f}, short={short_row[col]:.8f}"
         )
 
-# ---------------------------------------------------------------------------
-# Test 2 — date column integrity through dropna + reset_index
-# ---------------------------------------------------------------------------
 
 def test_dates_are_a_subset_of_input(full_df):
     """
@@ -252,9 +239,6 @@ def test_no_duplicate_dates(full_df):
     assert duplicates.empty, f"Duplicate dates in output: {duplicates.values}"
 
 
-# ---------------------------------------------------------------------------
-# Test 3 — basic correctness sanity checks
-# ---------------------------------------------------------------------------
 
 def test_return_1d_equals_pct_change(full_df):
     """
@@ -265,7 +249,6 @@ def test_return_1d_equals_pct_change(full_df):
     """
     result = compute_technical_features(full_df)
 
-    # Check a few rows in the middle to avoid any edge effects.
     for i in range(10, 15):
         row = result.iloc[i]
         prev = result.iloc[i - 1]

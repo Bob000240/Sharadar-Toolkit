@@ -13,8 +13,6 @@ BENCHMARK_SYMBOLS = [
     "XLP",
 ]
 
-# Sector names MUST match the `sector` values stored in the tickers table
-# (Sharadar/Zacks taxonomy), otherwise sector joins/lookups silently produce NaN.
 ETF_SECTOR_MAP = {
     "XLK": "Technology",
     "XLY": "Consumer Cyclical",
@@ -30,9 +28,6 @@ ETF_SECTOR_MAP = {
 }
 
 
-# Market-cap buckets (USD), classified on a point-in-time market cap. Boundaries
-# mirror the bands used in sig_fundamentals.valuation() (mid 1B–10B, large ≥10B);
-# the 300M floor drops nano/micro caps, which every strategy's universe excludes.
 _MICRO_CAP_CEILING = 300_000_000
 _MID_CAP_FLOOR = 1_000_000_000
 _LARGE_CAP_FLOOR = 10_000_000_000

@@ -47,7 +47,6 @@ def drop_all():
 
 
 def create_all():
-    # Market data
     equity_repo.create_table()
     print("  created equity_prices")
     fund_repo.create_table()
@@ -67,9 +66,10 @@ def create_all():
     macro_repo.create_table()
     print("  created macro")
 
-    # Operational
     profiles_repo.create_table()
-    print("  created strategy_profiles (empty; register strategies via pipeline.main register)")
+    print(
+        "  created strategy_profiles (empty; register strategies via pipeline.main register)"
+    )
 
     print("All tables created")
 

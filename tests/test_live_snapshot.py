@@ -10,9 +10,6 @@ from unittest.mock import MagicMock, patch
 from data.live_equity import MarketData
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 def _make_bar(open_: float, high: float, low: float, close: float, volume: float) -> MagicMock:
     bar = MagicMock()
@@ -30,9 +27,6 @@ def md():
         return MarketData()
 
 
-# ---------------------------------------------------------------------------
-# OHLCV aggregation correctness
-# ---------------------------------------------------------------------------
 
 class TestGetLiveSnapshotData:
 
@@ -99,14 +93,10 @@ class TestGetLiveSnapshotData:
         assert np.isclose(result.loc["MSFT", "open"], 300.0)
 
 
-# ---------------------------------------------------------------------------
-# Fallback behaviour
-# ---------------------------------------------------------------------------
 
 class TestGetLiveSnapshotFallback:
 
     def test_raises_on_api_exception(self, md):
-        # API/transport errors must propagate, not be swallowed into an empty frame.
         md.MarketDataClient.get_stock_bars.side_effect = RuntimeError("API down")
         with pytest.raises(RuntimeError):
             md.get_live_snapshot(["AAPL"])
@@ -120,9 +110,6 @@ class TestGetLiveSnapshotFallback:
         assert md.get_live_snapshot(["AAPL"]).empty
 
 
-# ---------------------------------------------------------------------------
-# Symbol mapping
-# ---------------------------------------------------------------------------
 
 class TestGetLiveSnapshotSymbolMapping:
 

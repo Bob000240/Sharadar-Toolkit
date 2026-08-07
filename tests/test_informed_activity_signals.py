@@ -60,14 +60,9 @@ def test_event_facts_fetch_window_and_aggregation(monkeypatch):
         pd.Timestamp("2026-07-20"),
     )
 
-    # Fetched over the correct point-in-time window: attach_event_facts steps
-    # signal_day back a day (you cannot act on a filing the same session it
-    # lands), so a 2026-07-20 signal day reads events in [2026-06-29, 2026-07-19]
-    # and measures recency against 2026-07-19.
     assert captured["start_date"] == "2026-06-29"
     assert captured["end_date"] == "2026-07-19"
 
-    # aggregated to one row per requested ticker, including the eventless one
     assert facts.index.tolist() == ["AAA", "NO_EVENTS"]
     assert facts.loc["AAA", "days_since_last_earnings"] == 1
     assert facts.loc["AAA", "days_since_last_activist_13d"] == 4
