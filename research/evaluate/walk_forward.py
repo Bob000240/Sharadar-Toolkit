@@ -64,6 +64,47 @@ class WalkForward:
             "median_complete_pct": by_date.complete_pct.median(),
         }
 
+    def compare(self, signal_days, filters, additions=None) -> pd.DataFrame:
+        rows = []
+        for day in signal_days:
+            frame = self.universe.run(day)
+            if additions is not None:
+                frame = additions(frame, day)
+            if frame.empty:
+                continue
+
+            measured = self.forward.run(frame.ticker, day)
+            bench = self.forward.benchmark([self.benchmark_ticker], day)
+            if measured.empty or bench.empty:
+                continue
+            benchmark_return = bench.forward_return.iloc[0]
+            by_ticker = measured.set_index("ticker")
+
+            for label, condition in filters.items():
+                selected = frame if condition is None else condition.apply(frame)
+                returns = by_ticker.reindex(selected["ticker"]).dropna(
+                    subset=["forward_return"]
+                )
+                if returns.empty:
+                    continue
+                median = returns.forward_return.median()
+                rows.append(
+                    {
+                        "variant": label,
+                        "signal_day": pd.Timestamp(day).date(),
+                        "n": len(returns),
+                        "median_return": median,
+                        "hit_rate": (returns.forward_return > 0).mean(),
+                        "benchmark_return": benchmark_return,
+                        "beat_benchmark_rate": (
+                            returns.forward_return > benchmark_return
+                        ).mean(),
+                        "excess_median": median - benchmark_return,
+                        "complete_pct": returns.complete.mean(),
+                    }
+                )
+        return pd.DataFrame(rows)
+
 
 if __name__ == "__main__":
     SIGNAL_DAYS = pd.date_range("2016-01-01", "2025-01-01", freq="QS").tolist()

@@ -96,6 +96,7 @@ def compute_technical_features(df: pd.DataFrame) -> pd.DataFrame:
     df["sma_200"] = _sma(df["close"], 200)
     df["pct_from_sma_20"] = (df["close"] - df["sma_20"]) / df["sma_20"]
     df["pct_from_sma_50"] = (df["close"] - df["sma_50"]) / df["sma_50"]
+    df["pct_from_sma_200"] = (df["close"] - df["sma_200"]) / df["sma_200"]
 
     df["ema_9"] = _ema(df["close"], 9)
     df["ema_21"] = _ema(df["close"], 21)

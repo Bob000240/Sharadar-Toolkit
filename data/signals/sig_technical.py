@@ -61,22 +61,29 @@ class TechnicalSignals(Signals):
         ticker: str,
         signal_day: pd.Timestamp,
     ) -> pd.Series:
+        """Benchmark 5/20-day returns, or NaN when its history is too short.
+
+        Returns NaN rather than raising, because too little benchmark history is
+        a coverage boundary rather than a fault — the same situation every other
+        lookback feature already handles this way. `return_252d` is NaN for a
+        security's first year rather than an exception, and an excess return
+        against a benchmark that does not yet have 21 sessions is unknowable in
+        exactly the same sense. Raising instead made the earliest signal days
+        abort a whole walk-forward rather than yield an empty population.
+        """
         lookback = signal_day - pd.Timedelta(days=45)
         prices = fund_repo.get(
             tickers=[ticker],
             start_date=str(lookback.date()),
             end_date=str(signal_day.date()),
         )
+        unknown = pd.Series({"return_5d": float("nan"), "return_20d": float("nan")})
         if prices.empty:
-            raise ValueError(
-                f"No fund price data for {ticker} as of {signal_day.date()}"
-            )
+            return unknown
 
         closes = prices.sort_values("date")["close"].to_numpy()
         if len(closes) < 21:
-            raise ValueError(
-                f"Fewer than 21 fund price rows for {ticker} as of {signal_day.date()}"
-            )
+            return unknown
 
         return pd.Series(
             {

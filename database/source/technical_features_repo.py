@@ -22,6 +22,7 @@ _COLUMNS = [
     "ema_crossover_days_ago",
     "pct_from_sma_20",
     "pct_from_sma_50",
+    "pct_from_sma_200",
     "volume_sma_10",
     "volume_sma_50",
     "volume_ratio",
@@ -96,6 +97,7 @@ def create_table():
                 ema_crossover_days_ago DOUBLE PRECISION,
                 pct_from_sma_20 DOUBLE PRECISION,
                 pct_from_sma_50 DOUBLE PRECISION,
+                pct_from_sma_200 DOUBLE PRECISION,
                 volume_sma_10 DOUBLE PRECISION,
                 volume_sma_50 DOUBLE PRECISION,
                 volume_ratio DOUBLE PRECISION,
@@ -203,18 +205,46 @@ def get_stale_feature_tickers() -> list[str]:
 def get_latest_rows(
     tickers: str | list[str] | None, signal_day: pd.Timestamp
 ) -> pd.DataFrame:
-    params = {
-        "signal_day": signal_day.date() if hasattr(signal_day, "date") else signal_day,
-    }
-    ticker_clause = ""
-    if tickers is not None:
-        params["tickers"] = [tickers] if isinstance(tickers, str) else tickers
-        ticker_clause = "AND ticker = ANY(:tickers)"
-    q = text(f"""
-        SELECT DISTINCT ON (ticker) *
-        FROM technical_features
-        WHERE date <= :signal_day
-          {ticker_clause}
-        ORDER BY ticker, date DESC
-    """)
-    return pd.read_sql_query(q, get_connection(), params=params)
+    """Each ticker's most recent feature row on or before `signal_day`.
+
+    With an explicit ticker list this drives one index seek per ticker against
+    the (ticker, date) primary key. `DISTINCT ON` over the same set instead
+    reads every historical row for every ticker before discarding all but the
+    newest — roughly 14M rows to return 5k, and ~15x slower. There is no lower
+    date bound in either form, so a long-delisted ticker still resolves to its
+    final row.
+    """
+    signal_day = signal_day.date() if hasattr(signal_day, "date") else signal_day
+
+    if tickers is None:
+        return pd.read_sql_query(
+            text("""
+                SELECT DISTINCT ON (ticker) *
+                FROM technical_features
+                WHERE date <= :signal_day
+                ORDER BY ticker, date DESC
+            """),
+            get_connection(),
+            params={"signal_day": signal_day},
+        )
+
+    return pd.read_sql_query(
+        text("""
+            SELECT latest.*
+            FROM unnest(CAST(:tickers AS text[])) AS wanted(ticker)
+            JOIN LATERAL (
+                SELECT *
+                FROM technical_features AS tf
+                WHERE tf.ticker = wanted.ticker
+                  AND tf.date <= :signal_day
+                ORDER BY tf.date DESC
+                LIMIT 1
+            ) AS latest ON TRUE
+            ORDER BY latest.ticker
+        """),
+        get_connection(),
+        params={
+            "tickers": [tickers] if isinstance(tickers, str) else list(tickers),
+            "signal_day": signal_day,
+        },
+    )

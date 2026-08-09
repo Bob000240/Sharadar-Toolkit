@@ -12,7 +12,7 @@ _FUND_TABLE = "fund_prices"
 
 _MIN_HORIZON_SESSIONS = 2
 
-_CALENDAR_SLACK = 1.7 #weeked, holidays, and other non-trading days
+_CALENDAR_SLACK = 1.7  # weeked, holidays, and other non-trading days
 _CALENDAR_PAD = 15
 
 _QUERY_TEMPLATE = """
