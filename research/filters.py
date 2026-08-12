@@ -7,6 +7,7 @@ import pandas as pd
 
 import database.source.fundamentals_repo as fundamentals_repo
 import database.source.technical_features_repo as technical_features_repo
+from data.signals.sig_events import EventSignals
 from data.signals.sig_fundamentals import FundamentalSignals
 from data.signals.sig_technical import TechnicalSignals
 
@@ -247,6 +248,13 @@ def _fundamental_facts(tickers: list[str], signal_day) -> pd.DataFrame:
     return frame
 
 
+def _event_facts(tickers: list[str], signal_day) -> pd.DataFrame:
+    # No _empty_facts fallback: attach_event_facts already emits a row for every
+    # requested ticker, with null recencies and an empty code list where nothing
+    # happened. Absence of events is a fact here, not missing data.
+    return EventSignals.attach_event_facts(tickers, signal_day)
+
+
 # Every registered source returns one ticker-indexed row per security, so any
 # column it produces becomes filterable without this module knowing the names.
 # InsiderSignals and InstitutionalSignals are absent on purpose: their
@@ -255,13 +263,14 @@ def _fundamental_facts(tickers: list[str], signal_day) -> pd.DataFrame:
 SIGNAL_SOURCES = {
     "technical": _technical_facts,
     "fundamental": _fundamental_facts,
+    "events": _event_facts,
 }
 
 
 def attach_signals(
     frame: pd.DataFrame,
     signal_day,
-    sources: Iterable[str] = ("technical", "fundamental"),
+    sources: Iterable[str] = tuple(SIGNAL_SOURCES),
 ) -> pd.DataFrame:
     """Merge point-in-time facts from the signal layer onto a universe frame.
 
@@ -324,6 +333,7 @@ def population(
 
 
 if __name__ == "__main__":
+    import data.signals.sig_events as sig_events
     from research.evaluate.forward import ForwardReturns
     from research.evaluate.walk_forward import WalkForward
     from research.universe import Universe
@@ -353,6 +363,16 @@ if __name__ == "__main__":
 
     print(f"\nWALK-FORWARD: does a filter close the gap? ({len(SIGNAL_DAYS)} quarters)")
 
+    # Which codes disqualify is a strategy judgment, not a signal-layer fact:
+    # sig_events names the codes but takes no position on them.
+    _DISTRESS_CODES = (
+        sig_events.BANKRUPTCY_CODE,
+        sig_events.DELISTING_CODE,
+        sig_events.RESTATEMENT_CODE,
+        sig_events.LATE_FILING_CODE,
+        sig_events.MATERIAL_IMPAIRMENT_CODE,
+    )
+
     _FILTERS = {
         "no filter (baseline)": None,
         "$1B cap": Filters(("marketcap", ">=", 1e9)),
@@ -360,7 +380,18 @@ if __name__ == "__main__":
         "profitable": Filters(("netinccmnusd", ">", 0)),
         "liquid >$5M/day": Filters(("dollar_volume_20d_avg", ">=", 5e6)),
         "above SMA200": Filters(("pct_from_sma_200", ">", 0)),
+        "no distress events": Filters(
+            ("recent_event_codes", "excludes_any", _DISTRESS_CODES)
+        ),
+        "distress events only": Filters(
+            ("recent_event_codes", "contains_any", _DISTRESS_CODES)
+        ),
         "$1B + profitable": Filters(("marketcap", ">=", 1e9), ("netinccmnusd", ">", 0)),
+        "$1B + profitable + no distress": Filters(
+            ("marketcap", ">=", 1e9),
+            ("netinccmnusd", ">", 0),
+            ("recent_event_codes", "excludes_any", _DISTRESS_CODES),
+        ),
         "sector_leaders gates": Filters(
             ("dollar_volume_20d_avg", ">=", 5e6),
             ("marketcap", ">=", 1e10),
@@ -369,6 +400,16 @@ if __name__ == "__main__":
             ("return_252d", ">", 0),
             ("pct_from_sma_200", ">", 0),
             ("trend_slope_60d", ">", 0),
+        ),
+        "sector_leaders + no distress": Filters(
+            ("dollar_volume_20d_avg", ">=", 5e6),
+            ("marketcap", ">=", 1e10),
+            ("netinccmnusd", ">", 0),
+            ("return_60d", ">", 0),
+            ("return_252d", ">", 0),
+            ("pct_from_sma_200", ">", 0),
+            ("trend_slope_60d", ">", 0),
+            ("recent_event_codes", "excludes_any", _DISTRESS_CODES),
         ),
     }
 
@@ -379,7 +420,7 @@ if __name__ == "__main__":
             continue
         summary = WalkForward.summarize(by_date)
         print(
-            f"  {label:<22} n(median)={by_date.n.median():>6.0f}   "
+            f"  {label:<30} measured(median)={by_date.measured.median():>6.0f}   "
             f"mean excess {summary['median_excess']:+.2%}   "
             f"dates beat bench {summary['pct_dates_beat_benchmark']:.1%}"
         )

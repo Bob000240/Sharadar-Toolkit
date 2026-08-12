@@ -365,7 +365,7 @@ if __name__ == "__main__":
             continue
         summary = WalkForward.summarize(rows)
         print(
-            f"  {label:<26} n(median)={rows.n.median():>5.0f}   "
+            f"  {label:<26} measured(median)={rows.measured.median():>5.0f}   "
             f"mean excess {summary['median_excess']:+.2%}   "
             f"dates beat bench {summary['pct_dates_beat_benchmark']:.1%}"
         )
