@@ -5,7 +5,7 @@ Streams a DataFrame into a TEMP staging table with COPY, then
 INSERT ... SELECT ... ON CONFLICT into the real target. Far faster than
 row-by-row executemany. Reuses a repo's column list as the schema-of-record;
 small/incremental writes still use repo.insert() (which also does the
-restatement-aware DO UPDATE for fundamentals/macro).
+restatement-aware DO UPDATE for fundamentals).
 """
 
 from __future__ import annotations

@@ -5,7 +5,6 @@ description = "Agentic AI Portfolio Manager"
 requires-python = ">=3.14"
 dependencies = [
     "alpaca-py>=0.43.4",
-    "fredapi>=0.5.2",
     "nasdaq-data-link>=1.0.4",
     "ndlbulkdownload>=0.2.0",
     "numpy>=2.4.6",

@@ -1,14 +1,13 @@
 """
 Full data load. Run once after setup_db.py.
 
-    uv run python -m pipeline.load_data        # NDL_APIKEY + FRED_API_KEY from .env
+    uv run python -m pipeline.load_data        # NDL_APIKEY from .env
 
-Three stages:
+Two stages:
   1. Raw Sharadar tables  -> bulk-exported as zipped CSV (Nasdaq datatables export,
      which runs on the table-API entitlement) and COPY'd into Postgres
      (fast + reproducible; includes delisted tickers).
   2. `technical_features` -> computed locally from equity_prices.
-  3. `macro`              -> pulled from FRED.
 
 The incremental delta (API-based) lives in pipeline/daily_update.py.
 """
@@ -25,7 +24,6 @@ import nasdaqdatalink
 from dotenv import load_dotenv
 
 from pipeline.config import BENCHMARK_SYMBOLS
-from data.macro_data import MacroData
 from data.technical_features import compute_technical_features
 
 import database.source.equity_repo as equity_repo
@@ -36,7 +34,6 @@ import database.source.fundamentals_repo as fundamentals_repo
 import database.source.insider_repo as insider_repo
 import database.source.institutional_repo as institutional_repo
 import database.source.event_repo as event_repo
-import database.source.macro_repo as macro_repo
 from database.bulk_copy import copy_insert
 
 load_dotenv()
@@ -133,19 +130,11 @@ def load_technical_features() -> None:
     print(f"  total: {total:,} rows  ({len(symbols):,} tickers)")
 
 
-def load_macro() -> None:
-    print("Loading macro data (FRED)...")
-    df = MacroData().get_macro(START_DATE, END_DATE)
-    macro_repo.insert(df)
-    print(f"  {len(df):,} rows")
-
-
 def main() -> None:
     print("=== QuorumNexus full load ===")
     print(f"Date range: {START_DATE} → {END_DATE}\n")
     load_sharadar_bulk()
     load_technical_features()
-    load_macro()
     print("\n=== Load complete ===")
 
 

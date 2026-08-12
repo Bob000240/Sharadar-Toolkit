@@ -32,7 +32,8 @@ QUALITY_HISTORY_TARGET_YEARS = 5
 MIN_QUALITY_HISTORY_OBSERVATIONS = 6
 MIN_VOLATILITY_OBSERVATIONS = 3
 
-# Five-year changes: latest annual value minus the earliest inside the window.
+_LABEL_LEAD_MONTHS = 6
+
 _HISTORY_CHANGE_FIELDS = {
     "gross_profitability_change_5y": "gross_profitability",
     "roa_change_5y": "roa",
@@ -42,7 +43,6 @@ _HISTORY_CHANGE_FIELDS = {
     "de_change_5y": "de",
 }
 
-# Dispersion across every annual observation in the window.
 _HISTORY_VOLATILITY_FIELDS = {
     "roe_volatility_5y": "roe",
     "grossmargin_volatility_5y": "grossmargin",
@@ -80,11 +80,12 @@ class FundamentalSignals(Signals):
         frame = frame.copy()
         signal_day = pd.Timestamp(signal_day)
         growth_start = signal_day - pd.Timedelta(days=730)
+        label_end = signal_day + pd.DateOffset(months=_LABEL_LEAD_MONTHS)
         arq = fundamentals_repo.get(
             tickers=frame.index.astype(str).tolist(),
             dimension="ARQ",
             start_date=str(growth_start.date()),
-            end_date=str(signal_day.date()),
+            end_date=str(label_end.date()),
         )
         if not arq.empty:
             arq = arq[pd.to_datetime(arq["datekey"]) <= signal_day]
@@ -100,11 +101,12 @@ class FundamentalSignals(Signals):
         frame = frame.copy()
         signal_day = pd.Timestamp(signal_day)
         history_start = signal_day - pd.DateOffset(years=6)
+        label_end = signal_day + pd.DateOffset(months=_LABEL_LEAD_MONTHS)
         annual_history = fundamentals_repo.get(
             tickers=frame.index.astype(str).tolist(),
             dimension="ARY",
             start_date=str(history_start.date()),
-            end_date=str(signal_day.date()),
+            end_date=str(label_end.date()),
         )
         if not annual_history.empty:
             annual_history = annual_history[
@@ -172,13 +174,6 @@ class FundamentalSignals(Signals):
 
     @classmethod
     def _calculate_history_features(cls, ary: pd.DataFrame) -> pd.DataFrame:
-        """Five-year change, volatility, and history-sufficiency facts per ticker.
-
-        Vectorised across every ticker at once rather than looping per group.
-        The per-group form spent ~93% of its time in pandas call overhead on
-        six-row frames — 10.3s for 5,300 tickers, against 0.8s for the query
-        that fed it.
-        """
         if ary.empty:
             return pd.DataFrame(columns=list(QUALITY_HISTORY_COLUMNS))
 
@@ -192,14 +187,9 @@ class FundamentalSignals(Signals):
         if ary.empty:
             return pd.DataFrame(columns=list(QUALITY_HISTORY_COLUMNS))
 
-        # One row per fiscal year, keeping the latest-filed restatement.
         ary = ary.sort_values(["ticker", "calendardate", "datekey"])
         ary = ary.drop_duplicates(["ticker", "calendardate"], keep="last")
 
-        # The window is the five years ending at each ticker's own latest annual
-        # period, so the cutoff differs per ticker. DateOffset is calendar-aware
-        # and cannot be broadcast over a Series, but calendardate takes very few
-        # distinct values, so it is resolved once per distinct date and mapped.
         latest_period = ary.groupby("ticker")["calendardate"].transform("last")
         distinct = pd.DatetimeIndex(latest_period.unique())
         cutoffs = pd.Series(
@@ -212,9 +202,6 @@ class FundamentalSignals(Signals):
         observations = by_ticker.size()
         complete = observations >= MIN_QUALITY_HISTORY_OBSERVATIONS
 
-        # head/tail rather than first/last: those skip nulls per column, which
-        # would silently read a value from a different year than the one the
-        # window actually begins or ends on.
         earliest = window.groupby("ticker", sort=True).head(1).set_index("ticker")
         latest = window.groupby("ticker", sort=True).tail(1).set_index("ticker")
 
@@ -223,7 +210,6 @@ class FundamentalSignals(Signals):
             features[name] = (latest[column] - earliest[column]).where(complete)
 
         then = earliest["shareswa"]
-        # safe_growth semantics: undefined when the base is zero.
         features["share_dilution_5y"] = (
             ((latest["shareswa"] - then) / then.abs()).where(then != 0).where(complete)
         )

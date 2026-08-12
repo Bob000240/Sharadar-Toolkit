@@ -9,7 +9,6 @@ import pandas as pd
 from pipeline.config import BENCHMARK_SYMBOLS
 from pipeline.load_data import START_DATE
 from data.sharadar_data import SharadarData
-from data.macro_data import MacroData
 from data.technical_features import compute_technical_features
 
 import database.source.equity_repo as equity_repo
@@ -20,7 +19,6 @@ import database.source.fundamentals_repo as fundamentals_repo
 import database.source.insider_repo as insider_repo
 import database.source.institutional_repo as institutional_repo
 import database.source.event_repo as event_repo
-import database.source.macro_repo as macro_repo
 
 TODAY = pd.Timestamp.today().strftime("%Y-%m-%d")
 
@@ -219,16 +217,6 @@ def update_tickers(sh: SharadarData):
     print(f"Tickers: {len(df):,} upserted")
 
 
-def update_macro():
-    since = macro_repo.get_latest_dates() or "2021-01-01"
-    df = MacroData().get_macro(since, TODAY)
-    if df.empty:
-        print("Macro: up to date")
-        return
-    macro_repo.insert(df)
-    print(f"Macro: {len(df):,} new rows")
-
-
 if __name__ == "__main__":
     print(f"=== QuorumNexus daily update — {TODAY} ===")
     sh = SharadarData()
@@ -239,7 +227,6 @@ if __name__ == "__main__":
     update_fundamentals(sh)
     update_insider(sh)
     update_events(sh)
-    update_macro()
 
     update_tickers(sh)
     update_institutional(sh)

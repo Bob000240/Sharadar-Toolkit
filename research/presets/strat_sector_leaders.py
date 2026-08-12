@@ -3,6 +3,7 @@ from datetime import date
 
 import pandas as pd
 
+import database.state.strategy_profiles_repository as profiles_repo
 from data.signals.sig_events import (
     EventSignals,
     BANKRUPTCY_CODE,
@@ -13,13 +14,13 @@ from data.signals.sig_events import (
 )
 from data.signals.sig_fundamentals import FundamentalSignals
 from data.signals.sig_technical import TechnicalSignals
-import database.source.eligibility_repo as eligibility_repo
-import database.state.strategy_profiles_repository as profiles_repo
+from research.filters import Filters, attach_signals
+from research.universe import Universe
 
 NAME = "sector_leaders"
 DESCRIPTION = (
     "Each sector's strongest healthy trend: liquid, profitable, "
-    "mid-cap+ names in confirmed uptrends, ranked within sector; "
+    "large-cap names in confirmed uptrends, ranked within sector; "
     "top-5-per-sector menu for the agent."
 )
 
@@ -43,16 +44,36 @@ class ExitSnapshot:
 
 
 _GATES = [
-    "listed_us_common_stock",
+    "listed_usd_domestic_common_stock",
     "liquid_min_5m_dollar_volume",
     "traded_within_10d",
-    "market_cap_min_1b",
+    "market_cap_min_10b",
     "positive_net_income",
     "positive_return_60d",
     "positive_return_252d",
     "above_sma_200",
     "rising_trend_slope_60d",
 ]
+
+_DOMESTIC_COMMON_STOCK_CATEGORIES = (
+    "Domestic Common Stock",
+    "Domestic Common Stock Primary Class",
+)
+
+_MIN_DOLLAR_VOLUME = 5_000_000
+_MIN_MARKET_CAP = 10_000_000_000
+
+_ELIGIBILITY_FILTERS = Filters(
+    ("currency", "=", "USD"),
+    ("category", "in", _DOMESTIC_COMMON_STOCK_CATEGORIES),
+    ("dollar_volume_20d_avg", ">=", _MIN_DOLLAR_VOLUME),
+    ("marketcap", ">=", _MIN_MARKET_CAP),
+    ("netinccmnusd", ">", 0),
+    ("return_60d", ">", 0),
+    ("return_252d", ">", 0),
+    ("pct_from_sma_200", ">", 0),
+    ("trend_slope_60d", ">", 0),
+)
 
 _EXCLUDING_EVENT_CODES = {
     DELISTING_CODE,
@@ -123,9 +144,9 @@ _TOP_N_PER_SECTOR = 5
 
 class SLEntryScreener:
     """Buy side. Emits the candidate menu: each sector's strongest healthy trends
-    among liquid, profitable, already-uptrending names (enforced upstream in
-    eligibility_repo.SL_eligible_tickers). Screen = light price-state gates, then
-    rank within sector.
+    among liquid, profitable, already-uptrending names. The structural population
+    comes from ``Universe``; this preset owns its strategy-specific filters and
+    ranks the survivors within sector.
 
     Stateless with respect to the signal day — construct once, call run(day) for
     as many days as needed (the registration check is date-independent).
@@ -141,6 +162,11 @@ class SLEntryScreener:
             )
         if not self.profile["active"]:
             raise RuntimeError(f"Strategy {NAME!r} is retired; re-register to run it")
+        self.universe = Universe(
+            security_types=("common_stock",),
+            exchanges=("NYSE", "NASDAQ"),
+            recent_trade_days=10,
+        )
 
     @staticmethod
     def _sleeve_score(frame: pd.DataFrame, signals: dict[str, int]) -> pd.Series:
@@ -238,32 +264,33 @@ class SLEntryScreener:
         )
 
     def run(self, signal_day: date) -> list[CandidateSnapshot]:
-        eligible = eligibility_repo.SL_eligible_tickers(signal_day)
+        eligible = self.universe.run(signal_day)
         if eligible.empty:
             return []
+
+        eligible = attach_signals(eligible, signal_day)
+        eligible = _ELIGIBILITY_FILTERS.apply(eligible)
+        if eligible.empty:
+            return []
+
+        # attach_signals already produced the raw and derived facts needed for
+        # both the eligibility gates and ranking. Reuse that frame rather than
+        # querying the signal repositories a second time.
+        eligible = eligible.set_index("ticker", drop=False)
+        eligible = FundamentalSignals.attach_sectors(eligible)
+        eligible = FundamentalSignals.attach_sector_ranks(
+            eligible,
+            FUNDAMENTAL_SIGNALS,
+            positive_only=_VALUE_POSITIVE_ONLY,
+        )
+        eligible = TechnicalSignals.attach_sector_ranks(
+            eligible,
+            TECHNICAL_SIGNALS,
+        )
+
         tickers = eligible["ticker"].tolist()
-
-        fundamentals = FundamentalSignals.get_signals(tickers, signal_day)
-        fundamentals = FundamentalSignals.attach_sectors(fundamentals)
-        fundamentals = FundamentalSignals.attach_history_features(
-            fundamentals, signal_day
-        )
-        fundamentals = FundamentalSignals.attach_ratios(fundamentals)
-        fundamentals = FundamentalSignals.attach_growth(fundamentals, signal_day)
-        fundamentals = FundamentalSignals.attach_sector_ranks(
-            fundamentals, FUNDAMENTAL_SIGNALS, positive_only=_VALUE_POSITIVE_ONLY
-        )
-        fundamentals = fundamentals.drop(columns=["marketcap"])
-        eligible = eligible.join(fundamentals, on="ticker", how="left")
-
-        technicals = TechnicalSignals.get_signals(tickers, signal_day)
-        technicals = TechnicalSignals.attach_sectors(technicals)
-        technicals = TechnicalSignals.attach_sector_ranks(technicals, TECHNICAL_SIGNALS)
-        technicals = technicals.drop(columns=["sector"])
-        eligible = eligible.join(technicals, on="ticker", how="left")
-
         events = EventSignals.attach_event_facts(tickers, signal_day)
-        eligible = eligible.join(events, on="ticker", how="left")
+        eligible = eligible.join(events, how="left")
         excluded = eligible["recent_event_codes"].apply(
             lambda codes: (
                 any(code in _EXCLUDING_EVENT_CODES for code in codes)

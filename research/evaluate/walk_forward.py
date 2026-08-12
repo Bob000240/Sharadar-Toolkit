@@ -34,18 +34,18 @@ class WalkForward:
             if bench.empty:
                 continue
             benchmark_return = bench.forward_return.iloc[0]
+            mean_return = population_frame.forward_return.mean()
             rows.append(
                 {
                     "signal_day": pd.Timestamp(day).date(),
                     "n": len(population_frame),
-                    "median_return": population_frame.forward_return.median(),
+                    "mean_return": mean_return,
                     "hit_rate": (population_frame.forward_return > 0).mean(),
                     "benchmark_return": benchmark_return,
                     "beat_benchmark_rate": (
                         population_frame.forward_return > benchmark_return
                     ).mean(),
-                    "excess_median": population_frame.forward_return.median()
-                    - benchmark_return,
+                    "excess_mean": mean_return - benchmark_return,
                     "complete_pct": population_frame.complete.mean(),
                 }
             )
@@ -57,9 +57,9 @@ class WalkForward:
             raise ValueError("no dates produced a measurement; nothing to summarize")
         return {
             "dates": len(by_date),
-            "median_of_medians": by_date.median_return.median(),
-            "median_excess": by_date.excess_median.median(),
-            "pct_dates_beat_benchmark": (by_date.excess_median > 0).mean(),
+            "median_of_means": by_date.mean_return.median(),
+            "median_excess": by_date.excess_mean.median(),
+            "pct_dates_beat_benchmark": (by_date.excess_mean > 0).mean(),
             "median_within_date_hit_rate": by_date.hit_rate.median(),
             "median_complete_pct": by_date.complete_pct.median(),
         }
@@ -87,19 +87,19 @@ class WalkForward:
                 )
                 if returns.empty:
                     continue
-                median = returns.forward_return.median()
+                mean_return = returns.forward_return.mean()
                 rows.append(
                     {
                         "variant": label,
                         "signal_day": pd.Timestamp(day).date(),
                         "n": len(returns),
-                        "median_return": median,
+                        "mean_return": mean_return,
                         "hit_rate": (returns.forward_return > 0).mean(),
                         "benchmark_return": benchmark_return,
                         "beat_benchmark_rate": (
                             returns.forward_return > benchmark_return
                         ).mean(),
-                        "excess_median": median - benchmark_return,
+                        "excess_mean": mean_return - benchmark_return,
                         "complete_pct": returns.complete.mean(),
                     }
                 )
@@ -123,11 +123,11 @@ if __name__ == "__main__":
         by_date.to_string(
             index=False,
             formatters={
-                "median_return": "{:+.2%}".format,
+                "mean_return": "{:+.2%}".format,
                 "hit_rate": "{:.1%}".format,
                 "benchmark_return": "{:+.2%}".format,
                 "beat_benchmark_rate": "{:.1%}".format,
-                "excess_median": "{:+.2%}".format,
+                "excess_mean": "{:+.2%}".format,
                 "complete_pct": "{:.1%}".format,
             },
         )
@@ -136,7 +136,7 @@ if __name__ == "__main__":
     summary = WalkForward.summarize(by_date)
     print("\nSUMMARY ACROSS ALL DATES")
     print(f"  dates                          {summary['dates']}")
-    print(f"  median of per-date medians     {summary['median_of_medians']:+.2%}")
+    print(f"  median of per-date means       {summary['median_of_means']:+.2%}")
     print(f"  median excess vs benchmark     {summary['median_excess']:+.2%}")
     print(f"  dates where median beat bench  {summary['pct_dates_beat_benchmark']:.1%}")
     print(
@@ -148,7 +148,7 @@ if __name__ == "__main__":
     covid_row = by_date[by_date.signal_day == pd.Timestamp("2019-07-01").date()]
     if not covid_row.empty:
         print(covid_row.to_string(index=False))
-        rank = (by_date.excess_median < covid_row.excess_median.iloc[0]).sum()
+        rank = (by_date.excess_mean < covid_row.excess_mean.iloc[0]).sum()
         print(
             f"  ranked {rank + 1} of {len(by_date)} dates by excess return (1 = worst)"
         )

@@ -16,7 +16,6 @@ import database.source.fundamentals_repo as fundamentals_repo
 import database.source.insider_repo as insider_repo
 import database.source.institutional_repo as institutional_repo
 import database.source.event_repo as event_repo
-import database.source.macro_repo as macro_repo
 import database.state.strategy_profiles_repository as profiles_repo
 
 
@@ -37,7 +36,6 @@ def drop_all():
         "technical_features",
         "fund_prices",
         "equity_prices",
-        "macro",
     ]
     with get_connection().begin() as conn:
         for t in tables:
@@ -63,8 +61,6 @@ def create_all():
     print("  created institutional_holdings")
     event_repo.create_table()
     print("  created events")
-    macro_repo.create_table()
-    print("  created macro")
 
     profiles_repo.create_table()
     print(

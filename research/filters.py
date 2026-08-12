@@ -144,28 +144,12 @@ def _condition_mask(frame: pd.DataFrame, condition: FilterCondition) -> pd.Serie
     mask = _OPERATORS[condition.operator](series, condition.value)
     mask = pd.Series(mask, index=frame.index).fillna(False).astype(bool)
 
-    # Missing values only pass when the caller explicitly requests ``is_null``.
-    # This also corrects pandas/numpy's usual ``NaN != value`` result of True.
     if condition.operator not in _NULL_OPERATORS:
         mask &= series.notna()
     return mask
 
 
-def apply_filter(
-    frame: pd.DataFrame,
-    field: str,
-    operator: str,
-    value: object = None,
-) -> pd.DataFrame:
-    """Apply one generic field/operator/value condition to ``frame``."""
-
-    condition = FilterCondition(field, operator, value)
-    return frame[_condition_mask(frame, condition)]
-
-
 class Filters:
-    """Apply multiple filter conditions sequentially (logical AND)."""
-
     def __init__(self, *conditions: FilterCondition | tuple) -> None:
         if not conditions:
             raise ValueError("Filters requires at least one condition")
@@ -218,6 +202,15 @@ class Filters:
                 }
             )
         return pd.DataFrame(rows)
+
+
+def apply_filter(
+    frame: pd.DataFrame,
+    field: str,
+    operator: str,
+    value: object = None,
+) -> pd.DataFrame:
+    return Filters((field, operator, value)).apply(frame)
 
 
 def _empty_facts(repo) -> pd.DataFrame:
@@ -345,10 +338,10 @@ if __name__ == "__main__":
     print(f"  with marketcap    {priced.marketcap.notna().sum():,}")
     print(f"  null marketcap    {priced.marketcap.isna().sum():,}")
 
-    print(f"\nFUNNEL on {SIGNAL_DAY} — the $1B vs $10B question in eligibility_repo.py")
+    print(f"\nFUNNEL on {SIGNAL_DAY} — the sector-leader $1B vs $10B question")
     for label, floor in (
-        ("documented: market_cap_min_1b", 1_000_000_000),
-        ("implemented: _SL_MIN_MARKET_CAP = $10B", 10_000_000_000),
+        ("alternative: $1B floor", 1_000_000_000),
+        ("sector_leaders: $10B floor", 10_000_000_000),
     ):
         print(f"\n  {label}")
         funnel = Filters(("marketcap", ">=", floor)).funnel(priced)
@@ -387,6 +380,6 @@ if __name__ == "__main__":
         summary = WalkForward.summarize(by_date)
         print(
             f"  {label:<22} n(median)={by_date.n.median():>6.0f}   "
-            f"median excess {summary['median_excess']:+.2%}   "
+            f"mean excess {summary['median_excess']:+.2%}   "
             f"dates beat bench {summary['pct_dates_beat_benchmark']:.1%}"
         )

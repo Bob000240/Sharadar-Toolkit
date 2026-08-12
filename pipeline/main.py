@@ -60,7 +60,6 @@ def main():
             ("Fundamentals", lambda: daily_update.update_fundamentals(sh)),
             ("Insider", lambda: daily_update.update_insider(sh)),
             ("Events", lambda: daily_update.update_events(sh)),
-            ("Macro", daily_update.update_macro),
             ("Tickers", lambda: daily_update.update_tickers(sh)),
             ("Institutional", lambda: daily_update.update_institutional(sh)),
         ]

@@ -42,6 +42,7 @@ _QUERY = text("""
         t.name,
         t.exchange,
         t.category,
+        t.currency,
         t.famaindustry,
         recency.last_traded
     FROM tickers AS t
