@@ -88,8 +88,6 @@ _COLLECTION_VALUE_OPERATORS = {
 
 @dataclass(frozen=True)
 class FilterCondition:
-    """One field/operator/value rule applied to an assembled signal frame."""
-
     field: str
     operator: str
     value: object = None
@@ -205,25 +203,7 @@ class Filters:
         return pd.DataFrame(rows)
 
 
-def apply_filter(
-    frame: pd.DataFrame,
-    field: str,
-    operator: str,
-    value: object = None,
-) -> pd.DataFrame:
-    return Filters((field, operator, value)).apply(frame)
-
-
 def _empty_facts(repo) -> pd.DataFrame:
-    """A no-row frame carrying the source's real columns.
-
-    A signal service returns a bare `DataFrame()` with no columns at all when a
-    date predates its data. Passing that through would leave the merged frame
-    missing every fact, and a filter naming one would raise KeyError as though
-    the field were misspelled. Preserving the columns makes the honest outcome
-    happen instead: every fact is null, so no security passes a fact-based
-    filter, and the population for that date is empty.
-    """
     return pd.DataFrame(
         columns=[column for column in repo._COLUMNS if column != "ticker"]
     ).rename_axis("ticker")
@@ -249,17 +229,9 @@ def _fundamental_facts(tickers: list[str], signal_day) -> pd.DataFrame:
 
 
 def _event_facts(tickers: list[str], signal_day) -> pd.DataFrame:
-    # No _empty_facts fallback: attach_event_facts already emits a row for every
-    # requested ticker, with null recencies and an empty code list where nothing
-    # happened. Absence of events is a fact here, not missing data.
     return EventSignals.attach_event_facts(tickers, signal_day)
 
 
-# Every registered source returns one ticker-indexed row per security, so any
-# column it produces becomes filterable without this module knowing the names.
-# InsiderSignals and InstitutionalSignals are absent on purpose: their
-# get_signals return raw transactions and holdings rather than one row per
-# ticker, so they need their own attach_* aggregation before they fit here.
 SIGNAL_SOURCES = {
     "technical": _technical_facts,
     "fundamental": _fundamental_facts,
@@ -272,13 +244,6 @@ def attach_signals(
     signal_day,
     sources: Iterable[str] = tuple(SIGNAL_SOURCES),
 ) -> pd.DataFrame:
-    """Merge point-in-time facts from the signal layer onto a universe frame.
-
-    The signal services own what a fact is and how it is made point-in-time;
-    this only joins them on ticker. Filtering then works on any column they
-    produce, so adding a field is a signal-layer change rather than an edit
-    here.
-    """
     unknown = tuple(name for name in sources if name not in SIGNAL_SOURCES)
     if unknown:
         raise ValueError(
@@ -288,9 +253,6 @@ def attach_signals(
 
     tickers = frame["ticker"].tolist()
     for name in sources:
-        # Merged even with no rows: a source that predates its data still
-        # carries its columns, so the facts land as nulls and a filter naming
-        # one yields an empty population rather than a missing-field KeyError.
         facts = SIGNAL_SOURCES[name](tickers, signal_day)
         overlap = sorted(set(facts.columns) & set(frame.columns))
         if overlap:
@@ -306,18 +268,6 @@ def population(
     filters: Filters | None = None,
     sources: Iterable[str] | None = None,
 ):
-    """A ``WalkForward.run(population=...)`` callable for a filtered universe.
-
-    Rebuilds the population per signal day so every fact is point-in-time, then
-    applies the filters. ``filters=None`` gives the unfiltered universe, which
-    is the baseline any lift measurement is compared against.
-
-    ``sources`` defaults to every registered signal source, so a filter can name
-    any fact without the caller also having to declare where it comes from. Pass
-    an explicit subset to skip work, or ``()`` for universe columns only. With
-    no filters and no explicit request, nothing is attached — the baseline needs
-    tickers, not facts.
-    """
     if sources is None:
         sources = () if filters is None else tuple(SIGNAL_SOURCES)
 
