@@ -1,12 +1,43 @@
-"""Do weighted composites beat a random cut at the same concentration?
+"""Test whether weighted composites beat a random cut at equal concentration.
 
-Five composites — momentum, value, shareholder yield, low volatility, profit
-growth — each cut to the same top_n and compared against a seeded random
-selection from the same filtered population. The random control is the point:
-without it, a composite that merely inherits the filter's edge looks skillful.
-Lifted out of research/ranking.py, where it lived as a __main__ block.
+::
 
-Run: uv run python -m experiments.composite_vs_random
+    uv run python -m experiments.composite_vs_random
+
+Five composites, each cut to the same ``top_n`` from the same prefiltered
+population, run against a seeded random selection of that size. The random
+control is the whole point: without it a composite that merely inherits the
+prefilter's edge, or the mechanical effect of holding fewer names, looks
+skillful.
+
+That control exists because of a prior result. The roic/fcf_yield/accruals blend
+carried no information at all: its top 200 and its bottom 200 both landed about
+2.3pp below the filtered baseline, so the cut was measuring concentration rather
+than quality. Every variant therefore holds the same prefilter and the same
+``top_n``, and the bar a composite must clear is the random cut, not the
+baseline.
+
+The composites and where they come from:
+
+  momentum          twelve-month winners (Jegadeesh & Titman), proximity to the
+                    52-week high (George & Hwang), and the volatility-scaled
+                    variant of the same idea. ``pct_from_52w_high`` lives in
+                    [-1, 0], so "high" means near the high.
+  value             cheapness. The prefilter requires positive net income, so
+                    "low pe" ranks cheap earners rather than crowning
+                    loss-makers cheapest.
+  shareholder_yield net payout — dividends plus buybacks less issuance — which
+                    carries more information than dividend yield alone
+                    (Boudoukh et al.); a shrinking share count is the five-year
+                    version of the same statement.
+  low_volatility    the low-volatility anomaly (Ang et al.) plus earnings
+                    stability. Uses ``interest_coverage`` rather than ``de``,
+                    whose negative-equity values would rank distress as least
+                    levered.
+  profit_growth     gross profitability (Novy-Marx) with top-line and operating
+                    growth.
+
+Lifted out of ``research/ranking.py``, where it was a __main__ block.
 """
 
 import pandas as pd
@@ -48,11 +79,9 @@ print(
     ].to_string(index=False)
 )
 
-# ── coverage: a metric a security lacks is renormalised away, not zeroed ──
 print("\nCOVERAGE (share of requested weight actually present)")
 print(ranked["coverage"].value_counts().sort_index(ascending=False).head().to_string())
 
-# ── grouped: best per industry rather than best overall ──────────────────
 per_industry = Ranking(
     ("roic", "high", 0.4),
     ("fcf_yield", "high", 0.3),
@@ -68,21 +97,14 @@ print(
 )
 
 
-# ── five candidate composites against a concentration control ───────────
-# The roic/fcf_yield/accruals blend carried no information: its top 200 AND
-# its bottom 200 both landed ~2.3pp below the filtered baseline, so the cut
-# was measuring concentration, not quality. Every variant here therefore
-# holds the same prefilter and the same top_n, and a seeded random cut of
-# the same size runs alongside as the control. The bar a composite has to
-# clear is the random cut, not the baseline — beating -6.7% is impossible
-# at this concentration if any 200-name cut costs ~2.3pp by itself.
 class _Chain:
-    """Apply `.apply(frame)` steps in order, so `walk.compare` sees a
-    filter-then-rank variant as one object.
+    """Apply ``.apply(frame)`` steps in order as one object.
+
+    Lets ``walk.compare`` treat a filter-then-rank variant as a single unit.
 
     Local to this experiment on purpose: composing a *spec* is the
-    orchestrator's job, and it composes at the screen level (universe,
-    signals, score, filter, cut). This composes two frame transforms for a
+    orchestrator's job and happens at the screen level, across universe,
+    signals, score, filter, and cut. This composes two frame transforms for a
     comparison sweep, which is a smaller and different thing.
     """
 
@@ -99,10 +121,11 @@ class _Chain:
 
 
 class _RandomCut:
-    """Seeded arbitrary selection at the experiment's concentration.
+    """Select an arbitrary fixed-size subset, seeded for reproducibility.
 
-    Deterministic across reruns (fixed seed), different picks per date
-    (each date hands it a different frame).
+    Deterministic across reruns because the seed is fixed, but different per
+    date because each date hands it a different frame. Vary the seed to build a
+    null distribution rather than a single control path.
     """
 
     def __init__(self, n: int, seed: int = 0) -> None:
@@ -117,43 +140,30 @@ class _RandomCut:
 
 TOP_N = 200
 COMPOSITES = {
-    # Jegadeesh & Titman's twelve-month winners, George & Hwang's proximity
-    # to the 52-week high, and the volatility-scaled variant of the same
-    # idea. pct_from_52w_high lives in [-1, 0], so "high" means near the
-    # high.
     "momentum": Ranking(
         ("vol_adjusted_momentum", "high", 0.4),
         ("return_252d", "high", 0.3),
         ("pct_from_52w_high", "high", 0.3),
         top_n=TOP_N,
     ),
-    # Cheapness. The prefilter requires positive net income, so "low pe"
-    # ranks cheap earners rather than crowning loss-makers cheapest.
     "value": Ranking(
         ("fcf_yield", "high", 0.4),
         ("pe", "low", 0.3),
         ("ps", "low", 0.3),
         top_n=TOP_N,
     ),
-    # Boudoukh et al.: net payout (dividends + buybacks - issuance) carries
-    # more information than dividend yield alone; a shrinking share count
-    # is the five-year version of the same statement.
     "shareholder_yield": Ranking(
         ("net_payout_yield", "high", 0.5),
         ("share_dilution_5y", "low", 0.3),
         ("divyield", "high", 0.2),
         top_n=TOP_N,
     ),
-    # Ang et al.'s low-volatility anomaly plus earnings stability.
-    # interest_coverage rather than de, whose negative-equity values would
-    # rank distress as "least levered".
     "low_volatility": Ranking(
         ("volatility_20", "low", 0.5),
         ("roe_volatility_5y", "low", 0.3),
         ("interest_coverage", "high", 0.2),
         top_n=TOP_N,
     ),
-    # Novy-Marx gross profitability, with top-line and operating growth.
     "profit_growth": Ranking(
         ("gross_profitability", "high", 0.4),
         ("revenue_growth_yoy", "high", 0.3),

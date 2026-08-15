@@ -1,4 +1,14 @@
-"""Point-in-time fundamental rows with optional fact attachments."""
+"""Point-in-time fundamental facts with optional attachments.
+
+Sharadar dates every filing twice: ``calendardate`` is the period reported on,
+``datekey`` the day it reached the tape, and the two sit months apart. Every
+read here is bounded on ``datekey``, so a report is invisible until the day it
+was actually published.
+
+Three dimensions are used. ART carries the latest trailing-twelve-month figures,
+ARQ the quarterly series behind year-over-year growth, and ARY the annual series
+behind the five-year change and volatility features.
+"""
 
 import numpy as np
 import pandas as pd
@@ -34,6 +44,9 @@ MIN_VOLATILITY_OBSERVATIONS = 3
 
 _LABEL_LEAD_MONTHS = 6
 
+_GROWTH_LOOKBACK = pd.Timedelta(days=730)
+_HISTORY_LOOKBACK = pd.DateOffset(years=6)
+
 _HISTORY_CHANGE_FIELDS = {
     "gross_profitability_change_5y": "gross_profitability",
     "roa_change_5y": "roa",
@@ -50,7 +63,12 @@ _HISTORY_VOLATILITY_FIELDS = {
 
 
 class FundamentalSignals(Signals):
-    """SQL-backed fundamental facts with opt-in DataFrame attachments."""
+    """SQL-backed fundamental facts with opt-in DataFrame attachments.
+
+    ``get_signals`` fetches the latest ART row per ticker; ``attach_ratios``,
+    ``attach_growth``, and ``attach_history_features`` add derived columns to a
+    ticker-indexed frame. Every method is stateless.
+    """
 
     @classmethod
     def get_signals(
@@ -58,7 +76,12 @@ class FundamentalSignals(Signals):
         tickers: list[str] | None,
         signal_day: pd.Timestamp,
     ) -> pd.DataFrame:
-        """Return latest point-in-time ART rows directly from the SQL repository."""
+        """Return each ticker's latest ART filing published by the signal day.
+
+        Passing ``tickers`` preserves the caller's order and silently drops
+        names with no filing at all. Return a ticker-indexed frame, empty with
+        no columns when the date predates the stored fundamentals.
+        """
         signal_day = pd.Timestamp(signal_day)
         frame = fundamentals_repo.get_latest_rows(tickers, "ART", signal_day)
         if frame.empty:
@@ -76,19 +99,20 @@ class FundamentalSignals(Signals):
         frame: pd.DataFrame,
         signal_day: pd.Timestamp,
     ) -> pd.DataFrame:
-        """Attach latest year-over-year facts from quarterly fundamentals."""
+        """Attach year-over-year growth facts from the quarterly series.
+
+        Compares the newest ARQ period against the one five quarters earlier, so
+        a ticker with fewer than five published quarters gets nulls rather than
+        a shorter comparison. Return a copy of ``frame`` with the growth columns
+        joined on.
+        """
         frame = frame.copy()
-        signal_day = pd.Timestamp(signal_day)
-        growth_start = signal_day - pd.Timedelta(days=730)
-        label_end = signal_day + pd.DateOffset(months=_LABEL_LEAD_MONTHS)
-        arq = fundamentals_repo.get(
-            tickers=frame.index.astype(str).tolist(),
-            dimension="ARQ",
-            start_date=str(growth_start.date()),
-            end_date=str(label_end.date()),
+        arq = cls._as_of_filings(
+            frame.index.astype(str).tolist(),
+            "ARQ",
+            pd.Timestamp(signal_day),
+            _GROWTH_LOOKBACK,
         )
-        if not arq.empty:
-            arq = arq[pd.to_datetime(arq["datekey"]) <= signal_day]
         return frame.join(cls._calculate_growth(arq), how="left")
 
     @classmethod
@@ -97,27 +121,31 @@ class FundamentalSignals(Signals):
         frame: pd.DataFrame,
         signal_day: pd.Timestamp,
     ) -> pd.DataFrame:
-        """Attach five-year change, volatility, and history-sufficiency facts."""
+        """Attach five-year change, volatility, and history-sufficiency facts.
+
+        Built from the annual series, so these columns need roughly six years of
+        filings before they resolve and are largely null in early backtest
+        windows. ``complete_multi_year_history`` records whether the window was
+        deep enough to trust. Return a copy of ``frame`` with them joined on.
+        """
         frame = frame.copy()
-        signal_day = pd.Timestamp(signal_day)
-        history_start = signal_day - pd.DateOffset(years=6)
-        label_end = signal_day + pd.DateOffset(months=_LABEL_LEAD_MONTHS)
-        annual_history = fundamentals_repo.get(
-            tickers=frame.index.astype(str).tolist(),
-            dimension="ARY",
-            start_date=str(history_start.date()),
-            end_date=str(label_end.date()),
+        annual_history = cls._as_of_filings(
+            frame.index.astype(str).tolist(),
+            "ARY",
+            pd.Timestamp(signal_day),
+            _HISTORY_LOOKBACK,
         )
-        if not annual_history.empty:
-            annual_history = annual_history[
-                pd.to_datetime(annual_history["datekey"]) <= signal_day
-            ]
         history = cls._calculate_history_features(annual_history)
         return frame.join(history, how="left")
 
     @classmethod
     def attach_ratios(cls, frame: pd.DataFrame) -> pd.DataFrame:
-        """Attach ratios that combine multiple stored fundamental columns."""
+        """Attach ratios that combine several stored fundamental columns.
+
+        Ratios whose sign would be meaningless are left null rather than
+        computed: a yield is only taken against a positive market cap. Return a
+        copy of ``frame`` with the ratio columns added.
+        """
         frame = frame.copy()
         frame["fcf_yield"] = cls.positive_ratio(frame["fcf"], frame["marketcap"])
         frame["interest_coverage"] = cls.safe_div(frame["ebit"], frame["intexp"])
@@ -135,7 +163,49 @@ class FundamentalSignals(Signals):
         return frame
 
     @classmethod
+    def _as_of_filings(
+        cls,
+        tickers: list[str],
+        dimension: str,
+        signal_day: pd.Timestamp,
+        lookback,
+    ) -> pd.DataFrame:
+        """Return rows of ``dimension`` covering ``lookback`` and published by now.
+
+        ``lookback`` is any span subtractable from a Timestamp, so a caller can
+        pass calendar days or calendar years as the accounting period requires.
+
+        The repository filters on ``calendardate``, so the query window is
+        padded forward by ``_LABEL_LEAD_MONTHS`` to reach periods that had
+        already closed on the signal day, and ``datekey`` then discards whatever
+        had not actually been published yet.
+
+        Both halves are load-bearing and only one of them is obvious. Without
+        the pad the newest period is missed and every fact lags a quarter.
+        Without the ``datekey`` filter the caller reads reports that did not
+        exist on the signal day, which is lookahead that surfaces as skill
+        rather than as an error, because next quarter's earnings really do
+        predict next quarter's returns.
+        """
+        frame = fundamentals_repo.get(
+            tickers=tickers,
+            dimension=dimension,
+            start_date=str((signal_day - lookback).date()),
+            end_date=str(
+                (signal_day + pd.DateOffset(months=_LABEL_LEAD_MONTHS)).date()
+            ),
+        )
+        if frame.empty:
+            return frame
+        return frame[pd.to_datetime(frame["datekey"]) <= signal_day]
+
+    @classmethod
     def _calculate_growth(cls, arq: pd.DataFrame) -> pd.DataFrame:
+        """Reduce a quarterly series to one year-over-year row per ticker.
+
+        Tickers with fewer than five published quarters are omitted entirely
+        rather than compared over a shorter span.
+        """
         rows = []
         for ticker, group in arq.groupby("ticker"):
             group = group.sort_values("datekey")
@@ -174,6 +244,13 @@ class FundamentalSignals(Signals):
 
     @classmethod
     def _calculate_history_features(cls, ary: pd.DataFrame) -> pd.DataFrame:
+        """Reduce an annual series to five-year change and volatility rows.
+
+        The window is measured back from each ticker's own latest period rather
+        than from a shared date, so a late filer is not penalised. Changes and
+        volatilities are null unless the window holds enough observations to
+        mean anything.
+        """
         if ary.empty:
             return pd.DataFrame(columns=list(QUALITY_HISTORY_COLUMNS))
 
@@ -230,6 +307,7 @@ class FundamentalSignals(Signals):
 
     @staticmethod
     def _history_change(latest, prior, complete_history, column) -> float:
+        """Return the change in ``column``, or NaN if the history is too thin."""
         if prior is None or not complete_history:
             return float("nan")
         now, then = latest[column], prior[column]
@@ -243,6 +321,7 @@ class FundamentalSignals(Signals):
         complete_history: bool,
         column: str,
     ) -> float:
+        """Return the dispersion of ``column``, or NaN if the history is thin."""
         if not complete_history:
             return np.nan
         values = pd.to_numeric(window[column], errors="coerce").dropna()

@@ -27,7 +27,11 @@ _sessions: pd.DatetimeIndex | None = None
 
 
 def sessions() -> pd.DatetimeIndex:
-    """Every session on record, ascending. Cached after the first call."""
+    """Return every session on record, ascending.
+
+    Read once and cached for the life of the process. Raise RuntimeError when
+    no price data has been loaded, since there is no calendar to derive.
+    """
     global _sessions
     if _sessions is None:
         frame = pd.read_sql_query(_QUERY, get_connection())
@@ -41,7 +45,11 @@ def sessions() -> pd.DatetimeIndex:
 
 
 def refresh() -> None:
-    """Drop the cached session list so the next call re-reads the database."""
+    """Drop the cached session list so the next call re-reads the database.
+
+    Needed only by a long-running process that must see dates loaded after it
+    started.
+    """
     global _sessions
     _sessions = None
 
@@ -59,25 +67,30 @@ def _out_of_range(day: pd.Timestamp) -> str:
 
 
 def first_session() -> date:
-    """Earliest session on record."""
+    """Return the earliest session on record."""
     return sessions()[0].date()
 
 
 def last_session() -> date:
-    """Latest session on record. This is the newest date the data can support,
-    which is not necessarily the latest session the market has held."""
+    """Return the latest session on record.
+
+    This is the newest date the data can support, which is not necessarily the
+    latest session the market has held.
+    """
     return sessions()[-1].date()
 
 
 def is_session(day) -> bool:
-    """True if the market produced prices on `day`."""
+    """Return True when the market produced prices on ``day``."""
     return _stamp(day) in sessions()
 
 
 def align(day) -> date:
-    """The latest session on or before `day` — the honest as-of date for a
-    request made on `day`. Raises if `day` precedes the first session; a `day`
-    past the end of the data aligns to the last session on record.
+    """Return the latest session on or before ``day``.
+
+    This is the honest as-of date for a request made on ``day``. A day past the
+    end of the data aligns to the last session on record. Raise ValueError when
+    ``day`` precedes the first session.
     """
     known = sessions()
     stamp = _stamp(day)
@@ -88,9 +101,11 @@ def align(day) -> date:
 
 
 def align_forward(day) -> date:
-    """The earliest session on or after `day` — the opening session of a period
-    that begins on `day`. The mirror of `align`, which looks backward for an
-    as-of date. Raises if the data does not reach `day`.
+    """Return the earliest session on or after ``day``.
+
+    The opening session of a period that begins on ``day``, and the mirror of
+    ``align``, which looks backward for an as-of date. Raise ValueError when the
+    data does not reach ``day``.
     """
     known = sessions()
     stamp = _stamp(day)
@@ -101,16 +116,20 @@ def align_forward(day) -> date:
 
 
 def latest_session(as_of=None) -> date:
-    """The session a screen run at `as_of` (default today) should use. Alias for
-    `align` that reads better at call sites deciding *when* to run."""
+    """Return the session a screen run at ``as_of`` should use.
+
+    Defaults to today. An alias for ``align`` that reads better at call sites
+    deciding when to run rather than what to align.
+    """
     return align(date.today() if as_of is None else as_of)
 
 
 def next_session(day, count: int = 1) -> date:
-    """The `count`-th session strictly after `day`.
+    """Return the ``count``-th session strictly after ``day``.
 
-    Raises if the data does not extend that far — use `horizon_end` where
-    running off the end of the data is expected rather than exceptional.
+    Raise ValueError when ``count`` is below 1, or when the data does not extend
+    that far. Use ``horizon_end`` instead where running off the end of the data
+    is expected rather than exceptional.
     """
     if count < 1:
         raise ValueError(f"count must be at least 1; got {count}")
@@ -126,7 +145,11 @@ def next_session(day, count: int = 1) -> date:
 
 
 def previous_session(day, count: int = 1) -> date:
-    """The `count`-th session strictly before `day`."""
+    """Return the ``count``-th session strictly before ``day``.
+
+    Raise ValueError when ``count`` is below 1, or when the data does not reach
+    back that far.
+    """
     if count < 1:
         raise ValueError(f"count must be at least 1; got {count}")
     known = sessions()
@@ -141,11 +164,12 @@ def previous_session(day, count: int = 1) -> date:
 
 
 def horizon_end(day, count: int) -> date:
-    """The `count`-th session after `day`, clamped to the last session on record.
+    """Return the ``count``-th session after ``day``, clamped to the last on record.
 
     Clamping is deliberate: a horizon that runs past the end of the data is a
     normal condition near the present, and the caller reports it as an
-    incomplete measurement rather than an error.
+    incomplete measurement rather than an error. Raise ValueError only when
+    ``count`` is below 1 or ``day`` precedes the calendar entirely.
     """
     if count < 1:
         raise ValueError(f"count must be at least 1; got {count}")
@@ -158,7 +182,7 @@ def horizon_end(day, count: int) -> date:
 
 
 def between(start, end) -> list[date]:
-    """Every session in the inclusive interval [start, end]."""
+    """Return every session in the inclusive interval [``start``, ``end``]."""
     known = sessions()
     left = known.searchsorted(_stamp(start), side="left")
     right = known.searchsorted(_stamp(end), side="right")
@@ -166,7 +190,7 @@ def between(start, end) -> list[date]:
 
 
 def session_count(start, end) -> int:
-    """How many sessions fall in the inclusive interval [start, end]."""
+    """Return how many sessions fall in [``start``, ``end``], inclusive."""
     known = sessions()
     return int(
         known.searchsorted(_stamp(end), side="right")
@@ -175,19 +199,22 @@ def session_count(start, end) -> int:
 
 
 def schedule(start, end, freq: str = "QS", direction: str = "forward") -> list[date]:
-    """Signal days on a pandas frequency, each snapped onto a real session.
+    """Return signal days on a pandas frequency, each snapped onto a session.
 
-    `pd.date_range(freq="QS")` yields quarter starts, most of which the market
+    ``pd.date_range(freq="QS")`` yields quarter starts, most of which the market
     is closed for. Snapping keeps the intended cadence while ensuring every
     signal day is a date the market actually traded.
 
-    `direction` decides which way a closed boundary moves. "forward" (the
-    default) takes the period's opening session, which is what a period-start
+    ``direction`` decides which way a closed boundary moves. "forward", the
+    default, takes the period's opening session, which is what a period-start
     frequency such as "QS" or "MS" means; "backward" takes the last session of
     the preceding period, which is the right reading for as-of style cadences.
     Boundaries with no session on the chosen side are dropped rather than
-    silently pulled to the other end of the data. Duplicates are dropped too, so
-    a frequency finer than the session grid cannot emit one session twice.
+    silently pulled to the other end of the data, and duplicates are dropped
+    too, so a frequency finer than the session grid cannot emit one session
+    twice.
+
+    Raise ValueError for a direction other than "forward" or "backward".
     """
     if direction not in ("forward", "backward"):
         raise ValueError(

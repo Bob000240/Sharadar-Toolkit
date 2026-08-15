@@ -1,4 +1,9 @@
-"""Point-in-time institutional holding rows and optional holding facts."""
+"""Point-in-time 13F holdings and optional ticker-level facts.
+
+A 13F is filed up to 45 days after the quarter it reports on, so a quarter is
+treated as unavailable until that lag has passed. ``FILING_DELAY_DAYS`` encodes
+the assumption; ``availability_is_estimated`` records that it is one.
+"""
 
 from __future__ import annotations
 
@@ -29,7 +34,12 @@ HOLDING_FACT_COLUMNS = (
 
 
 class InstitutionalSignals(Signals):
-    """SQL-backed 13F rows with opt-in ticker-level fact attachments."""
+    """SQL-backed 13F rows with opt-in ticker-level fact attachments.
+
+    ``get_signals`` returns raw holdings, one row per investor per quarter, and
+    ``attach_holding_facts`` aggregates them to one row per ticker. The two are
+    separate because the raw rows are useful on their own.
+    """
 
     @classmethod
     def get_signals(
@@ -38,7 +48,12 @@ class InstitutionalSignals(Signals):
         signal_day: pd.Timestamp,
         history_days: int = 200,
     ) -> pd.DataFrame:
-        """Return raw holdings from conservatively available report quarters."""
+        """Return raw holdings from quarters conservatively assumed available.
+
+        Quarters ending within ``FILING_DELAY_DAYS`` of the signal day are
+        excluded, since their filings may not have appeared yet. Return one row
+        per investor per quarter, not one per ticker.
+        """
         signal_day = pd.Timestamp(signal_day)
         available_quarter_cutoff = signal_day - pd.Timedelta(days=FILING_DELAY_DAYS)
         start = available_quarter_cutoff - pd.Timedelta(days=history_days)
@@ -61,7 +76,12 @@ class InstitutionalSignals(Signals):
         tickers: list[str],
         signal_day: pd.Timestamp,
     ) -> pd.DataFrame:
-        """Aggregate raw 13F rows into latest-quarter and QoQ facts."""
+        """Aggregate raw 13F rows into latest-quarter and quarter-over-quarter facts.
+
+        Only common-share positions are counted. Return a ticker-indexed frame
+        with one row per requested ticker; a ticker with no holdings keeps its
+        row with zero counts and null changes.
+        """
         signal_day = pd.Timestamp(signal_day)
         if frame.empty:
             grouped: dict[str, pd.DataFrame] = {}
@@ -91,6 +111,11 @@ class InstitutionalSignals(Signals):
         frame: pd.DataFrame | None,
         signal_day: pd.Timestamp,
     ) -> dict:
+        """Reduce one ticker's holdings to a fact dict.
+
+        Quarter-over-quarter changes need two quarters and stay at their empty
+        defaults with only one.
+        """
         empty = {
             "quarter_end": None,
             "assumed_available_from": None,

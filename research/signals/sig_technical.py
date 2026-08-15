@@ -1,4 +1,9 @@
-"""Point-in-time technical features with optional signal attachments."""
+"""Point-in-time technical features with optional signal attachments.
+
+Reads the stored per-session feature rows and derives the columns that only
+make sense cross-sectionally or against a benchmark. Everything is bounded by
+the signal day, so a feature row filed after it is never visible.
+"""
 
 import pandas as pd
 
@@ -19,7 +24,12 @@ class TechnicalSignals(Signals):
         tickers: list[str] | None,
         signal_day: pd.Timestamp,
     ) -> pd.DataFrame:
-        """Return latest point-in-time technical features from the SQL repository."""
+        """Return each ticker's most recent feature row on or before the day.
+
+        Passing ``tickers`` preserves the caller's order and silently drops
+        names with no row at all. Return a ticker-indexed frame, empty with no
+        columns when the date predates the stored features.
+        """
         signal_day = pd.Timestamp(signal_day)
         frame = technical_features_repo.get_latest_rows(tickers, signal_day)
         if frame.empty:
@@ -33,7 +43,11 @@ class TechnicalSignals(Signals):
 
     @classmethod
     def attach_return_percentiles(cls, frame: pd.DataFrame) -> pd.DataFrame:
-        """Attach market-wide percentile ranks for each configured return horizon."""
+        """Attach a market-wide percentile rank per configured return horizon.
+
+        Ranked across whatever population ``frame`` holds, so the percentiles
+        mean "within this frame" rather than "within the market".
+        """
         frame = frame.copy()
         for column in _RETURN_COLS:
             frame[f"{column}_percentile"] = cls.rank_pct(frame[column])
@@ -46,7 +60,11 @@ class TechnicalSignals(Signals):
         signal_day: pd.Timestamp,
         benchmark_ticker: str = "SPY",
     ) -> pd.DataFrame:
-        """Attach 5/20-day returns in excess of the requested benchmark."""
+        """Attach 5- and 20-day returns in excess of a benchmark fund.
+
+        The benchmark return is a single scalar per horizon, subtracted from
+        every row. Both columns are NaN when the benchmark lacks the history.
+        """
         frame = frame.copy()
         benchmark = cls._calculate_fund_returns(
             benchmark_ticker,
@@ -61,14 +79,12 @@ class TechnicalSignals(Signals):
         ticker: str,
         signal_day: pd.Timestamp,
     ) -> pd.Series:
-        """Benchmark 5/20-day returns, or NaN when its history is too short.
+        """Return the benchmark's 5- and 20-day returns, or NaN if too short.
 
-        Returns NaN rather than raising, because too little benchmark history is
-        a coverage boundary rather than a fault — the same situation every other
-        lookback feature already handles this way. `return_252d` is NaN for a
-        security's first year rather than an exception, and an excess return
-        against a benchmark that does not yet have 21 sessions is unknowable in
-        exactly the same sense. Raising instead made the earliest signal days
+        NaN rather than an exception, because too little benchmark history is a
+        coverage boundary rather than a fault, and every other lookback feature
+        already behaves this way: ``return_252d`` is NaN for a security's first
+        year rather than an error. Raising instead made the earliest signal days
         abort a whole walk-forward rather than yield an empty population.
         """
         lookback = signal_day - pd.Timedelta(days=45)

@@ -1,6 +1,6 @@
-"""
-Creates all DB tables in dependency order.
-Run once before load_data.py.
+"""Create every database table, in dependency order.
+
+Run once before the initial load::
 
     uv run python -m pipeline.setup_db
 """
@@ -20,6 +20,11 @@ import database.state.strategy_profiles_repository as profiles_repo
 
 
 def drop_all():
+    """Drop every table, children before parents.
+
+    Order matters: dependants are dropped first so a CASCADE never has to reach
+    across a foreign key that still has rows behind it.
+    """
     tables = [
         "strategy_profiles",
         "events",
@@ -39,6 +44,12 @@ def drop_all():
 
 
 def create_all():
+    """Create every table in dependency order.
+
+    Idempotent, since each repository creates its table only if absent. The strategy
+    registry is created empty; strategies register themselves through
+    ``pipeline.main register``.
+    """
     equity_repo.create_table()
     print("  created equity_prices")
     fund_repo.create_table()

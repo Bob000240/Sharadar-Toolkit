@@ -52,6 +52,10 @@ _UPDATE_SET = ", ".join(f"{c} = EXCLUDED.{c}" for c in _NON_PK)
 
 
 def create_table():
+    """Create the ``technical_features`` table and its indexes if absent.
+
+    Idempotent, so setup can be re-run safely.
+    """
     with get_connection().begin() as conn:
         conn.execute(
             text("""
@@ -126,12 +130,17 @@ def create_table():
 
 
 def drop_table():
+    """Drop ``technical_features`` and everything depending on it."""
     with get_connection().begin() as conn:
         conn.execute(text("DROP TABLE IF EXISTS technical_features CASCADE"))
         conn.execute(text("DROP TABLE IF EXISTS indicators CASCADE"))
 
 
 def insert(df: pd.DataFrame):
+    """Upsert rows into ``technical_features``, keyed on ``(ticker, date)``.
+
+    Columns outside ``_COLUMNS`` are ignored and NaN/NaT become SQL NULL. Recomputed features overwrite the stored ones, and infinities are stored as NULL. No-op on an empty frame.
+    """
     if df.empty:
         return
     frame = df[_COLUMNS].replace([np.inf, -np.inf], np.nan).astype(object)
@@ -151,6 +160,10 @@ def get(
     start_date: str | None = None,
     end_date: str | None = None,
 ) -> pd.DataFrame:
+    """Return ``technical_features`` rows matching the supplied filters.
+
+    Every argument is optional and omitting all of them returns the whole table. Dates bound the ``date`` column inclusively. Ordered by ticker then date.
+    """
     q = "SELECT * FROM technical_features WHERE TRUE"
     params = {}
     if tickers is not None:
@@ -167,8 +180,11 @@ def get(
 
 
 def is_empty() -> bool:
-    """Whether any features have been computed yet. EXISTS short-circuits on the
-    first row, unlike a per-ticker GROUP BY over the whole table."""
+    """Return True when no features have been computed yet.
+
+    ``EXISTS`` short-circuits on the first row, unlike a per-ticker ``GROUP BY``
+    over the whole table.
+    """
     with get_connection().connect() as conn:
         return conn.execute(
             text("SELECT NOT EXISTS (SELECT 1 FROM technical_features)")
@@ -176,7 +192,10 @@ def is_empty() -> bool:
 
 
 def get_missing_feature_dates() -> pd.DataFrame:
-    """Return equity-price keys without a matching technical-feature row."""
+    """Return the equity-price keys with no matching feature row.
+
+    The work list for an incremental feature build.
+    """
     q = text("""
         SELECT ep.ticker, ep.date
         FROM equity_prices ep
@@ -190,6 +209,11 @@ def get_missing_feature_dates() -> pd.DataFrame:
 
 
 def get_stale_feature_tickers() -> list[str]:
+    """Return tickers whose stored close no longer matches the price table.
+
+    A mismatch means the price was re-adjusted after the features were computed. Every rolling window depends on the full series, so these tickers need their
+    entire history rebuilt rather than just their recent rows.
+    """
     q = text("""
         SELECT DISTINCT ep.ticker
         FROM equity_prices ep

@@ -1,3 +1,9 @@
+"""Persistence for 13F institutional holdings, one row per investor per quarter.
+
+Holdings are reported quarterly and filed weeks later, so a caller reading these
+must apply its own filing-delay assumption before treating a quarter as known.
+"""
+
 from database.db_connection import get_connection
 import pandas as pd
 from sqlalchemy import text
@@ -22,6 +28,10 @@ CONFLICT = f"ON CONFLICT ({', '.join(KEY_COLUMNS)}) DO UPDATE SET {_UPDATE_SET}"
 
 
 def create_table():
+    """Create the ``institutional_holdings`` table and its indexes if absent.
+
+    Idempotent, so setup can be re-run safely.
+    """
     with get_connection().begin() as conn:
         conn.execute(
             text("""
@@ -41,11 +51,16 @@ def create_table():
 
 
 def drop_table():
+    """Drop ``institutional_holdings`` and everything depending on it."""
     with get_connection().begin() as conn:
         conn.execute(text("DROP TABLE IF EXISTS institutional_holdings CASCADE"))
 
 
 def insert(df: pd.DataFrame):
+    """Upsert rows into ``institutional_holdings``, keyed on ``(ticker, investorname, calendardate, securitytype)``.
+
+    Columns outside ``_COLUMNS`` are ignored and NaN/NaT become SQL NULL. A restated holding overwrites the stored one. No-op on an empty frame.
+    """
     if df.empty:
         return
     frame = df[_COLUMNS].astype(object)
@@ -66,6 +81,11 @@ def get(
     start_date: str | None = None,
     end_date: str | None = None,
 ) -> pd.DataFrame:
+    """Return ``institutional_holdings`` rows matching the supplied filters.
+
+    Every argument is optional and omitting all of them returns the whole table. Dates bound ``calendardate``, the quarter reported on, not the
+    filing date. Ordered by ticker then calendar date.
+    """
     q = "SELECT * FROM institutional_holdings WHERE TRUE"
     params = {}
     if tickers is not None:

@@ -1,3 +1,14 @@
+"""Persistence for Sharadar fundamentals across all reporting dimensions.
+
+Every filing carries two dates. ``calendardate`` is the period reported on and
+``datekey`` is the day it reached the tape, commonly months later. Point-in-time
+reads bound on ``datekey``; period-based reads bound on ``calendardate``.
+
+``dimension`` distinguishes the reporting basis, ART for trailing twelve months,
+ARQ for quarterly, and ARY for annual, and is part of the primary key so all
+three coexist per ticker.
+"""
+
 from database.db_connection import get_connection
 import pandas as pd
 from sqlalchemy import text
@@ -121,6 +132,10 @@ _BIND_LIST = ", ".join(f":{c}" for c in _COLUMNS)
 
 
 def create_table():
+    """Create the ``fundamentals`` table and its indexes if absent.
+
+    Idempotent, so setup can be re-run safely.
+    """
     with get_connection().begin() as conn:
         conn.execute(
             text("""
@@ -245,6 +260,7 @@ def create_table():
 
 
 def drop_table():
+    """Drop ``fundamentals`` and everything depending on it."""
     with get_connection().begin() as conn:
         conn.execute(text("DROP TABLE IF EXISTS fundamentals CASCADE"))
 
@@ -257,6 +273,10 @@ CONFLICT = f"ON CONFLICT (ticker, dimension, datekey) DO UPDATE SET {_UPDATE_SET
 
 
 def insert(df: pd.DataFrame):
+    """Upsert rows into ``fundamentals``, keyed on ``(ticker, dimension, datekey)``.
+
+    Columns outside ``_COLUMNS`` are ignored and NaN/NaT become SQL NULL. A restatement filed under a new ``datekey`` lands as its own row, while a correction to an existing filing overwrites it. No-op on an empty frame.
+    """
     if df.empty:
         return
     frame = df[_COLUMNS].astype(object)
@@ -277,6 +297,12 @@ def get(
     start_date: str | None = None,
     end_date: str | None = None,
 ) -> pd.DataFrame:
+    """Return ``fundamentals`` rows matching the supplied filters.
+
+    Every argument is optional and omitting all of them returns the whole table. ``dimension`` selects the reporting basis: ART for trailing twelve
+    months, ARQ for quarterly, ARY for annual. Dates bound ``calendardate``, the
+    period reported on, which is months earlier than the day it was filed. Ordered by ticker, dimension, then filing date.
+    """
     q = "SELECT * FROM fundamentals WHERE TRUE"
     params = {}
     if tickers is not None:
@@ -298,6 +324,12 @@ def get(
 def get_latest_rows(
     tickers: str | list[str] | None, dimension: str, signal_day: pd.Timestamp
 ) -> pd.DataFrame:
+    """Return each ticker's most recent filing of ``dimension``.
+
+    Bounded on ``datekey``, the day the filing reached the tape, so a report is
+    invisible until it was actually published. There is no lower bound, so a
+    long-delisted ticker still resolves to its final filing.
+    """
     params = {
         "dim": dimension,
         "signal_day": signal_day.date() if hasattr(signal_day, "date") else signal_day,
@@ -319,6 +351,11 @@ def get_latest_rows(
 
 
 def get_sync_cursor() -> str | None:
+    """Return the newest ``lastupdated`` stamp on record, or None if empty.
+
+    The incremental-load watermark: the daily update asks the vendor only for rows
+    changed since this, so a full refetch is never needed.
+    """
     with get_connection().connect() as conn:
         result = conn.execute(
             text("SELECT MAX(lastupdated) FROM fundamentals")

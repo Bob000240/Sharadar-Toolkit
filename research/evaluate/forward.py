@@ -1,3 +1,14 @@
+"""Forward returns over a fixed horizon of market sessions.
+
+The measurement half of a walk-forward: given a population and a signal day,
+what did those securities go on to do? Nothing here reads a fact from on or
+before the signal day, and nothing elsewhere reads a price after it.
+
+The window closes on an exact session supplied by ``research.calendar`` rather
+than on a calendar-day approximation, so every name is measured over the
+identical wall-clock span.
+"""
+
 from __future__ import annotations
 
 import pandas as pd
@@ -43,19 +54,27 @@ _QUERY_TEMPLATE = """
 
 
 class ForwardReturns:
-    """Return from the first session after the signal day to the end of a fixed
-    horizon.
+    """Return from the first session after the signal day to a fixed horizon.
 
-    The horizon is counted in *market* sessions, not in the security's own bars:
+    Public methods are ``run``, for equities, and ``benchmark``, for funds; the
+    two differ only in which price table they read. ``horizon_sessions`` is the
+    single instance variable.
+
+    The horizon is counted in market sessions, not in the security's own bars:
     every name is measured over the identical wall-clock window, closing at
-    `calendar.horizon_end(signal_day, horizon_sessions)`. A name that halts,
+    ``calendar.horizon_end(signal_day, horizon_sessions)``. A name that halts,
     delists, or trades thinly reaches the window's end with fewer bars, exits on
-    its last one, and reports `complete=False`. Counting each name's own bars
+    its last one, and reports ``complete=False``. Counting each name's own bars
     instead would let a sparse security's "252 sessions" span fourteen months
     and be compared against a liquid one's twelve.
     """
 
     def __init__(self, horizon_sessions: int = 252) -> None:
+        """Set the horizon in market sessions.
+
+        Raise ValueError below ``_MIN_HORIZON_SESSIONS``, since an entry and an
+        exit cannot come from the same bar.
+        """
         if horizon_sessions < _MIN_HORIZON_SESSIONS:
             raise ValueError(
                 f"horizon_sessions must be at least {_MIN_HORIZON_SESSIONS} "
@@ -63,19 +82,31 @@ class ForwardReturns:
         self.horizon_sessions = horizon_sessions
 
     def __repr__(self) -> str:
+        """Return the configured horizon."""
         return f"ForwardReturns(horizon_sessions={self.horizon_sessions})"
 
     def run(self, tickers, signal_day) -> pd.DataFrame:
+        """Return forward returns for equities over the horizon."""
         return self._returns(_EQUITY_TABLE, tickers, signal_day)
 
     def benchmark(self, tickers, signal_day) -> pd.DataFrame:
+        """Return forward returns for funds, read from the fund price table."""
         return self._returns(_FUND_TABLE, tickers, signal_day)
 
     def _returns(self, table: str, tickers, signal_day) -> pd.DataFrame:
+        """Measure one population over the horizon against ``table``.
+
+        The window opens strictly after ``signal_day`` and closes on the exact
+        session the horizon lands on, clamped to the end of the data. Clamping
+        is what makes an unfinished horizon report ``complete=False`` rather than
+        raise: near the present there is simply no exit yet.
+
+        Return one row per measurable ticker, carrying the entry and exit dates
+        and prices, the realised ``forward_return``, ``sessions_held``, and
+        ``complete``. A ticker with no price at all after the signal day is
+        absent rather than null.
+        """
         query = text(_QUERY_TEMPLATE.format(table=table, price=_PRICE_COLUMN))
-        # The exact session the horizon lands on, clamped to the end of the data.
-        # Clamping is what makes an unfinished horizon report complete=False
-        # rather than raise: near the present, there is simply no exit yet.
         window_end = calendar.horizon_end(signal_day, self.horizon_sessions)
         frame = pd.read_sql_query(
             query,

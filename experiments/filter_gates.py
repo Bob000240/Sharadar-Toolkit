@@ -1,10 +1,24 @@
-"""Which entry gates actually close the gap against SPY?
+"""Measure which entry gates actually close the gap against SPY.
+
+::
+
+    uv run python -m experiments.filter_gates
 
 Eleven filter variants swept over quarterly signal days, each measured on
-forward return versus a SPY buy-and-hold over the identical window. Lifted out
-of research/filters.py, where it lived as a __main__ block.
+forward return against a SPY buy-and-hold over the identical window, with an
+unfiltered baseline for comparison. ``distress events only`` runs alongside
+``no distress events`` as a sign check: a gate that helps should hurt when
+inverted.
 
-Run: uv run python -m experiments.filter_gates
+The preamble reports fundamentals coverage on one date, because a market-cap
+floor is only a size filter to the extent market cap is populated; where it is
+not, the gate is really selecting for coverage.
+
+Which event codes disqualify is a strategy judgment rather than a signal-layer
+fact: ``sig_events`` names the codes but takes no position on them, so the
+distress list is assembled here.
+
+Lifted out of ``research/filters.py``, where it was a __main__ block.
 """
 
 import research.calendar as calendar
@@ -39,8 +53,6 @@ walk = WalkForward(universe, forward, benchmark="SPY")
 
 print(f"\nWALK-FORWARD: does a filter close the gap? ({len(SIGNAL_DAYS)} quarters)")
 
-# Which codes disqualify is a strategy judgment, not a signal-layer fact:
-# sig_events names the codes but takes no position on them.
 _DISTRESS_CODES = (
     sig_events.BANKRUPTCY_CODE,
     sig_events.DELISTING_CODE,

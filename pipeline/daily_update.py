@@ -1,9 +1,16 @@
-"""
-Daily incremental update steps. Run each market day after close via:
+"""Daily incremental update steps, run each market day after close.
+
+::
+
     uv run python -m pipeline.main update
 
-`pipeline.main` owns the step order and per-step failure handling; this module
-only provides the individual update functions.
+``pipeline.main`` owns the step order and the per-step failure handling; this
+module only provides the individual update functions.
+
+Most steps resume from a stored ``lastupdated`` watermark and ask the vendor only
+for rows changed since. Insider filings, events, and 13F holdings use a fixed
+lookback window instead, because those records can appear long after the date
+they describe.
 """
 
 import time
@@ -27,10 +34,17 @@ TODAY = pd.Timestamp.today().strftime("%Y-%m-%d")
 
 
 def _lookback(days: int) -> str:
+    """Return the date ``days`` calendar days before today, as a string."""
     return (pd.Timestamp.today() - pd.Timedelta(days=days)).strftime("%Y-%m-%d")
 
 
 def _fetch(sh_fn, repo_insert, label: str, batch_size: int = 0, **filters) -> None:
+    """Fetch one vendor endpoint and upsert what it returns.
+
+    With ``batch_size`` set, the ticker list is split into batches and each is
+    fetched and written before the next, so a large request cannot time out as one
+    call. Progress and timings are printed because this runs unattended.
+    """
     scope = ", ".join(f"{k}={v}" for k, v in filters.items() if k != "tickers")
 
     if batch_size:
@@ -77,6 +91,7 @@ def _fetch(sh_fn, repo_insert, label: str, batch_size: int = 0, **filters) -> No
 
 
 def update_equity_prices(sh: SharadarData):
+    """Fetch equity bars changed since the stored watermark."""
     _fetch(
         sh.equity_prices,
         equity_repo.insert,
@@ -86,6 +101,7 @@ def update_equity_prices(sh: SharadarData):
 
 
 def update_fund_prices(sh: SharadarData):
+    """Fetch benchmark fund bars changed since the stored watermark."""
     _fetch(
         sh.fund_prices,
         fund_repo.insert,
@@ -96,9 +112,12 @@ def update_fund_prices(sh: SharadarData):
 
 
 def _recompute_history(symbols: list[str], batch_size: int) -> int:
-    """Rebuild these tickers' ENTIRE feature history from their current prices.
-    Every rolling window (SMA-200, 252d return, OBV) depends on the full series,
-    so a re-adjusted price invalidates the whole history, not just recent rows."""
+    """Rebuild these tickers' entire feature history from their current prices.
+
+    Every rolling window — SMA-200, the 252-day return, OBV — depends on the full
+    series, so a re-adjusted price invalidates the whole history rather than just
+    the recent rows. Return the number of rows written.
+    """
     total = 0
     for i in range(0, len(symbols), batch_size):
         batch = symbols[i : i + batch_size]
@@ -116,6 +135,12 @@ def _recompute_history(symbols: list[str], batch_size: int) -> int:
 
 
 def update_technical_features(batch_size: int = 200):
+    """Rebuild stale feature histories, then fill in missing dates.
+
+    Stale tickers are rebuilt in full first and then excluded from the gap fill, so
+    no ticker is computed twice. Each gap batch reads back far enough before its
+    earliest missing date to warm the longest rolling window.
+    """
     if technical_features_repo.is_empty():
         print("Technical features: no base data")
         return
@@ -168,6 +193,11 @@ def update_technical_features(batch_size: int = 200):
 
 
 def update_fundamentals(sh: SharadarData):
+    """Fetch fundamentals changed since the stored watermark.
+
+    Falls back to a 90-day window when nothing is stored yet, which is wide enough
+    to catch restatements of recently closed periods.
+    """
     _fetch(
         sh.fundamentals,
         fundamentals_repo.insert,
@@ -177,6 +207,11 @@ def update_fundamentals(sh: SharadarData):
 
 
 def update_insider(sh: SharadarData):
+    """Fetch insider filings disclosed in the last two weeks.
+
+    Windowed by filing date rather than a watermark, because a filing can appear
+    long after the trade it reports.
+    """
     _fetch(
         sh.insider_transactions,
         insider_repo.insert,
@@ -187,6 +222,10 @@ def update_insider(sh: SharadarData):
 
 
 def update_institutional(sh: SharadarData):
+    """Fetch 13F holdings for every equity ticker, in batches.
+
+    Batched because the ticker list is too long for one request.
+    """
     _fetch(
         sh.institutional_holdings,
         institutional_repo.insert,
@@ -199,6 +238,7 @@ def update_institutional(sh: SharadarData):
 
 
 def update_events(sh: SharadarData):
+    """Fetch corporate events from the last week."""
     _fetch(
         sh.events,
         event_repo.insert,
@@ -209,6 +249,7 @@ def update_events(sh: SharadarData):
 
 
 def update_tickers(sh: SharadarData):
+    """Fetch equity and benchmark descriptors changed since the watermark."""
     since = tickers_repo.get_sync_cursor()
     equities = sh.tickers(table="SEP", lastupdated_since=since)
     funds = sh.tickers(table="SFP", tickers=BENCHMARK_SYMBOLS, lastupdated_since=since)

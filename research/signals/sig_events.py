@@ -1,4 +1,12 @@
-"""Point-in-time corporate event rows and optional ticker-level facts."""
+"""Point-in-time corporate event facts, one row per ticker.
+
+The lookback ends the day *before* the signal day, unlike every other signal
+source, which reads up to and including it. An 8-K filed on the signal day is
+therefore not visible to a screen run that same day.
+
+The module names the Sharadar event codes but takes no position on them:
+whether a code is good, bad, or disqualifying is a strategy judgment.
+"""
 
 from __future__ import annotations
 
@@ -26,10 +34,9 @@ EVENT_FACT_COLUMNS = (
 class EventSignals(Signals):
     """SQL-backed corporate-event facts, one row per ticker.
 
-    Unlike the other signal services, events are never consumed as raw rows —
-    they're only useful once aggregated per ticker — so there is a single
-    method that both fetches and aggregates, rather than the usual
-    get_signals() + attach_*() split.
+    The only public method is ``attach_event_facts``, which both fetches and
+    aggregates. Unlike the other signal services there is no ``get_signals`` /
+    ``attach_*`` split, because events are never useful as raw rows.
     """
 
     @classmethod
@@ -39,14 +46,16 @@ class EventSignals(Signals):
         signal_day: pd.Timestamp,
         lookback_days: int = 20,
     ) -> pd.DataFrame:
-        """Fetch each ticker's corporate events within `lookback_days` of
-        `signal_day` (point-in-time) and aggregate them into objective facts —
-        one row per requested ticker: earnings and 13D recency, plus the deduped
-        list of recent event codes.
+        """Aggregate each ticker's recent corporate events into objective facts.
 
-        Tickers with no events remain present with ``None`` recencies and an
-        empty code list. Whether any code is good, bad, or disqualifying belongs
-        to the consuming strategy.
+        The window is the ``lookback_days`` ending one day before
+        ``signal_day``, so nothing filed on the signal day itself is visible.
+
+        Return a ticker-indexed frame with one row per *requested* ticker,
+        carrying earnings recency, 13D recency, and the deduplicated list of
+        event codes. Tickers with no events keep their row with null recencies
+        and an empty list, because absence of events is a fact rather than
+        missing data.
         """
         signal_day = pd.Timestamp(signal_day) - pd.Timedelta(days=1)
         start = signal_day - pd.Timedelta(days=lookback_days)
@@ -88,6 +97,7 @@ class EventSignals(Signals):
 
     @staticmethod
     def _has_code(series: pd.Series, code: str) -> pd.Series:
+        """Mark rows whose pipe-delimited code string contains ``code``."""
         return series.apply(
             lambda value: (
                 code in {item.strip() for item in str(value).split("|")}
@@ -103,6 +113,11 @@ class EventSignals(Signals):
         code: str,
         signal_day: pd.Timestamp,
     ) -> int | None:
+        """Return days since the most recent event carrying ``code``.
+
+        Return None when the ticker has no events at all, or none with that
+        code, in the window.
+        """
         if frame is None or frame.empty:
             return None
         matches = frame.loc[cls._has_code(frame["eventcodes"], code), "date"]
@@ -112,6 +127,7 @@ class EventSignals(Signals):
 
     @staticmethod
     def _event_codes(frame: pd.DataFrame | None) -> list[str]:
+        """Return the sorted, deduplicated event codes in the window."""
         if frame is None or frame.empty:
             return []
         codes = {

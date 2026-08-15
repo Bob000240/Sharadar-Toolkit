@@ -1,3 +1,18 @@
+"""The sector_leaders strategy: each sector's strongest healthy trend.
+
+A worked example of a preset built on the research layer. The structural
+population comes from ``Universe``; everything else here is strategy judgment
+and belongs to this file rather than to the shared modules.
+
+Scoring runs inside the already-narrowed eligible set, unlike
+``research.orchestrator``, which scores the whole structural universe before
+filtering. Expect different numbers from the two.
+
+Metric directions in the sleeve dicts are written as +1 for higher-is-better and
+-1 for lower. They are signs only, never magnitudes: metrics within a sleeve are
+equally weighted, and only ``SLEEVE_WEIGHTS`` decides relative importance.
+"""
+
 from dataclasses import dataclass
 from datetime import date
 
@@ -27,6 +42,13 @@ DESCRIPTION = (
 
 @dataclass
 class CandidateSnapshot:
+    """One ranked candidate, frozen into the packet handed to the agent.
+
+    Carries the symbol, the entry date, the blended ``setup_score``, the gates
+    it cleared, any non-disqualifying ``risk_flags``, and a ``signal_context``
+    of the underlying numbers.
+    """
+
     symbol: str
     entry_date: date
     setup_score: float
@@ -135,16 +157,25 @@ _TOP_N_PER_SECTOR = 5
 
 
 class SLEntryScreener:
-    """Buy side. Emits the candidate menu: each sector's strongest healthy trends
-    among liquid, profitable, already-uptrending names. The structural population
-    comes from ``Universe``; this preset owns its strategy-specific filters and
-    ranks the survivors within sector.
+    """Buy side: the candidate menu of each sector's strongest healthy trends.
 
-    Stateless with respect to the signal day — construct once, call run(day) for
-    as many days as needed (the registration check is date-independent).
+    Public methods are ``run``, which produces the menu for one day, plus
+    ``rank``, ``risk``, and ``to_snapshot``, the stages it composes.
+
+    Selects among liquid, profitable, already-uptrending large caps, then ranks
+    the survivors within their own sector so no single sector crowds the menu.
+
+    Stateless with respect to the signal day: construct once and call ``run``
+    for as many days as needed, since the registration check is
+    date-independent.
     """
 
     def __init__(self):
+        """Check the strategy's registration and build its universe.
+
+        Raise RuntimeError when the profile is missing or retired, so a screen
+        cannot silently run outside the registry.
+        """
         self.strategy_name = NAME
         self.profile = profiles_repo.get_profile_by_name(NAME)
         if self.profile is None:
@@ -162,10 +193,13 @@ class SLEntryScreener:
 
     @staticmethod
     def _sleeve_score(frame: pd.DataFrame, signals: dict[str, int]) -> pd.Series:
-        """Equal-weighted mean of a sleeve's direction-adjusted sector percentiles.
-        +1 metrics use `{metric}_sector_pct` as-is; -1 metrics are flipped
-        (100 - pct) so higher always means better. skipna: a candidate missing one
-        metric is scored on the rest of the sleeve rather than zeroed out."""
+        """Return the equal-weighted mean of one sleeve's sector percentiles.
+
+        Direction-adjusted first, so 100 always means good: +1 metrics use
+        ``{metric}_sector_pct`` as-is and -1 metrics are flipped to
+        ``100 - pct``. A candidate missing one metric is scored on the rest of
+        the sleeve rather than zeroed out for it.
+        """
         adjusted = {
             metric: (
                 frame[f"{metric}_sector_pct"]
@@ -177,10 +211,15 @@ class SLEntryScreener:
         return pd.DataFrame(adjusted).mean(axis=1, skipna=True)
 
     def rank(self, candidates: pd.DataFrame) -> pd.DataFrame:
-        """Attach the five sleeve scores and the blended setup_score, then keep the
-        top N per sector. Weights are renormalized per row over whichever sleeves
-        have data, so a candidate missing an entire sleeve (e.g. no 5-year history)
-        is scored on the rest rather than penalized to zero."""
+        """Attach the sleeve scores and blended score, then cut per sector.
+
+        Sleeve weights are renormalised per row over whichever sleeves have
+        data, so a candidate missing an entire sleeve — no five-year history,
+        typically — is scored on the rest rather than penalised to zero. A
+        candidate with no scoreable sleeve at all is dropped.
+
+        Return the top ``_TOP_N_PER_SECTOR`` rows of each sector, best first.
+        """
         ranked = candidates.copy()
         sleeve_scores = pd.DataFrame(
             {
@@ -205,10 +244,13 @@ class SLEntryScreener:
         )
 
     def risk(self, row: pd.Series) -> list[str]:
-        """Non-disqualifying context flags for one candidate. These inform the
-        agent; they never remove a name from the menu. Risks the eligibility gates
-        already exclude (illiquidity, deep drawdowns from a broken trend) are
-        intentionally absent — they can't fire on an eligible name."""
+        """Return non-disqualifying context flags for one candidate.
+
+        These inform the agent and never remove a name from the menu. Risks the
+        eligibility gates already exclude, such as illiquidity or a deep
+        drawdown from a broken trend, are deliberately absent, because they
+        cannot fire on a name that got this far.
+        """
         rules = {
             "overbought": row["rsi_14"] > 70,
             "volatile_base": row["consolidation_tightness"] > 1.5,
@@ -227,7 +269,11 @@ class SLEntryScreener:
         return flags
 
     def to_snapshot(self, row: pd.Series, signal_day: date) -> CandidateSnapshot:
-        """Freeze one ranked row into the packet handed to the agent."""
+        """Freeze one ranked row into the packet handed to the agent.
+
+        Numbers are rounded and nulls normalised to None, so the snapshot
+        serialises cleanly and carries no pandas types.
+        """
 
         def number(key: str, digits: int = 2):
             value = row.get(key)
@@ -256,6 +302,14 @@ class SLEntryScreener:
         )
 
     def run(self, signal_day: date) -> list[CandidateSnapshot]:
+        """Return the candidate menu as of ``signal_day``.
+
+        Runs the universe, attaches signals once and reuses that frame for both
+        the eligibility gates and the ranking, drops names carrying a
+        disqualifying event code, then ranks within sector.
+
+        Return an empty list when no name survives, rather than raising.
+        """
         eligible = self.universe.run(signal_day)
         if eligible.empty:
             return []
@@ -265,9 +319,6 @@ class SLEntryScreener:
         if eligible.empty:
             return []
 
-        # attach_signals already produced the raw and derived facts needed for
-        # both the eligibility gates and ranking. Reuse that frame rather than
-        # querying the signal repositories a second time.
         eligible = eligible.set_index("ticker", drop=False)
         eligible = FundamentalSignals.attach_sectors(eligible)
         eligible = FundamentalSignals.attach_sector_ranks(
@@ -301,9 +352,6 @@ class SLEntryScreener:
 if __name__ == "__main__":
     import research.calendar as calendar
 
-    # Not date.today(): on a weekend or holiday the universe's recency window
-    # still returns rows, so the screen would run on stale prices without saying
-    # so. latest_session() names the session the data actually supports.
     as_of = calendar.latest_session()
 
     screener = SLEntryScreener()

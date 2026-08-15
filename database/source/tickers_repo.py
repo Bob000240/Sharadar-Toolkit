@@ -1,3 +1,10 @@
+"""Persistence for ticker descriptors: listing, classification, and status.
+
+The same symbol can appear under more than one vendor table, so ``table_code``
+is part of the key. Upserts merge rather than replace: a null in an incoming row
+leaves the stored value alone, because vendor rows are often partial.
+"""
+
 from database.db_connection import get_connection
 import pandas as pd
 from sqlalchemy import text
@@ -45,6 +52,10 @@ CONFLICT = f"ON CONFLICT (ticker, table_code) DO UPDATE SET {_UPDATE_SET}"
 
 
 def create_table():
+    """Create the ``tickers`` table and its indexes if absent.
+
+    Idempotent, so setup can be re-run safely.
+    """
     with get_connection().begin() as conn:
         conn.execute(
             text("""
@@ -85,11 +96,16 @@ def create_table():
 
 
 def drop_table():
+    """Drop ``tickers`` and everything depending on it."""
     with get_connection().begin() as conn:
         conn.execute(text("DROP TABLE IF EXISTS tickers CASCADE"))
 
 
 def insert(df: pd.DataFrame):
+    """Upsert rows into ``tickers``, keyed on ``(ticker, table_code)``.
+
+    Columns outside ``_COLUMNS`` are ignored and NaN/NaT become SQL NULL. Updates preserve any stored value the incoming row leaves null, so a partial vendor row cannot erase descriptors it simply did not carry. No-op on an empty frame.
+    """
     if df.empty:
         return
     df = df.rename(columns={"table": "table_code"})
@@ -107,6 +123,11 @@ def get(
     table_code: str | None = None,
     is_delisted: bool | None = None,
 ) -> pd.DataFrame:
+    """Return ``tickers`` rows matching the supplied filters.
+
+    Every argument is optional and omitting all of them returns the whole table. ``table_code`` selects the vendor table the ticker belongs to,
+    SEP for equities and SFP for funds. Ordered by ticker.
+    """
     q = "SELECT * FROM tickers WHERE TRUE"
     params = {}
     if tickers is not None:
@@ -123,6 +144,11 @@ def get(
 
 
 def get_sync_cursor() -> str | None:
+    """Return the newest ``lastupdated`` stamp on record, or None if empty.
+
+    The incremental-load watermark: the daily update asks the vendor only for rows
+    changed since this, so a full refetch is never needed.
+    """
     with get_connection().connect() as conn:
         result = conn.execute(text("SELECT MAX(lastupdated) FROM tickers")).scalar()
         return str(result) if result else None

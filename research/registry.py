@@ -20,25 +20,48 @@ inputs to the derived fields below, not things anyone screens on directly — a
 raw `sma_200` percentile is meaningless, whereas `pct_from_sma_50` is not. The
 underlying columns remain available in the frame; they are simply not offered.
 
-`direction` is None where no canonical better/worse exists: `volatility_20` is
-rankable, but whether low or high is "good" depends on the question being asked,
-so the caller must supply a direction rather than inherit a fake default.
+``direction`` is None where no canonical better/worse exists: ``volatility_20``
+is rankable, but whether low or high is "good" depends on the question being
+asked, so the caller must supply a direction rather than inherit a fake default.
+
+``_FIVE_YEAR`` is the shared coverage note for the ``*_change_5y`` and
+``*_volatility_5y`` fields. All of them need roughly six years of annual history
+before they resolve, so all of them are effectively empty in early backtest
+windows.
 """
 
 from dataclasses import dataclass
 
-# ── field description ────────────────────────────────────────────────────────
-
 
 @dataclass(frozen=True)
 class Field:
+    """One declarative description of a field a user may screen or rank on.
+
+    ``key`` is the frame column name and ``label`` its display name. ``group``
+    buckets the field for a grouped control. ``source`` names the derive chain
+    that produces it: "technical", "fundamental", or "event".
+
+    ``direction`` encodes which end is good as +1 for higher-is-better, -1 for
+    lower, or None where no canonical direction exists. It is a sign only, never
+    a magnitude — weighting is the ranker's business. ``unit`` is one of ratio,
+    pct, usd, days, count, or score. ``positive_only`` marks a field whose
+    non-positive values are undefined rather than extreme, so they are masked
+    out of a rank instead of occupying its good end.
+
+    ``filterable`` and ``rankable`` gate which roles the field may be used in.
+    ``description``, ``citation``, and ``coverage_note`` are prose for a GUI or
+    a retrieval layer.
+
+    The only public member is the ``needs_direction`` property.
+    """
+
     key: str
     label: str
     group: str
-    source: str                      # "technical" | "fundamental" | "event"
-    direction: int | None = None     # +1 higher-is-better, -1 lower, None ambiguous
-    unit: str = "ratio"              # ratio | pct | usd | days | count | score
-    positive_only: bool = False      # non-positive is UNDEFINED, mask from ranks
+    source: str
+    direction: int | None = None
+    unit: str = "ratio"
+    positive_only: bool = False
     filterable: bool = True
     rankable: bool = True
     description: str = ""
@@ -47,17 +70,16 @@ class Field:
 
     @property
     def needs_direction(self) -> bool:
-        """True when the field is rankable but has no canonical direction, so a
-        caller must state which end it prefers."""
+        """Return True when a caller must supply a direction for this field.
+
+        That is, when the field is rankable but has no canonical better end.
+        """
         return self.rankable and self.direction is None
 
 
-# Every `*_change_5y` / `*_volatility_5y` needs ~6 years of annual history before
-# it resolves, so all of them are effectively empty in early backtest windows.
 _FIVE_YEAR = "Requires ~6y of annual history; largely unpopulated before ~2022."
 
 _FIELDS = [
-    # ── trend ────────────────────────────────────────────────────────────────
     Field("trend_slope_60d", "60-Day Trend Slope", "Trend", "technical", +1,
           description="Slope of the least-squares fit through 60 sessions of "
                       "closes. Positive means the trend is still rising rather "
@@ -96,7 +118,6 @@ _FIELDS = [
           description="Sessions since the 9/21-day EMA crossover. Small values "
                       "mark a fresh trend change in either direction."),
 
-    # ── momentum ─────────────────────────────────────────────────────────────
     Field("return_252d", "12-Month Return", "Momentum", "technical", +1,
           unit="pct",
           description="Trailing one-year price return, the classic momentum "
@@ -124,7 +145,6 @@ _FIELDS = [
                       "high can mean strength or exhaustion, so direction is "
                       "for the caller to choose."),
 
-    # ── volatility & risk ────────────────────────────────────────────────────
     Field("volatility_20", "20-Day Volatility", "Volatility", "technical", None,
           unit="pct",
           description="Realized standard deviation of daily returns over 20 "
@@ -139,7 +159,6 @@ _FIELDS = [
           description="How tight the recent price base is. Lower means a "
                       "quieter base."),
 
-    # ── liquidity & size ─────────────────────────────────────────────────────
     Field("dollar_volume_20d_avg", "Avg Dollar Volume (20d)", "Liquidity",
           "technical", +1, unit="usd",
           description="Mean daily traded value over 20 sessions — the practical "
@@ -151,7 +170,6 @@ _FIELDS = [
           description="Point-in-time market capitalization from the latest ART "
                       "filing available on the signal date."),
 
-    # ── valuation ────────────────────────────────────────────────────────────
     Field("pe", "P/E", "Valuation", "fundamental", -1, positive_only=True,
           description="Price to earnings. Non-positive is undefined, not cheap: "
                       "a loss-maker has no meaningful P/E and is masked from "
@@ -174,7 +192,6 @@ _FIELDS = [
           description="Trailing dividend yield. High yield can signal value or "
                       "distress, so direction is the caller's."),
 
-    # ── profitability ────────────────────────────────────────────────────────
     Field("gross_profitability", "Gross Profitability", "Profitability",
           "fundamental", +1,
           description="Gross profit divided by total assets. Measured this high "
@@ -209,7 +226,6 @@ _FIELDS = [
                       "gate — but not for ranking, where an absolute dollar "
                       "amount would just rank by company size."),
 
-    # ── quality & accounting ─────────────────────────────────────────────────
     Field("accruals", "Accruals", "Quality", "fundamental", -1,
           description="(Net income − operating cash flow) / assets. The wedge "
                       "between reported profit and cash. Firms with high "
@@ -243,7 +259,6 @@ _FIELDS = [
           description="Five-year dispersion of gross margin; pricing stability.",
           coverage_note=_FIVE_YEAR),
 
-    # ── growth ───────────────────────────────────────────────────────────────
     Field("revenue_growth_yoy", "Revenue Growth (YoY)", "Growth", "fundamental",
           +1, unit="pct", description="Year-over-year revenue change."),
     Field("eps_growth_yoy", "EPS Growth (YoY)", "Growth", "fundamental", +1,
@@ -277,7 +292,6 @@ _FIELDS = [
           -1, description="Five-year change in leverage; rising is worse.",
           coverage_note=_FIVE_YEAR),
 
-    # ── capital discipline ───────────────────────────────────────────────────
     Field("net_payout_yield", "Net Payout Yield", "Capital Discipline",
           "fundamental", +1, unit="pct",
           description="Dividends plus net buybacks over market cap. Captures "
@@ -290,7 +304,6 @@ _FIELDS = [
           citation="Pontiff & Woodgate (2008)",
           coverage_note=_FIVE_YEAR),
 
-    # ── events (filter-only) ─────────────────────────────────────────────────
     Field("recent_event_codes", "Recent Event Codes", "Events", "event",
           unit="count", rankable=False,
           description="Deduped Sharadar 8-K event codes filed in the lookback "
@@ -309,12 +322,12 @@ _FIELDS = [
 FIELDS: dict[str, Field] = {field.key: field for field in _FIELDS}
 
 
-# ── accessors ────────────────────────────────────────────────────────────────
-
-
 def get(key: str) -> Field:
-    """Look up one field, raising with the key spelled out — the error a GUI or
-    an agent that invented a field name should see."""
+    """Return the registered field named ``key``.
+
+    Raise KeyError with the key spelled out, which is the error a GUI or an
+    agent that invented a field name should see.
+    """
     try:
         return FIELDS[key]
     except KeyError:
@@ -322,21 +335,28 @@ def get(key: str) -> Field:
 
 
 def unknown(keys) -> list[str]:
-    """The subset of `keys` that is not registered. Cheap pre-query validation."""
+    """Return the subset of ``keys`` that is not registered.
+
+    Cheap pre-query validation: no database and no frame required.
+    """
     return [key for key in keys if key not in FIELDS]
 
 
 def rankable() -> dict[str, Field]:
+    """Return every field that may be used as a rank metric."""
     return {key: f for key, f in FIELDS.items() if f.rankable}
 
 
 def filterable() -> dict[str, Field]:
+    """Return every field that may be used as a filter condition."""
     return {key: f for key, f in FIELDS.items() if f.filterable}
 
 
 def by_group() -> dict[str, list[Field]]:
-    """Fields bucketed by group, in registration order — the shape a GUI needs to
-    render grouped controls."""
+    """Return the fields bucketed by group, in registration order.
+
+    The shape a GUI needs to render grouped controls.
+    """
     groups: dict[str, list[Field]] = {}
     for field in _FIELDS:
         groups.setdefault(field.group, []).append(field)
@@ -344,12 +364,18 @@ def by_group() -> dict[str, list[Field]]:
 
 
 def sources(keys) -> set[str]:
-    """Which derive chains a set of fields requires ("technical", "fundamental",
-    "event"), so a screen only computes what it is asked for."""
+    """Return which derive chains ``keys`` requires.
+
+    One or more of "technical", "fundamental", and "event", so a screen computes
+    only what it was asked for.
+    """
     return {get(key).source for key in keys}
 
 
 def positive_only(keys) -> tuple[str, ...]:
-    """The subset needing non-positive masking before ranking — what the ranker
-    passes to `attach_sector_ranks` instead of a hardcoded constant."""
+    """Return the subset of ``keys`` needing non-positive masking before ranking.
+
+    What a caller hands to ``Ranking(positive_only=...)`` instead of a hardcoded
+    per-strategy constant.
+    """
     return tuple(key for key in keys if get(key).positive_only)

@@ -24,11 +24,16 @@ CREATE TABLE IF NOT EXISTS strategy_profiles (
 
 
 def create_table() -> None:
+    """Create the ``strategy_profiles`` table if absent.
+
+    Idempotent, so setup can be re-run safely.
+    """
     with get_connection().begin() as conn:
         conn.execute(text(DDL))
 
 
 def drop_table() -> None:
+    """Drop ``strategy_profiles`` and everything depending on it."""
     with get_connection().begin() as conn:
         conn.execute(text("DROP TABLE IF EXISTS strategy_profiles CASCADE"))
 
@@ -47,15 +52,19 @@ def upsert_profile(name: str, description: str) -> None:
 
 
 def retire_profile(name: str) -> bool:
-    """Soft-retire: mark inactive so no new entries run. The row is kept so the
-    strategy can be reactivated (via upsert) and stays in the registry's history
-    rather than vanishing. Returns False if no such profile exists."""
+    """Mark a strategy inactive so no new entries run.
+
+    A soft retire: the row is kept so the strategy can be reactivated by an
+    upsert and stays in the registry's history rather than vanishing. Return
+    False when no such profile exists.
+    """
     sql = text("UPDATE strategy_profiles SET active = FALSE WHERE name = :name")
     with get_connection().begin() as conn:
         return conn.execute(sql, {"name": name}).rowcount > 0
 
 
 def get_profile_by_name(name: str) -> dict | None:
+    """Return one profile as a dict, or None when it is not registered."""
     sql = text("SELECT * FROM strategy_profiles WHERE name = :name")
     with get_connection().connect() as conn:
         row = conn.execute(sql, {"name": name}).fetchone()

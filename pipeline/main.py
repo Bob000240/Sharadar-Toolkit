@@ -20,8 +20,11 @@ _STRATEGY_PKG = "research.presets"
 
 
 def _load_strategy(name: str):
-    """Import strategy `name` (research.presets.strat_<name>) and return its
-    module. Exits if it lacks NAME/DESCRIPTION."""
+    """Import and return the strategy module named ``name``.
+
+    Resolves to ``research.presets.strat_<name>``. Exit with a message when the
+    module carries no NAME and DESCRIPTION, which are what the registry stores.
+    """
     import importlib
 
     module = importlib.import_module(f"{_STRATEGY_PKG}.strat_{name}")
@@ -31,6 +34,13 @@ def _load_strategy(name: str):
 
 
 def main():
+    """Dispatch one subcommand from ``sys.argv``.
+
+    Each command imports its dependencies lazily, so an unrelated broken import
+    cannot stop the others from running. The update command keeps going after a
+    failed step and exits non-zero at the end with the list of failures, because a
+    single unavailable vendor endpoint should not abandon the rest of the load.
+    """
     if len(sys.argv) < 2:
         print(__doc__)
         sys.exit(1)

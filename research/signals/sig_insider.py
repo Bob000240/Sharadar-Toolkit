@@ -1,4 +1,14 @@
-"""Point-in-time insider transaction rows and optional activity facts."""
+"""Point-in-time insider transactions and optional activity facts.
+
+Windows are measured on ``filingdate`` rather than ``transactiondate``: a
+purchase is not knowable until it is disclosed, whatever day it was executed.
+
+The central judgment here is routine versus opportunistic. An insider who buys
+in the same calendar month every year is following a plan, and that purchase
+carries little information; one who breaks the pattern may be acting on
+something. ``ROUTINE_PATTERN_YEARS`` sets how many prior years must show the
+same month before a purchase counts as routine.
+"""
 
 from __future__ import annotations
 
@@ -41,7 +51,13 @@ ACTIVITY_FACT_COLUMNS = (
 
 
 class InsiderSignals(Signals):
-    """SQL-backed insider transactions with opt-in ticker-level facts."""
+    """SQL-backed insider transactions with opt-in ticker-level facts.
+
+    ``get_signals`` returns raw transaction rows. ``attach_purchase_classification``
+    labels open-market purchases, ``attach_activity_facts`` aggregates them to one
+    row per ticker, and ``attach_marketcap_normalization`` scales purchase value
+    against size. The split exists because the raw rows are useful on their own.
+    """
 
     @classmethod
     def get_signals(
@@ -50,10 +66,12 @@ class InsiderSignals(Signals):
         signal_day: pd.Timestamp,
         history_years: int = ROUTINE_PATTERN_YEARS + 1,
     ) -> pd.DataFrame:
-        """Return raw transactions known by the signal day.
+        """Return raw transactions disclosed on or before the signal day.
 
-        The default history includes enough prior years to distinguish recurring
-        same-month purchases from potentially opportunistic purchases.
+        ``history_years`` defaults to one year more than
+        ``ROUTINE_PATTERN_YEARS``, which is the depth needed to tell a recurring
+        same-month purchase from a potentially opportunistic one. Return one row
+        per transaction, not one per ticker.
         """
         signal_day = pd.Timestamp(signal_day)
         start = signal_day - pd.DateOffset(years=history_years)
@@ -72,7 +90,11 @@ class InsiderSignals(Signals):
 
     @classmethod
     def attach_purchase_classification(cls, frame: pd.DataFrame) -> pd.DataFrame:
-        """Attach routine/opportunistic labels to open-market purchase rows."""
+        """Attach a routine or opportunistic label to open-market purchases.
+
+        Only purchase rows are labelled; every other row keeps a null. Return a
+        copy of ``frame`` with a ``purchase_classification`` column added.
+        """
         frame = frame.copy()
         frame["purchase_classification"] = pd.Series(
             pd.NA,
@@ -96,7 +118,12 @@ class InsiderSignals(Signals):
         signal_day: pd.Timestamp,
         lookback_days: int = 90,
     ) -> pd.DataFrame:
-        """Aggregate raw transactions into objective recent-activity facts."""
+        """Aggregate raw transactions into objective recent-activity facts.
+
+        Two windows are counted, a 30-day one and the ``lookback_days`` one.
+        Return a ticker-indexed frame with one row per requested ticker; a
+        ticker with no transactions keeps its row with zero counts.
+        """
         signal_day = pd.Timestamp(signal_day)
         transactions = cls.attach_purchase_classification(frame)
         if transactions.empty:
@@ -135,7 +162,12 @@ class InsiderSignals(Signals):
         frame: pd.DataFrame,
         marketcaps: pd.Series,
     ) -> pd.DataFrame:
-        """Attach opportunistic purchase value as a fraction of market cap."""
+        """Attach opportunistic purchase value as a fraction of market cap.
+
+        Scales conviction against company size, so a $1m purchase reads
+        differently at a microcap than at a megacap. Null where the market cap
+        is missing or non-positive.
+        """
         frame = frame.copy()
         aligned_marketcaps = pd.to_numeric(
             marketcaps.reindex(frame.index),
@@ -149,6 +181,7 @@ class InsiderSignals(Signals):
 
     @staticmethod
     def _unique_owner_count(transactions: pd.DataFrame) -> int:
+        """Count distinct insiders, matching names case- and space-insensitively."""
         owners = (
             transactions["ownername"]
             .fillna("")
@@ -160,6 +193,16 @@ class InsiderSignals(Signals):
 
     @staticmethod
     def _classify_purchases(purchases: pd.DataFrame) -> pd.Series:
+        """Label each purchase routine, opportunistic, or unclassified.
+
+        A purchase is routine when the same insider also bought in that same
+        calendar month in each of the previous ``ROUTINE_PATTERN_YEARS`` years,
+        which marks a recurring plan rather than a decision. Prior purchases
+        count only if they were both disclosed and executed earlier, so the
+        label is decidable from what was knowable at the time. A row with no
+        identifiable owner or transaction date is unclassified rather than
+        guessed at.
+        """
         if purchases.empty:
             return pd.Series(dtype="object", index=purchases.index)
 
@@ -205,6 +248,11 @@ class InsiderSignals(Signals):
         signal_day: pd.Timestamp,
         lookback_days: int,
     ) -> dict:
+        """Reduce one ticker's transactions to a fact dict.
+
+        Buys and sells are counted separately over both windows, with the
+        opportunistic subset broken out by insider role.
+        """
         empty = {
             "buy_count_30d": 0,
             "buy_count_90d": 0,
@@ -303,6 +351,7 @@ class InsiderSignals(Signals):
 
     @staticmethod
     def _absolute_value_sum(frame: pd.DataFrame) -> float:
+        """Sum transaction values as magnitudes, treating unparsable ones as zero."""
         values = pd.to_numeric(frame["transactionvalue"], errors="coerce")
         return float(values.abs().fillna(0).sum())
 
@@ -311,6 +360,7 @@ class InsiderSignals(Signals):
         frame: pd.DataFrame,
         signal_day: pd.Timestamp,
     ) -> int | None:
+        """Return days since the most recent disclosure, or None if there is none."""
         if frame.empty:
             return None
         return int((signal_day - frame["filingdate"].max()).days)

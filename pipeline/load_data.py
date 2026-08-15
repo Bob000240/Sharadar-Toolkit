@@ -1,15 +1,17 @@
-"""
-Full data load. Run once after setup_db.py.
+"""Full initial data load. Run once after the tables exist.
 
-    uv run python -m pipeline.load_data        # NDL_APIKEY from .env
+::
 
-Two stages:
-  1. Raw Sharadar tables  -> bulk-exported as zipped CSV (Nasdaq datatables export,
-     which runs on the table-API entitlement) and COPY'd into Postgres
-     (fast + reproducible; includes delisted tickers).
-  2. `technical_features` -> computed locally from equity_prices.
+    uv run python -m pipeline.load_data
 
-The incremental delta (API-based) lives in pipeline/daily_update.py.
+Two stages. Raw Sharadar tables are bulk-exported as zipped CSV through the
+datatables export endpoint and COPY'd into Postgres, which is both faster than
+row-by-row inserts and reproducible, and which includes delisted tickers so the
+history carries no survivorship bias. Technical features are then computed
+locally from the loaded equity prices.
+
+The incremental delta that keeps this current lives in ``pipeline.daily_update``.
+Requires NDL_APIKEY in the environment.
 """
 
 import glob
@@ -61,6 +63,11 @@ _CHUNK = 200_000
 def _export(
     code: str, dest: str, date_field: str | None, tickers: list | None
 ) -> list[str]:
+    """Export one Sharadar table to zipped CSV and unpack it.
+
+    Return the paths of the extracted CSV parts. Raise RuntimeError when the export
+    produced nothing, which otherwise surfaces much later as an empty table.
+    """
     filters: dict = {}
     if date_field:
         filters[date_field] = {"gte": START_DATE}
@@ -78,6 +85,11 @@ def _export(
 
 
 def load_sharadar_table(code: str) -> None:
+    """Bulk-load one Sharadar table into its Postgres table.
+
+    Streamed in chunks so a multi-gigabyte export never has to fit in memory. Rows
+    with no ticker are dropped, since they cannot be joined to anything.
+    """
     repo, table, date_field, tickers = SHARADAR_TABLES[code]
     rename = _RENAMES.get(code)
     row_filter = _ROW_FILTERS.get(code)
@@ -97,11 +109,19 @@ def load_sharadar_table(code: str) -> None:
 
 
 def load_sharadar_bulk() -> None:
+    """Load every configured Sharadar table in order."""
     for code in SHARADAR_TABLES:
         load_sharadar_table(code)
 
 
 def load_technical_features() -> None:
+    """Compute technical features for every ticker and store them.
+
+    Batched by ticker, and each ticker's full price history is passed in one piece
+    because every rolling window depends on the whole series. Infinities become
+    NULL, since a ratio against a zero denominator is not a number the database
+    should carry.
+    """
     print("Computing technical features from equity prices (all tickers)...")
     symbols = equity_repo.get_latest_dates()["ticker"].tolist()
     total = 0
@@ -131,6 +151,7 @@ def load_technical_features() -> None:
 
 
 def main() -> None:
+    """Run the full load: raw tables first, then derived features."""
     print("=== Sharadar Toolkit full load ===")
     print(f"Date range: {START_DATE} → {END_DATE}\n")
     load_sharadar_bulk()

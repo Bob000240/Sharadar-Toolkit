@@ -1,3 +1,16 @@
+"""The structural universe: which securities exist and are tradable at all.
+
+These are the non-negotiable listing rules — security type, exchange, and
+recency of trading — as distinct from the elective filters a strategy chooses.
+A screen composes both, but only this half decides whether a security is a
+candidate in principle.
+
+Recency is enforced against the last date the security actually produced a
+price, read per ticker by a lateral join, so a name that quietly stopped
+trading drops out before any strategy sees it. ``_STALE_TRADE_DAYS`` is the
+threshold past which that guarantee weakens enough to warrant a warning.
+"""
+
 from __future__ import annotations
 
 import warnings
@@ -67,6 +80,17 @@ _QUERY = text("""
 
 
 class Universe:
+    """A point-in-time list of securities eligible on structural grounds.
+
+    The only public method is ``run``, which issues the query for one signal
+    day. Instance variables mirror the constructor arguments: ``security_types``,
+    ``exchanges``, ``include_tickers``, ``exclude_tickers``, and
+    ``recent_trade_days``.
+
+    Stateless with respect to the signal day, so one instance is built once and
+    reused across every date of a sweep.
+    """
+
     def __init__(
         self,
         security_types: tuple[str, ...] = ("common_stock",),
@@ -75,6 +99,15 @@ class Universe:
         exclude_tickers: tuple[str, ...] = (),
         recent_trade_days: int = 10,
     ) -> None:
+        """Resolve the requested security types to categories and validate.
+
+        ``include_tickers`` are admitted regardless of category and exchange;
+        ``exclude_tickers`` are removed regardless of everything else.
+        ``recent_trade_days`` is the tolerated gap since the security last
+        traded. Validation runs here rather than at query time, so a malformed
+        universe cannot reach the database. Raise ValueError for an empty or
+        unregistered security type or exchange, or an out-of-range recency.
+        """
         self.security_types = tuple(security_types)
         self.exchanges = tuple(exchanges)
         self.include_tickers = tuple(include_tickers)
@@ -86,6 +119,7 @@ class Universe:
         self._validate_recency()
 
     def __repr__(self) -> str:
+        """Return every setting that affects membership."""
         return (
             f"Universe(security_types={self.security_types}, "
             f"exchanges={self.exchanges}, "
@@ -95,6 +129,11 @@ class Universe:
         )
 
     def _resolve_categories(self) -> list[str]:
+        """Expand the requested security types into Sharadar category names.
+
+        Return the sorted union of their categories. Raise ValueError when no
+        type is given or a type is not registered.
+        """
         if not self.security_types:
             raise ValueError("security_types must not be empty")
         unknown = tuple(
@@ -110,6 +149,7 @@ class Universe:
         )
 
     def _validate_exchanges(self) -> None:
+        """Raise ValueError when no exchange is given or a code is unknown."""
         if not self.exchanges:
             raise ValueError("exchanges must not be empty")
         unknown = tuple(e for e in self.exchanges if e not in _EXCHANGES)
@@ -119,6 +159,13 @@ class Universe:
             )
 
     def _validate_recency(self) -> None:
+        """Bound the tolerated trading gap and warn when it grows stale.
+
+        Raise ValueError outside [1, ``_MAX_RECENT_TRADE_DAYS``]. Beyond
+        ``_STALE_TRADE_DAYS`` the population starts admitting securities that
+        have stopped trading but are not yet delisted, which is a warning rather
+        than an error because a wider window is sometimes wanted deliberately.
+        """
         if not 1 <= self.recent_trade_days <= _MAX_RECENT_TRADE_DAYS:
             raise ValueError(
                 f"recent_trade_days must be between 1 and {_MAX_RECENT_TRADE_DAYS}; "
@@ -133,6 +180,15 @@ class Universe:
             )
 
     def run(self, signal_day) -> pd.DataFrame:
+        """Return the securities eligible as of ``signal_day``.
+
+        ``signal_day`` is treated as an as-of date, so it need not be a trading
+        session, though callers that align it first get an honest one.
+
+        Return one row per security with its ticker, permaticker, name,
+        exchange, category, currency, Fama industry, and the date it last
+        traded.
+        """
         return pd.read_sql_query(
             _QUERY,
             get_connection(),
@@ -149,6 +205,11 @@ class Universe:
 
 
 def unmapped_categories() -> list[str]:
+    """Return the ticker categories no registered security type claims.
+
+    A maintenance aid: Sharadar adds categories over time, and one that nothing
+    maps to is silently absent from every universe.
+    """
     known = pd.read_sql_query(
         text("SELECT DISTINCT category FROM tickers WHERE category IS NOT NULL"),
         get_connection(),

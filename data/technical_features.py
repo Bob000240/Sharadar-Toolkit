@@ -6,11 +6,16 @@ from numpy.lib.stride_tricks import sliding_window_view
 
 
 def _rolling_trend(close: pd.Series, window: int = 60) -> tuple[pd.Series, pd.Series]:
-    """Vectorized 60-day trend quality: R^2 and annualized slope of a linear fit of
-    close vs time. Closed-form rolling regression — replaces per-window
-    rolling.apply(corrcoef/polyfit), which ran a Python callable on every window of
-    every ticker and dominated feature-generation runtime. Same values (leading window-1 rows
-    and any NaN-containing window are NaN, matching rolling(window).apply)."""
+    """Return the R-squared and annualised slope of a rolling linear fit.
+
+    A closed-form rolling regression of close against time. It replaces a
+    per-window ``rolling.apply`` of corrcoef and polyfit, which ran a Python
+    callable on every window of every ticker and dominated feature-generation
+    runtime.
+
+    Values are identical to the version it replaced: the leading ``window - 1``
+    rows and any window containing a NaN are NaN.
+    """
     y = close.to_numpy(dtype=float)
     n = y.size
     r2 = np.full(n, np.nan)
@@ -33,14 +38,17 @@ def _rolling_trend(close: pd.Series, window: int = 60) -> tuple[pd.Series, pd.Se
 
 
 def _sma(series: pd.Series, length: int) -> pd.Series:
+    """Return the simple moving average over ``length`` bars."""
     return series.rolling(length).mean()
 
 
 def _ema(series: pd.Series, length: int) -> pd.Series:
+    """Return the exponential moving average over ``length`` bars."""
     return series.ewm(span=length, adjust=False).mean()
 
 
 def _rsi(series: pd.Series, length: int) -> pd.Series:
+    """Return the Relative Strength Index over ``length`` bars."""
     delta = series.diff()
     gain = delta.clip(lower=0)
     loss = -delta.clip(upper=0)
@@ -51,6 +59,7 @@ def _rsi(series: pd.Series, length: int) -> pd.Series:
 
 
 def _macd(series: pd.Series, fast: int, slow: int, signal: int) -> pd.DataFrame:
+    """Return the MACD line, its signal line, and their histogram."""
     ema_fast = _ema(series, fast)
     ema_slow = _ema(series, slow)
     macd_line = ema_fast - ema_slow
@@ -66,6 +75,7 @@ def _macd(series: pd.Series, fast: int, slow: int, signal: int) -> pd.DataFrame:
 
 
 def _atr(high: pd.Series, low: pd.Series, close: pd.Series, length: int) -> pd.Series:
+    """Return the Average True Range over ``length`` bars."""
     tr = pd.concat(
         [
             high - low,
@@ -78,11 +88,20 @@ def _atr(high: pd.Series, low: pd.Series, close: pd.Series, length: int) -> pd.S
 
 
 def _obv(close: pd.Series, volume: pd.Series) -> pd.Series:
+    """Return On-Balance Volume, the signed cumulative volume."""
     direction = np.sign(close.diff()).fillna(0)
     return (direction * volume).cumsum()
 
 
 def compute_technical_features(df: pd.DataFrame) -> pd.DataFrame:
+    """Compute every technical feature for one ticker's price history.
+
+    Expects a single ticker's bars sorted by date, because every rolling window
+    depends on the full contiguous series. Leading rows are NaN until each window
+    fills, which is the honest answer for a security without the history yet.
+
+    Return a copy of ``df`` with the feature columns added and the index reset.
+    """
     df = df.copy()
 
     df["return_1d"] = df["close"].pct_change()

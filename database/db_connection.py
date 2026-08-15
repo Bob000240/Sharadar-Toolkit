@@ -1,3 +1,10 @@
+"""A single lazily-built SQLAlchemy engine shared by every repository.
+
+The engine is created on first use and reused for the life of the process, so
+connection settings live in one place and the pool is not rebuilt per query.
+Credentials come from the environment via a .env file.
+"""
+
 import os
 from dotenv import load_dotenv
 from sqlalchemy import create_engine
@@ -8,6 +15,11 @@ _engine = None
 
 
 def get_connection():
+    """Return the shared engine, building it on first call.
+
+    Reads DB_USER, DB_PASSWORD, DB_HOST, DB_PORT, and DB_NAME from the environment,
+    falling back to local defaults for everything but the password.
+    """
     global _engine
     if _engine is None:
         user = os.getenv("DB_USER", "postgres")

@@ -1,9 +1,18 @@
-"""The unfiltered baseline: how does the whole structural universe do?
+"""Measure the unfiltered structural universe against SPY.
 
-Every variant in the other experiments is measured against this. Lifted out of
-research/evaluate/walk_forward.py, where it lived as a __main__ block.
+::
 
-Run: uv run python -m experiments.walk_forward_baseline
+    uv run python -m experiments.walk_forward_baseline
+
+Every variant in the other experiments is measured against this number, so it
+is the first thing to re-run when a result looks surprising.
+
+Quarter starts are mostly holidays or weekends, so ``calendar.schedule`` snaps
+each onto the quarter's opening session and every signal day is one the market
+actually held.
+
+Lifted out of ``research/evaluate/walk_forward.py``, where it was a __main__
+block.
 """
 
 import pandas as pd
@@ -13,8 +22,6 @@ from research.evaluate.forward import ForwardReturns
 from research.evaluate.walk_forward import WalkForward
 from research.universe import Universe
 
-# Quarter starts are mostly holidays or weekends; schedule() snaps each onto
-# the quarter's opening session so every signal day is one the market held.
 SIGNAL_DAYS = calendar.schedule("2016-01-01", "2025-01-01", freq="QS")
 
 walk = WalkForward(Universe(), ForwardReturns(horizon_sessions=252), benchmark="SPY")

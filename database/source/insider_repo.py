@@ -1,3 +1,9 @@
+"""Persistence for insider transaction filings, one row per disclosed trade.
+
+Filters run on ``filingdate`` rather than ``transactiondate``: a trade is not
+knowable until it is disclosed, whatever day it was executed.
+"""
+
 from database.db_connection import get_connection
 import pandas as pd
 from sqlalchemy import text
@@ -37,6 +43,10 @@ CONFLICT = (
 
 
 def create_table():
+    """Create the ``insider_transactions`` table and its indexes if absent.
+
+    Idempotent, so setup can be re-run safely.
+    """
     with get_connection().begin() as conn:
         conn.execute(
             text("""
@@ -72,11 +82,16 @@ def create_table():
 
 
 def drop_table():
+    """Drop ``insider_transactions`` and everything depending on it."""
     with get_connection().begin() as conn:
         conn.execute(text("DROP TABLE IF EXISTS insider_transactions CASCADE"))
 
 
 def insert(df: pd.DataFrame):
+    """Upsert rows into ``insider_transactions``, keyed on ``(ticker, filingdate, ownername, transactiondate, transactioncode)``.
+
+    Columns outside ``_COLUMNS`` are ignored and NaN/NaT become SQL NULL. A duplicate filing is discarded rather than overwritten. No-op on an empty frame.
+    """
     if df.empty:
         return
     frame = df[_COLUMNS].astype(object)
@@ -96,6 +111,11 @@ def get(
     start_date: str | None = None,
     end_date: str | None = None,
 ) -> pd.DataFrame:
+    """Return ``insider_transactions`` rows matching the supplied filters.
+
+    Every argument is optional and omitting all of them returns the whole table. Dates bound ``filingdate`` inclusively, which is the point-in-time
+    bound: a filing is invisible before the day it appeared. Ordered by ticker then filing date.
+    """
     q = "SELECT * FROM insider_transactions WHERE TRUE"
     params = {}
     if tickers is not None:

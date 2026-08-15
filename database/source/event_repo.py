@@ -1,3 +1,9 @@
+"""Persistence for corporate event codes, one row per ticker per date.
+
+``eventcodes`` is a pipe-delimited string of Sharadar 8-K codes rather than one
+row per code, so membership tests split it on read.
+"""
+
 from database.db_connection import get_connection
 import pandas as pd
 from sqlalchemy import text
@@ -10,6 +16,10 @@ _BIND_LIST = ", ".join(f":{c}" for c in _COLUMNS)
 
 
 def create_table():
+    """Create the ``events`` table and its indexes if absent.
+
+    Idempotent, so setup can be re-run safely.
+    """
     with get_connection().begin() as conn:
         conn.execute(
             text("""
@@ -25,11 +35,16 @@ def create_table():
 
 
 def drop_table():
+    """Drop ``events`` and everything depending on it."""
     with get_connection().begin() as conn:
         conn.execute(text("DROP TABLE IF EXISTS events CASCADE"))
 
 
 def insert(df: pd.DataFrame):
+    """Upsert rows into ``events``, keyed on ``(ticker, date)``.
+
+    Columns outside ``_COLUMNS`` are ignored and NaN/NaT become SQL NULL. A duplicate is discarded rather than overwritten, since an event that already landed does not change. No-op on an empty frame.
+    """
     if df.empty:
         return
     frame = df[_COLUMNS].astype(object)
@@ -46,6 +61,10 @@ def get(
     start_date: str | None = None,
     end_date: str | None = None,
 ) -> pd.DataFrame:
+    """Return ``events`` rows matching the supplied filters.
+
+    Every argument is optional and omitting all of them returns the whole table. Dates bound the ``date`` column inclusively. Ordered by ticker then date.
+    """
     q = "SELECT * FROM events WHERE TRUE"
     params = {}
     if tickers is not None:
