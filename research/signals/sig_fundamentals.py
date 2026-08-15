@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 
 import database.source.fundamentals_repo as fundamentals_repo
-from data.signals.sig import Signals
+from research.signals.sig import Signals
 
 
 GROWTH_COLUMNS = (

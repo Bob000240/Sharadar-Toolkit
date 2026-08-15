@@ -4,7 +4,7 @@ import pandas as pd
 
 import database.source.fund_repo as fund_repo
 import database.source.technical_features_repo as technical_features_repo
-from data.signals.sig import Signals
+from research.signals.sig import Signals
 
 
 _RETURN_COLS = ["return_5d", "return_20d", "return_60d", "return_252d"]

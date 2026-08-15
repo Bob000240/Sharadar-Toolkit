@@ -2,8 +2,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from data.signals.sig import Signals
-from data.signals.sig_fundamentals import FundamentalSignals
+from research.signals.sig import Signals
+from research.signals.sig_fundamentals import FundamentalSignals
 
 
 def test_fundamental_signals_inherits_common_helpers():
@@ -28,7 +28,7 @@ def test_sector_rank_stays_sector_relative_for_small_peer_groups():
 
 def test_get_signals_returns_only_requested_art_rows(monkeypatch):
     monkeypatch.setattr(
-        "data.signals.sig_fundamentals.fundamentals_repo.get_latest_rows",
+        "research.signals.sig_fundamentals.fundamentals_repo.get_latest_rows",
         lambda tickers, dimension, signal_day: pd.DataFrame(
             {
                 "ticker": ["BBB", "AAA"],
@@ -70,7 +70,7 @@ def test_attach_history_features_uses_five_year_annual_history(monkeypatch):
             }
         )
     monkeypatch.setattr(
-        "data.signals.sig_fundamentals.fundamentals_repo.get",
+        "research.signals.sig_fundamentals.fundamentals_repo.get",
         lambda **kwargs: pd.DataFrame(rows),
     )
 

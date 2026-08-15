@@ -1,26 +1,26 @@
 """
-QuorumNexus pipeline entrypoint.
+Sharadar Toolkit pipeline entrypoint.
 
 Usage:
     uv run python -m pipeline.main <command>
 
 Commands:
-    setup                Enable pgvector and create all tables
+    setup                Create all tables
     load                 Run the initial full data load
     update               Run the daily incremental update
     register <name>      Register/update a strategy from its NAME/DESCRIPTION.
     retire <name>        Soft-retire a strategy (no new entries; row kept for history).
 
-<name> is the strategy name, e.g. sector_leaders (-> decision.strategies.strat_sector_leaders).
+<name> is the strategy name, e.g. sector_leaders (-> research.presets.strat_sector_leaders).
 """
 
 import sys
 
-_STRATEGY_PKG = "decision.strategies"
+_STRATEGY_PKG = "research.presets"
 
 
 def _load_strategy(name: str):
-    """Import strategy `name` (decision.strategies.strat_<name>) and return its
+    """Import strategy `name` (research.presets.strat_<name>) and return its
     module. Exits if it lacks NAME/DESCRIPTION."""
     import importlib
 
@@ -38,9 +38,8 @@ def main():
     cmd = sys.argv[1].lower()
 
     if cmd == "setup":
-        from pipeline.setup_db import enable_pgvector, drop_all, create_all
+        from pipeline.setup_db import drop_all, create_all
 
-        enable_pgvector()
         drop_all()
         create_all()
 

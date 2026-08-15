@@ -5,7 +5,7 @@ from __future__ import annotations
 import pandas as pd
 
 import database.source.event_repo as event_repo
-from data.signals.sig import Signals
+from research.signals.sig import Signals
 
 
 EARNINGS_CODE = "22"

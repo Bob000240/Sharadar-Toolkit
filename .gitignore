@@ -1,12 +1,17 @@
-# Hidden files
-.*
+# Secrets / local environment
+.env
+.env.*
+SHARADAR_KEYS.csv
+
 # Python
 __pycache__/
+.venv/
+.pytest_cache/
+.ruff_cache/
 
-SHARADAR_KEYS.csv
-PROJECT_CONCEPTS.md
-PROJECT_IMPLEMENTATION.md
+# Editors
+.vscode/
+.claude/
 
-QN/
-
-tests/
+# Local scratch
+.sweep_cache.parquet

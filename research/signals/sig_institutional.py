@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 
 import database.source.institutional_repo as institutional_repo
-from data.signals.sig import Signals
+from research.signals.sig import Signals
 
 
 FILING_DELAY_DAYS = 45

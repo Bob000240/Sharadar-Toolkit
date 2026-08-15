@@ -1,7 +1,6 @@
 import pandas as pd
-import pytest
 
-from data.signals.sig_technical import TechnicalSignals
+from research.signals.sig_technical import TechnicalSignals
 
 
 def _technical_feature_rows() -> pd.DataFrame:
@@ -50,7 +49,7 @@ def test_get_signals_returns_only_requested_sql_rows(monkeypatch):
         staticmethod(_attach_test_sectors),
     )
     monkeypatch.setattr(
-        "data.signals.sig_technical.technical_features_repo.get_latest_rows",
+        "research.signals.sig_technical.technical_features_repo.get_latest_rows",
         lambda tickers, signal_day: _technical_feature_rows(),
     )
 
@@ -73,11 +72,11 @@ def test_strategy_can_opt_into_technical_attachments(monkeypatch):
         staticmethod(_attach_test_sectors),
     )
     monkeypatch.setattr(
-        "data.signals.sig_technical.technical_features_repo.get_latest_rows",
+        "research.signals.sig_technical.technical_features_repo.get_latest_rows",
         lambda tickers, signal_day: _technical_feature_rows(),
     )
     monkeypatch.setattr(
-        "data.signals.sig_technical.fund_repo.get",
+        "research.signals.sig_technical.fund_repo.get",
         lambda **kwargs: _benchmark_prices(),
     )
 
@@ -100,7 +99,7 @@ def test_strategy_can_opt_into_technical_attachments(monkeypatch):
 
 def test_get_signals_omits_unavailable_requested_ticker(monkeypatch):
     monkeypatch.setattr(
-        "data.signals.sig_technical.technical_features_repo.get_latest_rows",
+        "research.signals.sig_technical.technical_features_repo.get_latest_rows",
         lambda tickers, signal_day: _technical_feature_rows(),
     )
 
