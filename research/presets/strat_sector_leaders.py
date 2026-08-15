@@ -299,7 +299,12 @@ class SLEntryScreener:
 
 
 if __name__ == "__main__":
-    as_of = date.today()
+    import research.calendar as calendar
+
+    # Not date.today(): on a weekend or holiday the universe's recency window
+    # still returns rows, so the screen would run on stale prices without saying
+    # so. latest_session() names the session the data actually supports.
+    as_of = calendar.latest_session()
 
     screener = SLEntryScreener()
     candidates = screener.run(as_of)

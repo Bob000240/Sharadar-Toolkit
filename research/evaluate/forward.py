@@ -3,6 +3,7 @@ from __future__ import annotations
 import pandas as pd
 from sqlalchemy import text
 
+import research.calendar as calendar
 from database.db_connection import get_connection
 
 _PRICE_COLUMN = "closeadj"
@@ -11,9 +12,6 @@ _EQUITY_TABLE = "equity_prices"
 _FUND_TABLE = "fund_prices"
 
 _MIN_HORIZON_SESSIONS = 2
-
-_CALENDAR_SLACK = 1.7  # weeked, holidays, and other non-trading days
-_CALENDAR_PAD = 15
 
 _QUERY_TEMPLATE = """
     WITH ranked AS (
@@ -26,7 +24,7 @@ _QUERY_TEMPLATE = """
         FROM {table}
         WHERE ticker = ANY(:tickers)
           AND date >  CAST(:as_of AS date)
-          AND date <= CAST(:as_of AS date) + CAST(:calendar_window AS integer)
+          AND date <= CAST(:window_end AS date)
           AND {price} > 0
     )
     SELECT
@@ -45,13 +43,24 @@ _QUERY_TEMPLATE = """
 
 
 class ForwardReturns:
+    """Return from the first session after the signal day to the end of a fixed
+    horizon.
+
+    The horizon is counted in *market* sessions, not in the security's own bars:
+    every name is measured over the identical wall-clock window, closing at
+    `calendar.horizon_end(signal_day, horizon_sessions)`. A name that halts,
+    delists, or trades thinly reaches the window's end with fewer bars, exits on
+    its last one, and reports `complete=False`. Counting each name's own bars
+    instead would let a sparse security's "252 sessions" span fourteen months
+    and be compared against a liquid one's twelve.
+    """
+
     def __init__(self, horizon_sessions: int = 252) -> None:
         if horizon_sessions < _MIN_HORIZON_SESSIONS:
             raise ValueError(
                 f"horizon_sessions must be at least {_MIN_HORIZON_SESSIONS} "
             )
         self.horizon_sessions = horizon_sessions
-        self._calendar_window = int(horizon_sessions * _CALENDAR_SLACK) + _CALENDAR_PAD
 
     def __repr__(self) -> str:
         return f"ForwardReturns(horizon_sessions={self.horizon_sessions})"
@@ -64,6 +73,10 @@ class ForwardReturns:
 
     def _returns(self, table: str, tickers, signal_day) -> pd.DataFrame:
         query = text(_QUERY_TEMPLATE.format(table=table, price=_PRICE_COLUMN))
+        # The exact session the horizon lands on, clamped to the end of the data.
+        # Clamping is what makes an unfinished horizon report complete=False
+        # rather than raise: near the present, there is simply no exit yet.
+        window_end = calendar.horizon_end(signal_day, self.horizon_sessions)
         frame = pd.read_sql_query(
             query,
             get_connection(),
@@ -71,7 +84,7 @@ class ForwardReturns:
                 "tickers": list(tickers),
                 "as_of": pd.Timestamp(signal_day).date().isoformat(),
                 "horizon": self.horizon_sessions,
-                "calendar_window": self._calendar_window,
+                "window_end": window_end.isoformat(),
             },
         )
         frame["forward_return"] = frame["exit_price"] / frame["entry_price"] - 1
