@@ -249,21 +249,3 @@ class FundamentalSignals(Signals):
         if len(values) < 3:
             return np.nan
         return values.std(ddof=0)
-
-
-if __name__ == "__main__":
-    as_of = pd.Timestamp("2024-06-30")
-    signals = FundamentalSignals.get_signals(
-        ["AAPL", "MSFT", "GOOG", "AMZN", "TSLA"],
-        as_of,
-    )
-    signals = FundamentalSignals.attach_sectors(signals)
-    signals = FundamentalSignals.attach_history_features(signals, as_of)
-    signals = FundamentalSignals.attach_ratios(signals)
-    signals = FundamentalSignals.attach_growth(signals, as_of)
-    signals = FundamentalSignals.attach_sector_ranks(
-        signals,
-        {"pe": -1, "roic": 1, "fcf_yield": 1},
-        positive_only=("pe",),
-    )
-    print(signals)

@@ -1,15 +1,18 @@
 import pandas as pd
 import pytest
 
-from research.filters import FilterCondition, Filters, apply_filter
+from research.filters import FilterCondition, Filters
 
 
-def test_apply_filter_accepts_a_generic_field_operator_and_value():
+def test_a_single_condition_accepts_a_generic_field_operator_and_value():
+    """Was written against a standalone `apply_filter(frame, field, op, value)`,
+    which 9c8e255 removed in favour of the one-condition Filters form. Null is
+    not a pass: CCC has no value, so it cannot satisfy the threshold."""
     frame = pd.DataFrame(
         {"ticker": ["AAA", "BBB", "CCC"], "r_squared_60d": [0.8, 0.6, None]}
     )
 
-    result = apply_filter(frame, "r_squared_60d", ">=", 0.7)
+    result = Filters(("r_squared_60d", ">=", 0.7)).apply(frame)
 
     assert result["ticker"].tolist() == ["AAA"]
 
