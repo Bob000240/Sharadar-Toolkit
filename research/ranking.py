@@ -4,12 +4,8 @@ from dataclasses import dataclass
 
 import pandas as pd
 
-from data.signals.sig import Signals
+from research.signals.sig import Signals
 
-# Higher-is-better or lower-is-better. Direction is a judgment about what a
-# field means, which is why it lives here rather than in the signal layer:
-# `rank_pct` emits a direction-free percentile, and this module decides whether
-# the top or the bottom of that range is the good end.
 _DIRECTIONS = {"high", "low"}
 
 _DEFAULT_MIN_COVERAGE = 0.5
@@ -17,8 +13,6 @@ _DEFAULT_MIN_COVERAGE = 0.5
 
 @dataclass(frozen=True)
 class RankMetric:
-    """One field, which end of it is good, and how much it counts."""
-
     field: str
     direction: str
     weight: float = 1.0
@@ -52,22 +46,6 @@ def _coerce_metric(metric: object) -> RankMetric:
 
 
 class Ranking:
-    """Score and order a population by a weighted blend of percentile ranks.
-
-        Ranking(("roic", "high", 0.6), ("pe", "low", 0.4), group_by="famaindustry")
-
-    Percentiles rather than raw values, because the fields being blended have
-    incommensurable units — a ROIC of 0.15 and a P/E of 12 cannot be averaged,
-    but their cross-sectional ranks can.
-
-    Ranks are computed over the population handed to `apply`, before any `top_n`
-    cut. That means the caller decides the comparison set by choosing what to
-    pass in: rank the filtered survivors and a score means "best of those that
-    qualified"; rank the whole universe and it means "best overall". Neither is
-    wrong, but they are different questions, and the score silently changes
-    meaning between them.
-    """
-
     def __init__(
         self,
         *metrics: RankMetric | tuple,
@@ -122,12 +100,6 @@ class Ranking:
         return Signals.rank_within_sector(values, frame[self.group_by])
 
     def apply(self, frame: pd.DataFrame) -> pd.DataFrame:
-        """Return `frame` with per-metric percentiles, a score, and a rank.
-
-        Adds `{field}_pct` for every metric (already direction-adjusted, so 100
-        is always the good end), plus `score`, `coverage`, and `rank`. Rows are
-        ordered best-first; `top_n` cuts per group when grouping.
-        """
         self._validate_fields(frame)
         if frame.empty:
             return frame.assign(score=[], coverage=[], rank=[])
@@ -139,8 +111,6 @@ class Ranking:
         for metric in self.metrics:
             percentile = self._percentile(ranked, metric.field)
             if metric.direction == "low":
-                # rank_pct is direction-free, so invert rather than negate the
-                # weight — 100 must always mean "good" for the blend to add up.
                 percentile = 100.0 - percentile
             ranked[f"{metric.field}_pct"] = percentile
 
@@ -155,10 +125,6 @@ class Ranking:
         total_weight = sum(metric.weight for metric in self.metrics)
         ranked["coverage"] = available_weight / total_weight
 
-        # Renormalise by the weight actually present, so a security missing one
-        # metric is scored on the others rather than being handed a zero for it.
-        # Below `min_coverage` the blend is too thin to mean anything and the
-        # score is null — which drops the row rather than ranking it as worst.
         score = weighted_total / available_weight.where(available_weight > 0)
         ranked["score"] = score.where(ranked["coverage"] >= self.min_coverage)
 
@@ -168,8 +134,6 @@ class Ranking:
 
         if self.group_by is None:
             ranked = ranked.sort_values("score", ascending=False)
-            # method="min" so tied scores share the better rank rather than
-            # being ordered arbitrarily by row position.
             ranked["rank"] = ranked["score"].rank(ascending=False, method="min")
         else:
             ranked = ranked.sort_values(
@@ -185,7 +149,6 @@ class Ranking:
         return ranked
 
     def select(self, frame: pd.DataFrame) -> pd.Series:
-        """Just the surviving tickers, for `WalkForward`'s population hook."""
         return self.apply(frame)["ticker"]
 
 

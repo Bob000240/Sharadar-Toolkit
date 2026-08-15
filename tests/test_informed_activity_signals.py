@@ -2,10 +2,10 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from data.signals.sig import Signals
-from data.signals.sig_events import EventSignals
-from data.signals.sig_insider import InsiderSignals
-from data.signals.sig_institutional import InstitutionalSignals
+from research.signals.sig import Signals
+from research.signals.sig_events import EventSignals
+from research.signals.sig_insider import InsiderSignals
+from research.signals.sig_institutional import InstitutionalSignals
 
 
 def _purchase(
@@ -54,7 +54,7 @@ def test_event_facts_fetch_window_and_aggregation(monkeypatch):
             }
         )
 
-    monkeypatch.setattr("data.signals.sig_events.event_repo.get", fake_get)
+    monkeypatch.setattr("research.signals.sig_events.event_repo.get", fake_get)
     facts = EventSignals.attach_event_facts(
         ["AAA", "NO_EVENTS"],
         pd.Timestamp("2026-07-20"),
@@ -173,7 +173,7 @@ def test_institutional_get_enforces_availability_and_attachment_computes_qoq(
         return holdings
 
     monkeypatch.setattr(
-        "data.signals.sig_institutional.institutional_repo.get",
+        "research.signals.sig_institutional.institutional_repo.get",
         fake_get,
     )
     raw = InstitutionalSignals.get_signals(

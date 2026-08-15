@@ -4,7 +4,7 @@ from datetime import date
 import pandas as pd
 
 import database.state.strategy_profiles_repository as profiles_repo
-from data.signals.sig_events import (
+from research.signals.sig_events import (
     EventSignals,
     BANKRUPTCY_CODE,
     DELISTING_CODE,
@@ -12,8 +12,8 @@ from data.signals.sig_events import (
     MATERIAL_IMPAIRMENT_CODE,
     RESTATEMENT_CODE,
 )
-from data.signals.sig_fundamentals import FundamentalSignals
-from data.signals.sig_technical import TechnicalSignals
+from research.signals.sig_fundamentals import FundamentalSignals
+from research.signals.sig_technical import TechnicalSignals
 from research.filters import Filters, attach_signals
 from research.universe import Universe
 
@@ -33,14 +33,6 @@ class CandidateSnapshot:
     passed_gates: list[str]
     risk_flags: list[str]
     signal_context: dict
-
-
-@dataclass
-class ExitSnapshot:
-    symbol: str
-    exit_date: date
-    exit_reason: str
-    exit_context: dict
 
 
 _GATES = [
@@ -304,26 +296,6 @@ class SLEntryScreener:
 
         menu = self.rank(eligible)
         return [self.to_snapshot(row, signal_day) for _, row in menu.iterrows()]
-
-
-class SLExitMonitor:
-    def __init__(self):
-        self.strategy_name = NAME
-        self.profile = profiles_repo.get_profile_by_name(NAME)
-        if self.profile is None:
-            raise RuntimeError(
-                f"Strategy {NAME!r} is not registered; run: "
-                f"python -m pipeline.main register sector_leaders"
-            )
-
-    def run(self, positions: list[dict], signal_day: date) -> list[ExitSnapshot]:
-        if not positions:
-            return []
-        raise NotImplementedError(
-            "Exit rules are not implemented: the universal max-loss floor, the "
-            "trailing stop from the high-water mark, and the primary-uptrend break. "
-            "See PROJECT_IMPLEMENTATION.md § Exit pipeline."
-        )
 
 
 if __name__ == "__main__":

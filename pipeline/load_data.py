@@ -131,7 +131,7 @@ def load_technical_features() -> None:
 
 
 def main() -> None:
-    print("=== QuorumNexus full load ===")
+    print("=== Sharadar Toolkit full load ===")
     print(f"Date range: {START_DATE} → {END_DATE}\n")
     load_sharadar_bulk()
     load_technical_features()

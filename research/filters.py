@@ -7,9 +7,9 @@ import pandas as pd
 
 import database.source.fundamentals_repo as fundamentals_repo
 import database.source.technical_features_repo as technical_features_repo
-from data.signals.sig_events import EventSignals
-from data.signals.sig_fundamentals import FundamentalSignals
-from data.signals.sig_technical import TechnicalSignals
+from research.signals.sig_events import EventSignals
+from research.signals.sig_fundamentals import FundamentalSignals
+from research.signals.sig_technical import TechnicalSignals
 
 
 def _between(series: pd.Series, value: object) -> pd.Series:
@@ -283,7 +283,7 @@ def population(
 
 
 if __name__ == "__main__":
-    import data.signals.sig_events as sig_events
+    import research.signals.sig_events as sig_events
     from research.evaluate.forward import ForwardReturns
     from research.evaluate.walk_forward import WalkForward
     from research.universe import Universe

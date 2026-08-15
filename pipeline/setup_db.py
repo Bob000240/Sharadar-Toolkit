@@ -19,12 +19,6 @@ import database.source.event_repo as event_repo
 import database.state.strategy_profiles_repository as profiles_repo
 
 
-def enable_pgvector():
-    with get_connection().begin() as conn:
-        conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-    print("pgvector enabled")
-
-
 def drop_all():
     tables = [
         "strategy_profiles",
@@ -71,8 +65,7 @@ def create_all():
 
 
 if __name__ == "__main__":
-    print("=== QuorumNexus DB setup ===")
-    enable_pgvector()
+    print("=== Sharadar Toolkit DB setup ===")
     drop_all()
     create_all()
     print("=== Done ===")

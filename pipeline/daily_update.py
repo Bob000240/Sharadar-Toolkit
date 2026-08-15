@@ -1,6 +1,9 @@
 """
-Daily incremental update. Run each market day after close.
-    uv run python -m pipeline.daily_update
+Daily incremental update steps. Run each market day after close via:
+    uv run python -m pipeline.main update
+
+`pipeline.main` owns the step order and per-step failure handling; this module
+only provides the individual update functions.
 """
 
 import time
@@ -215,20 +218,3 @@ def update_tickers(sh: SharadarData):
         return
     tickers_repo.insert(df)
     print(f"Tickers: {len(df):,} upserted")
-
-
-if __name__ == "__main__":
-    print(f"=== QuorumNexus daily update — {TODAY} ===")
-    sh = SharadarData()
-
-    update_equity_prices(sh)
-    update_fund_prices(sh)
-    update_technical_features()
-    update_fundamentals(sh)
-    update_insider(sh)
-    update_events(sh)
-
-    update_tickers(sh)
-    update_institutional(sh)
-
-    print("=== Done ===")
