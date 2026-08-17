@@ -8,29 +8,9 @@ Commands:
     setup                Create all tables
     load                 Run the initial full data load
     update               Run the daily incremental update
-    register <name>      Register/update a strategy from its NAME/DESCRIPTION.
-    retire <name>        Soft-retire a strategy (no new entries; row kept for history).
-
-<name> is the strategy name, e.g. sector_leaders (-> research.presets.strat_sector_leaders).
 """
 
 import sys
-
-_STRATEGY_PKG = "research.presets"
-
-
-def _load_strategy(name: str):
-    """Import and return the strategy module named ``name``.
-
-    Resolves to ``research.presets.strat_<name>``. Exit with a message when the
-    module carries no NAME and DESCRIPTION, which are what the registry stores.
-    """
-    import importlib
-
-    module = importlib.import_module(f"{_STRATEGY_PKG}.strat_{name}")
-    if not hasattr(module, "NAME") or not hasattr(module, "DESCRIPTION"):
-        sys.exit(f"{name} has no NAME/DESCRIPTION constants")
-    return module
 
 
 def main():
@@ -87,26 +67,6 @@ def main():
             )
             sys.exit(1)
         print(f"\n=== all {len(steps)} steps completed ===")
-
-    elif cmd == "register":
-        if len(sys.argv) < 3:
-            sys.exit("usage: register <name>")
-        import database.state.strategy_profiles_repository as profiles_repo
-
-        module = _load_strategy(sys.argv[2])
-        profiles_repo.upsert_profile(module.NAME, module.DESCRIPTION)
-        print(f"registered {module.NAME}")
-
-    elif cmd == "retire":
-        if len(sys.argv) < 3:
-            sys.exit("usage: retire <name>")
-        import database.state.strategy_profiles_repository as profiles_repo
-
-        name = sys.argv[2]
-        if profiles_repo.retire_profile(name):
-            print(f"retired {name} (row kept in registry; re-register to reactivate)")
-        else:
-            print(f"no profile named {name}")
 
     else:
         print(f"Unknown command: {cmd}")

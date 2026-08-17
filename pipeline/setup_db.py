@@ -16,7 +16,6 @@ import database.source.fundamentals_repo as fundamentals_repo
 import database.source.insider_repo as insider_repo
 import database.source.institutional_repo as institutional_repo
 import database.source.event_repo as event_repo
-import database.state.strategy_profiles_repository as profiles_repo
 
 
 def drop_all():
@@ -26,7 +25,6 @@ def drop_all():
     across a foreign key that still has rows behind it.
     """
     tables = [
-        "strategy_profiles",
         "events",
         "institutional_holdings",
         "insider_transactions",
@@ -46,9 +44,7 @@ def drop_all():
 def create_all():
     """Create every table in dependency order.
 
-    Idempotent, since each repository creates its table only if absent. The strategy
-    registry is created empty; strategies register themselves through
-    ``pipeline.main register``.
+    Idempotent, since each repository creates its table only if absent.
     """
     equity_repo.create_table()
     print("  created equity_prices")
@@ -66,11 +62,6 @@ def create_all():
     print("  created institutional_holdings")
     event_repo.create_table()
     print("  created events")
-
-    profiles_repo.create_table()
-    print(
-        "  created strategy_profiles (empty; register strategies via pipeline.main register)"
-    )
 
     print("All tables created")
 

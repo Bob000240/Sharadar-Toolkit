@@ -16,9 +16,7 @@ The order of operations is deliberate at every step:
 Step 3 before step 4 is the load-bearing choice. Scoring the full universe
 before filtering makes a score of 82 mean the same thing no matter which filters
 the spec picked; scoring afterwards would make every score relative to a
-different reference set and silently incomparable between screens. It is also a
-behavioural difference from ``SLEntryScreener``, which ranks inside an
-already-narrowed set, so expect different numbers from the two.
+different reference set and silently incomparable between screens.
 
 This module composes; it does not compute. Universe rules live in
 ``research.universe``, feature assembly in ``research.filters.attach_signals``,
