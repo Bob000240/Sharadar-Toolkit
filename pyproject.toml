@@ -4,19 +4,16 @@ version = "0.1.0"
 description = "Point-in-time equity research platform over Sharadar data"
 requires-python = ">=3.14"
 dependencies = [
-    "nasdaq-data-link>=1.0.4",
-    "ndlbulkdownload>=0.2.0",
+    "nasdaq-data-link",
     "numpy>=2.4.6",
     "pandas>=3.0.3",
-    "psycopg2-binary>=2.9.12",
-    "pyarrow>=24.0.0",
-    "python-dotenv>=1.2.2",
-    "requests>=2.34.2",
-    "sqlalchemy>=2.0.51",
+    "psycopg2-binary",
+    "python-dotenv",
+    "sqlalchemy",
 ]
 
 [dependency-groups]
 dev = [
-    "pytest>=9.1.1",
-    "ruff>=0.15.18",
+    "pytest",
+    "ruff",
 ]

@@ -84,9 +84,7 @@ def test_purchase_classification_is_an_explicit_attachment():
 
     result = InsiderSignals.attach_purchase_classification(transactions)
 
-    assert result.iloc[:3]["purchase_classification"].tolist() == [
-        "opportunistic"
-    ] * 3
+    assert result.iloc[:3]["purchase_classification"].tolist() == ["opportunistic"] * 3
     assert result.iloc[3]["purchase_classification"] == "routine"
     assert pd.isna(result.iloc[4]["purchase_classification"])
     assert result.iloc[5]["purchase_classification"] == "unclassified"

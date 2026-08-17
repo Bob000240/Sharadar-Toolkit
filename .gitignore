@@ -1,6 +1,5 @@
 # Secrets / local environment
 .env
-.env.*
 SHARADAR_KEYS.csv
 
 # Python
@@ -9,9 +8,6 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 
-# Editors
+# Editors / agent tooling
 .vscode/
 .claude/
-
-# Local scratch
-.sweep_cache.parquet

@@ -86,9 +86,7 @@ def test_technical_feature_update_normalizes_database_dates(monkeypatch):
         ]
     )
 
-    monkeypatch.setattr(
-        daily_update.technical_features_repo, "is_empty", lambda: False
-    )
+    monkeypatch.setattr(daily_update.technical_features_repo, "is_empty", lambda: False)
     monkeypatch.setattr(
         daily_update.technical_features_repo,
         "get_stale_feature_tickers",
@@ -217,9 +215,7 @@ def test_stale_tickers_rebuild_whole_history_not_just_missing_dates(monkeypatch)
         ]
     )
 
-    monkeypatch.setattr(
-        daily_update.technical_features_repo, "is_empty", lambda: False
-    )
+    monkeypatch.setattr(daily_update.technical_features_repo, "is_empty", lambda: False)
     monkeypatch.setattr(
         daily_update.technical_features_repo,
         "get_stale_feature_tickers",

@@ -93,9 +93,7 @@ def test_collection_operators(operator, value, expected):
 
 
 def test_nulls_require_an_explicit_null_operator():
-    frame = pd.DataFrame(
-        {"ticker": ["AAA", "BBB", "CCC"], "roe": [0.2, None, 0.1]}
-    )
+    frame = pd.DataFrame({"ticker": ["AAA", "BBB", "CCC"], "roe": [0.2, None, 0.1]})
 
     not_equal = Filters(("roe", "!=", 0.2)).apply(frame)
     is_null = Filters(("roe", "is_null")).apply(frame)

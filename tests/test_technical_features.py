@@ -13,6 +13,7 @@ How pytest works (quick primer):
     pytest shows you the exact values so you can diagnose the bug.
   - Run all tests with:  python -m pytest tests/ -v
 """
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -26,7 +27,6 @@ from data.technical_features import (
     _sma,
     compute_technical_features,
 )
-
 
 
 def test_sma_basic():
@@ -81,7 +81,9 @@ def test_macd_structure():
 
 def test_macd_histogram():
     """MACD histogram = MACD line - signal line."""
-    series = pd.Series(100 * np.exp(np.cumsum(np.random.default_rng(42).normal(0, 0.01, 80))))
+    series = pd.Series(
+        100 * np.exp(np.cumsum(np.random.default_rng(42).normal(0, 0.01, 80)))
+    )
     result = _macd(series, fast=12, slow=26, signal=9)
     macd = result["MACD_12_26_9"]
     signal = result["MACDs_12_26_9"]
@@ -133,7 +135,6 @@ def test_obv_flat():
     assert (result == 0).all()
 
 
-
 def make_ohlcv(n: int, seed: int = 42) -> pd.DataFrame:
     """Synthetic OHLCV DataFrame with n business days.
 
@@ -164,7 +165,6 @@ def make_ohlcv(n: int, seed: int = 42) -> pd.DataFrame:
 def full_df():
     """400-bar OHLCV series.  Module-scoped so it's built once for all tests."""
     return make_ohlcv(400)
-
 
 
 def test_no_lookahead_bias(full_df):
@@ -237,7 +237,6 @@ def test_no_duplicate_dates(full_df):
     result = compute_technical_features(full_df)
     duplicates = result[result["date"].duplicated()]["date"]
     assert duplicates.empty, f"Duplicate dates in output: {duplicates.values}"
-
 
 
 def test_return_1d_equals_pct_change(full_df):
