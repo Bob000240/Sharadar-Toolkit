@@ -38,6 +38,15 @@ FROM technical_features tf
 LEFT JOIN equity_prices ep ON ep.ticker = tf.ticker AND ep.date = tf.date
 WHERE ep.ticker IS NULL;
 
+-- A4. Recent price rows with no daily valuation row. DAILY covers fewer
+-- tickers than SEP (funds and non-fundamental securities have no row), so
+-- this is a coverage gauge rather than a strict zero check.
+SELECT 'A4 prices_without_valuation', 'LOW', count(*),
+       count(DISTINCT ep.ticker) || ' tickers'
+FROM equity_prices ep
+LEFT JOIN daily_valuation dv ON dv.ticker = ep.ticker AND dv.date = ep.date
+WHERE ep.date > CURRENT_DATE - 30 AND dv.ticker IS NULL;
+
 -- ─────────────────────────────────────────────────────────────────────────────
 -- B. PRICE SANITY  (bad inputs produce confident, wrong signals)
 -- ─────────────────────────────────────────────────────────────────────────────
@@ -183,6 +192,7 @@ FROM (
     SELECT 'equity_prices' src, max(date) mx FROM equity_prices
     UNION ALL SELECT 'fund_prices', max(date) FROM fund_prices
     UNION ALL SELECT 'technical_features', max(date) FROM technical_features
+    UNION ALL SELECT 'daily_valuation', max(date) FROM daily_valuation
     UNION ALL SELECT 'fundamentals(datekey)', max(datekey) FROM fundamentals
     UNION ALL SELECT 'insider(filingdate)', max(filingdate) FROM insider_transactions
     UNION ALL SELECT 'events', max(date) FROM events

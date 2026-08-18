@@ -8,11 +8,17 @@ was actually published.
 Three dimensions are used. ART carries the latest trailing-twelve-month figures,
 ARQ the quarterly series behind year-over-year growth, and ARY the annual series
 behind the five-year change and volatility features.
+
+``attach_daily_valuation`` adds the SHARADAR/DAILY counterparts of the SF1
+valuation columns. Same ratios, different price date: SF1 freezes both halves
+at the filing date, while DAILY reprices the market-cap half every session, so
+``pe_daily`` is the signal-day price over the last filed earnings.
 """
 
 import numpy as np
 import pandas as pd
 
+import database.source.daily_repo as daily_repo
 import database.source.fundamentals_repo as fundamentals_repo
 from research.signals.sig import Signals
 
@@ -61,13 +67,29 @@ _HISTORY_VOLATILITY_FIELDS = {
     "grossmargin_volatility_5y": "grossmargin",
 }
 
+# SHARADAR/DAILY reuses the SF1 column names for its repriced ratios, so they
+# are suffixed on attach to coexist with the filing-dated originals.
+_DAILY_RENAMES = {
+    c: f"{c}_daily" for c in ("ev", "evebit", "evebitda", "marketcap", "pb", "pe", "ps")
+}
+# Vendor stores these in USD millions; every other USD field is plain USD.
+_DAILY_MILLIONS = ("marketcap_daily", "ev_daily")
+_DAILY_DROP = ("date", "lastupdated")
+
+DAILY_VALUATION_COLUMNS = tuple(
+    _DAILY_RENAMES.get(c, c)
+    for c in daily_repo._COLUMNS
+    if c != "ticker" and c not in _DAILY_DROP
+)
+
 
 class FundamentalSignals(Signals):
     """SQL-backed fundamental facts with opt-in DataFrame attachments.
 
     ``get_signals`` fetches the latest ART row per ticker; ``attach_ratios``,
-    ``attach_growth``, and ``attach_history_features`` add derived columns to a
-    ticker-indexed frame. Every method is stateless.
+    ``attach_growth``, ``attach_history_features``, and
+    ``attach_daily_valuation`` add derived columns to a ticker-indexed frame.
+    Every method is stateless.
     """
 
     @classmethod
@@ -161,6 +183,43 @@ class FundamentalSignals(Signals):
             frame["marketcap"].where(frame["marketcap"] > 0),
         )
         return frame
+
+    @classmethod
+    def attach_daily_valuation(
+        cls,
+        frame: pd.DataFrame,
+        signal_day: pd.Timestamp,
+    ) -> pd.DataFrame:
+        """Attach signal-day-priced valuation ratios from SHARADAR/DAILY.
+
+        Each ticker's most recent DAILY row on or before ``signal_day``,
+        suffixed ``_daily`` because the vendor reuses the SF1 column names:
+        ``pe`` is the filing-date ratio already on the frame and ``pe_daily``
+        the same ratio at the signal-day price. ``marketcap_daily`` and
+        ``ev_daily`` arrive in USD millions and are normalized to USD here, so
+        one threshold means the same thing against either marketcap field.
+
+        Return a copy of ``frame`` with the columns joined on; a ticker with no
+        DAILY row keeps its row with them null.
+        """
+        frame = frame.copy()
+        daily = daily_repo.get_latest_rows(
+            frame.index.astype(str).tolist(),
+            pd.Timestamp(signal_day),
+        )
+        if daily.empty:
+            daily = pd.DataFrame(columns=list(DAILY_VALUATION_COLUMNS)).rename_axis(
+                "ticker"
+            )
+        else:
+            daily = (
+                daily.set_index("ticker")
+                .drop(columns=list(_DAILY_DROP), errors="ignore")
+                .rename(columns=_DAILY_RENAMES)
+            )
+            for column in _DAILY_MILLIONS:
+                daily[column] = daily[column] * 1e6
+        return frame.join(daily, how="left")
 
     @classmethod
     def _as_of_filings(
@@ -304,27 +363,3 @@ class FundamentalSignals(Signals):
         features["complete_multi_year_history"] = complete
         features.index.name = "ticker"
         return features[list(QUALITY_HISTORY_COLUMNS)]
-
-    @staticmethod
-    def _history_change(latest, prior, complete_history, column) -> float:
-        """Return the change in ``column``, or NaN if the history is too thin."""
-        if prior is None or not complete_history:
-            return float("nan")
-        now, then = latest[column], prior[column]
-        if pd.isna(now) or pd.isna(then):
-            return float("nan")
-        return now - then
-
-    @staticmethod
-    def _history_volatility(
-        window: pd.DataFrame,
-        complete_history: bool,
-        column: str,
-    ) -> float:
-        """Return the dispersion of ``column``, or NaN if the history is thin."""
-        if not complete_history:
-            return np.nan
-        values = pd.to_numeric(window[column], errors="coerce").dropna()
-        if len(values) < 3:
-            return np.nan
-        return values.std(ddof=0)

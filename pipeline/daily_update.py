@@ -21,6 +21,7 @@ from pipeline.load_data import START_DATE
 from data.sharadar_data import SharadarData
 from data.technical_features import compute_technical_features
 
+import database.source.daily_repo as daily_repo
 import database.source.equity_repo as equity_repo
 import database.source.fund_repo as fund_repo
 import database.source.technical_features_repo as technical_features_repo
@@ -108,6 +109,28 @@ def update_fund_prices(sh: SharadarData):
         "Fund prices",
         lastupdated_since=fund_repo.get_sync_cursor() or START_DATE,
         tickers=BENCHMARK_SYMBOLS,
+    )
+
+
+def update_daily_valuation(sh: SharadarData):
+    """Fetch DAILY valuation rows changed since the stored watermark.
+
+    An empty table is refused rather than backfilled: a decade of daily rows
+    through the JSON API is the wrong tool, and the bulk export path exists for
+    exactly that.
+    """
+    cursor = daily_repo.get_sync_cursor()
+    if cursor is None:
+        print(
+            "Daily valuation: empty — bulk load it first: "
+            "load_data.load_sharadar_table('DAILY')"
+        )
+        return
+    _fetch(
+        sh.daily_valuation,
+        daily_repo.insert,
+        "Daily valuation",
+        lastupdated_since=cursor,
     )
 
 

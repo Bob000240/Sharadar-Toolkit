@@ -336,7 +336,8 @@ def _fundamental_facts(tickers: list[str], signal_day) -> pd.DataFrame:
     """Assemble ticker-indexed fundamental facts.
 
     The latest filing published on or before ``signal_day``, plus ratios,
-    year-over-year growth, and five-year history features.
+    year-over-year growth, five-year history features, and the signal-day
+    repriced valuation ratios from SHARADAR/DAILY.
     """
     frame = FundamentalSignals.get_signals(tickers, signal_day)
     if frame.empty:
@@ -344,6 +345,7 @@ def _fundamental_facts(tickers: list[str], signal_day) -> pd.DataFrame:
     frame = FundamentalSignals.attach_ratios(frame)
     frame = FundamentalSignals.attach_growth(frame, signal_day)
     frame = FundamentalSignals.attach_history_features(frame, signal_day)
+    frame = FundamentalSignals.attach_daily_valuation(frame, signal_day)
     return frame
 
 

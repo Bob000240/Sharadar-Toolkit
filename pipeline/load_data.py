@@ -10,6 +10,10 @@ row-by-row inserts and reproducible, and which includes delisted tickers so the
 history carries no survivorship bias. Technical features are then computed
 locally from the loaded equity prices.
 
+The technical features are local on purpose: no vendor table carries historical
+indicators. SHARADAR/METRICS looked like one but serves a one-row-per-ticker
+snapshot (verified by API probe), so derived history can only be built here.
+
 The incremental delta that keeps this current lives in ``pipeline.daily_update``.
 Requires NDL_APIKEY in the environment.
 """
@@ -28,6 +32,7 @@ from dotenv import load_dotenv
 from pipeline.config import BENCHMARK_SYMBOLS
 from data.technical_features import compute_technical_features
 
+import database.source.daily_repo as daily_repo
 import database.source.equity_repo as equity_repo
 import database.source.fund_repo as fund_repo
 import database.source.technical_features_repo as technical_features_repo
@@ -52,6 +57,7 @@ SHARADAR_TABLES = {
     "SF2": (insider_repo, "insider_transactions", "filingdate", None),
     "SF3": (institutional_repo, "institutional_holdings", "calendardate", None),
     "EVENTS": (event_repo, "events", "date", None),
+    "DAILY": (daily_repo, "daily_valuation", "date", None),
 }
 _RENAMES = {"TICKERS": {"table": "table_code"}}
 _ROW_FILTERS = {

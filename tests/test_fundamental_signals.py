@@ -134,3 +134,83 @@ def test_attach_sector_ranks_adds_direction_free_percentiles():
     assert result.loc["T9", "pe_sector_pct"] == 100.0
     assert result.loc["T0", "roe_sector_pct"] == 100.0
     assert result["fcf_yield_sector_pct"].isna().all()
+
+
+def _daily_rows() -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "ticker": ["AAA", "BBB"],
+            "date": pd.to_datetime(["2026-08-14"] * 2),
+            "lastupdated": pd.to_datetime(["2026-08-14"] * 2),
+            "ev": [12_000.0, 500.0],
+            "evebit": [15.0, 8.0],
+            "evebitda": [12.0, 6.0],
+            "marketcap": [10_000.0, 400.0],
+            "pb": [3.0, 1.2],
+            "pe": [25.0, -4.0],
+            "ps": [5.0, 0.8],
+        }
+    )
+
+
+@pytest.fixture
+def stub_daily_repo(monkeypatch):
+    monkeypatch.setattr(
+        "research.signals.sig_fundamentals.daily_repo.get_latest_rows",
+        lambda tickers, signal_day: _daily_rows(),
+    )
+
+
+def test_attach_daily_valuation_suffixes_and_keeps_sf1_columns(stub_daily_repo):
+    frame = pd.DataFrame(
+        {"pe": [30.0], "marketcap": [9e9]},
+        index=pd.Index(["AAA"], name="ticker"),
+    )
+
+    result = FundamentalSignals.attach_daily_valuation(
+        frame, pd.Timestamp("2026-08-14")
+    )
+
+    # The SF1 columns survive untouched; the DAILY twins arrive suffixed.
+    assert result.loc["AAA", "pe"] == 30.0
+    assert result.loc["AAA", "pe_daily"] == 25.0
+    assert "date" not in result.columns
+    assert "lastupdated" not in result.columns
+
+
+def test_attach_daily_valuation_normalizes_vendor_millions(stub_daily_repo):
+    frame = pd.DataFrame(index=pd.Index(["AAA"], name="ticker"))
+
+    result = FundamentalSignals.attach_daily_valuation(
+        frame, pd.Timestamp("2026-08-14")
+    )
+
+    assert result.loc["AAA", "marketcap_daily"] == 10_000.0 * 1e6
+    assert result.loc["AAA", "ev_daily"] == 12_000.0 * 1e6
+
+
+def test_attach_daily_valuation_keeps_uncovered_tickers_with_nulls(stub_daily_repo):
+    frame = pd.DataFrame(index=pd.Index(["AAA", "ZZZ"], name="ticker"))
+
+    result = FundamentalSignals.attach_daily_valuation(
+        frame, pd.Timestamp("2026-08-14")
+    )
+
+    assert list(result.index) == ["AAA", "ZZZ"]
+    assert pd.isna(result.loc["ZZZ", "pe_daily"])
+
+
+def test_attach_daily_valuation_empty_table_still_adds_the_columns(monkeypatch):
+    monkeypatch.setattr(
+        "research.signals.sig_fundamentals.daily_repo.get_latest_rows",
+        lambda tickers, signal_day: pd.DataFrame(),
+    )
+    frame = pd.DataFrame(index=pd.Index(["AAA"], name="ticker"))
+
+    result = FundamentalSignals.attach_daily_valuation(
+        frame, pd.Timestamp("2026-08-14")
+    )
+
+    assert "pe_daily" in result.columns
+    assert "marketcap_daily" in result.columns
+    assert result["pe_daily"].isna().all()

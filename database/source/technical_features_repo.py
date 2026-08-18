@@ -74,7 +74,7 @@ def create_table():
                    AND EXISTS (
                        SELECT 1
                        FROM pg_constraint
-                       WHERE conrelid = 'technical_features'::regclass
+                       WHERE conrelid = to_regclass('technical_features')
                          AND conname = 'indicators_pkey'
                    ) THEN
                     ALTER TABLE technical_features

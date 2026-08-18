@@ -15,10 +15,17 @@ eligibility SQL, and prose in docstrings. Every consumer now reads it from here:
     language request onto real field keys
 
 Deliberately NOT registered: raw statement line items (`assets`, `ncfo`,
-`shareswa`) and moving-average levels (`sma_50`, `volume_sma_10`). They are
+`shareswa`), moving-average levels (`sma_50`, `volume_sma_10`), and the price
+levels the derived technical fields are built from (`atr_14`, `high_52w`,
+`rolling_20d_high`, `macd`, `macd_signal`, `obv`, `dollar_volume`). They are
 inputs to the derived fields below, not things anyone screens on directly — a
-raw `sma_200` percentile is meaningless, whereas `pct_from_sma_50` is not. The
-underlying columns remain available in the frame; they are simply not offered.
+raw `sma_200` percentile is meaningless, whereas `pct_from_sma_50` is not, and
+a level that scales with price ranks companies by share price rather than by
+anything about them. `ev_daily` is excluded as a vendor duplicate: it restates
+size, which `marketcap_daily` already carries. `close` is the one exception,
+registered as a filter only: the structural universe enforces no price floor,
+so a penny-stock gate has nowhere else to live. The underlying columns remain
+available in the frame; they are simply not offered.
 
 ``direction`` is None where no canonical better/worse exists: ``volatility_20``
 is rankable, but whether low or high is "good" depends on the question being
@@ -52,6 +59,17 @@ class Field:
     ``description``, ``citation``, and ``coverage_note`` are prose for a GUI or
     a retrieval layer.
 
+    ``allowed_operators`` restricts which filter operators the field accepts,
+    and None means every scalar operator. Only a field whose cells are not
+    scalars needs it: ``recent_event_codes`` holds a list per row, so ``>=``
+    against it is not an error anyone catches — every comparison simply returns
+    False and the screen silently empties. ``value_type`` is the type a filter
+    value is compared as, and for a collection-valued field it is the type of
+    the items inside the cell rather than of the cell itself. It marks a type
+    category rather than a storage width: a count stays ``float`` because every
+    numeric column here is nullable and therefore float64 whatever its values
+    are, and ``unit="count"`` already carries the "whole number" reading.
+
     The only public member is the ``needs_direction`` property.
     """
 
@@ -64,6 +82,8 @@ class Field:
     positive_only: bool = False
     filterable: bool = True
     rankable: bool = True
+    allowed_operators: frozenset[str] | None = None
+    value_type: type = float
     description: str = ""
     citation: str | None = None
     coverage_note: str | None = None
@@ -78,6 +98,16 @@ class Field:
 
 
 _FIVE_YEAR = "Requires ~6y of annual history; largely unpopulated before ~2022."
+
+_WITHIN_FRAME = (
+    "Ranked across the population being screened, not the whole market, so the "
+    "same security scores differently under a different universe."
+)
+
+_VENDOR_DAILY = (
+    "Sourced from the daily_valuation table (SHARADAR/DAILY); every value is "
+    "null until that table is loaded."
+)
 
 _FIELDS = [
     Field(
@@ -196,6 +226,17 @@ _FIELDS = [
         citation="Jegadeesh (1990)",
     ),
     Field(
+        "return_5d",
+        "1-Week Return",
+        "Momentum",
+        "technical",
+        None,
+        unit="pct",
+        description="Trailing one-week return. Direction is unset for the same "
+        "reason as the one-month horizon: this short, reversal "
+        "dominates continuation.",
+    ),
+    Field(
         "vol_adjusted_momentum",
         "Volatility-Adjusted Momentum",
         "Momentum",
@@ -226,6 +267,75 @@ _FIELDS = [
         description="14-day Relative Strength Index. A state, not a quality — "
         "high can mean strength or exhaustion, so direction is "
         "for the caller to choose.",
+    ),
+    Field(
+        "return_5d_percentile",
+        "1-Week Return Percentile",
+        "Momentum",
+        "technical",
+        None,
+        unit="score",
+        rankable=False,
+        description="Cross-sectional percentile of the one-week return.",
+        coverage_note=_WITHIN_FRAME,
+    ),
+    Field(
+        "return_20d_percentile",
+        "1-Month Return Percentile",
+        "Momentum",
+        "technical",
+        None,
+        unit="score",
+        rankable=False,
+        description="Cross-sectional percentile of the one-month return.",
+        coverage_note=_WITHIN_FRAME,
+    ),
+    Field(
+        "return_60d_percentile",
+        "3-Month Return Percentile",
+        "Momentum",
+        "technical",
+        +1,
+        unit="score",
+        rankable=False,
+        description="Cross-sectional percentile of the three-month return. "
+        "`>= 80` is how a top-quintile momentum gate is written.",
+        coverage_note=_WITHIN_FRAME,
+    ),
+    Field(
+        "return_252d_percentile",
+        "12-Month Return Percentile",
+        "Momentum",
+        "technical",
+        +1,
+        unit="score",
+        rankable=False,
+        description="Cross-sectional percentile of the one-year return.",
+        coverage_note=_WITHIN_FRAME,
+    ),
+    Field(
+        "excess_return_5d",
+        "Excess Return (1w, vs SPY)",
+        "Momentum",
+        "technical",
+        +1,
+        unit="pct",
+        description="One-week return less the benchmark's over the same span, "
+        "which separates a security that rose from one that rose "
+        "because everything did.",
+        coverage_note="Null when the benchmark fund lacks the history; the "
+        "benchmark defaults to SPY.",
+    ),
+    Field(
+        "excess_return_20d",
+        "Excess Return (1m, vs SPY)",
+        "Momentum",
+        "technical",
+        +1,
+        unit="pct",
+        description="One-month return less the benchmark's over the same span.",
+        coverage_note="Null when the benchmark fund lacks the history; the "
+        "benchmark defaults to SPY.",
     ),
     Field(
         "volatility_20",
@@ -278,6 +388,20 @@ _FIELDS = [
         "activity in either direction.",
     ),
     Field(
+        "close",
+        "Close Price",
+        "Liquidity",
+        "technical",
+        None,
+        unit="usd",
+        rankable=False,
+        description="Latest close on or before the signal date. Offered as a "
+        "filter — `>= 5` is the conventional penny-stock gate, and "
+        "the structural universe has no price floor of its own — but "
+        "not for ranking, where a share price says nothing about a "
+        "security relative to another.",
+    ),
+    Field(
         "marketcap",
         "Market Cap",
         "Size",
@@ -285,7 +409,8 @@ _FIELDS = [
         None,
         unit="usd",
         description="Point-in-time market capitalization from the latest ART "
-        "filing available on the signal date.",
+        "filing available on the signal date. Priced at the filing "
+        "date; `marketcap_daily` reprices it at the signal day.",
     ),
     Field(
         "pe",
@@ -296,7 +421,8 @@ _FIELDS = [
         positive_only=True,
         description="Price to earnings. Non-positive is undefined, not cheap: "
         "a loss-maker has no meaningful P/E and is masked from "
-        "ranks rather than ranked cheapest.",
+        "ranks rather than ranked cheapest. Priced at the filing "
+        "date; `pe_daily` reprices it at the signal day.",
     ),
     Field(
         "ps",
@@ -306,7 +432,8 @@ _FIELDS = [
         -1,
         positive_only=True,
         description="Price to sales. Defined wherever revenue is positive, so "
-        "it survives loss-making years that void P/E.",
+        "it survives loss-making years that void P/E. Priced at the "
+        "filing date; `ps_daily` reprices it at the signal day.",
     ),
     Field(
         "pb",
@@ -316,7 +443,9 @@ _FIELDS = [
         -1,
         positive_only=True,
         description="Price to book. Negative book value is undefined, and it "
-        "understates asset-light firms whose value is intangible.",
+        "understates asset-light firms whose value is intangible. "
+        "Priced at the filing date; `pb_daily` reprices it at the "
+        "signal day.",
     ),
     Field(
         "evebitda",
@@ -326,7 +455,22 @@ _FIELDS = [
         -1,
         positive_only=True,
         description="Enterprise value to EBITDA — capital-structure neutral, "
-        "so it compares across differing leverage.",
+        "so it compares across differing leverage. Priced at the "
+        "filing date; `evebitda_daily` reprices it at the signal "
+        "day.",
+    ),
+    Field(
+        "evebit",
+        "EV/EBIT",
+        "Valuation",
+        "fundamental",
+        -1,
+        positive_only=True,
+        description="Enterprise value to EBIT. Stricter than EV/EBITDA, which "
+        "adds depreciation back: for a capital-intensive business "
+        "that charge is a real recurring cost, not an accounting "
+        "artefact. Priced at the filing date; `evebit_daily` "
+        "reprices it at the signal day.",
     ),
     Field(
         "fcf_yield",
@@ -414,6 +558,18 @@ _FIELDS = [
         unit="pct",
         description="EBITDA over revenue; comparable across tax and "
         "depreciation regimes.",
+    ),
+    Field(
+        "ros",
+        "Return on Sales",
+        "Profitability",
+        "fundamental",
+        +1,
+        unit="pct",
+        description="EBIT over revenue. Sits between EBITDA margin and net "
+        "margin: after depreciation, which is a real cost, but "
+        "before the interest and tax that leverage and domicile "
+        "drive rather than the business does.",
     ),
     Field(
         "cfo_to_assets",
@@ -516,6 +672,33 @@ _FIELDS = [
         coverage_note=_FIVE_YEAR,
     ),
     Field(
+        "quality_history_observations",
+        "Annual Filings in 5y Window",
+        "Quality",
+        "fundamental",
+        None,
+        unit="count",
+        rankable=False,
+        description="How many annual filings the five-year window actually "
+        "held. Not a quality signal but the evidence behind one: "
+        "every `*_change_5y` and `*_volatility_5y` field is null "
+        "below six, so this is what a coverage gate is written on.",
+    ),
+    Field(
+        "complete_multi_year_history",
+        "Complete 5y History",
+        "Quality",
+        "fundamental",
+        None,
+        rankable=False,
+        value_type=bool,
+        description="Whether the five-year window was deep enough to trust, "
+        "which is `quality_history_observations >= 6` precomputed. "
+        "Filter on it to score only securities whose history "
+        "features resolved, rather than silently ranking them on "
+        "the metrics that happened to survive.",
+    ),
+    Field(
         "revenue_growth_yoy",
         "Revenue Growth (YoY)",
         "Growth",
@@ -561,6 +744,16 @@ _FIELDS = [
         +1,
         description="Five-year change in gross profitability: improving "
         "quality rather than a single-period level.",
+        coverage_note=_FIVE_YEAR,
+    ),
+    Field(
+        "roa_change_5y",
+        "ROA Trend (5y)",
+        "Growth",
+        "fundamental",
+        +1,
+        description="Five-year change in return on assets — leverage-neutral "
+        "improvement, unlike the ROE trend it parallels.",
         coverage_note=_FIVE_YEAR,
     ),
     Field(
@@ -624,12 +817,80 @@ _FIELDS = [
         coverage_note=_FIVE_YEAR,
     ),
     Field(
+        "marketcap_daily",
+        "Market Cap (Daily)",
+        "Size",
+        "fundamental",
+        None,
+        unit="usd",
+        description="Market capitalization at the signal-day price rather than "
+        "the filing-day price `marketcap` carries, so a name that "
+        "halved since its last 10-Q shows its current size here.",
+        coverage_note=_VENDOR_DAILY,
+    ),
+    Field(
+        "pe_daily",
+        "P/E (Daily)",
+        "Valuation",
+        "fundamental",
+        -1,
+        positive_only=True,
+        description="Signal-day price against the last filed earnings — unlike "
+        "`pe`, whose price is also frozen at the filing date. The "
+        "same loss-maker masking applies.",
+        coverage_note=_VENDOR_DAILY,
+    ),
+    Field(
+        "ps_daily",
+        "P/S (Daily)",
+        "Valuation",
+        "fundamental",
+        -1,
+        positive_only=True,
+        description="Signal-day price against the last filed revenue.",
+        coverage_note=_VENDOR_DAILY,
+    ),
+    Field(
+        "pb_daily",
+        "P/B (Daily)",
+        "Valuation",
+        "fundamental",
+        -1,
+        positive_only=True,
+        description="Signal-day price against the last filed book value.",
+        coverage_note=_VENDOR_DAILY,
+    ),
+    Field(
+        "evebit_daily",
+        "EV/EBIT (Daily)",
+        "Valuation",
+        "fundamental",
+        -1,
+        positive_only=True,
+        description="Signal-day enterprise value against the last filed EBIT.",
+        coverage_note=_VENDOR_DAILY,
+    ),
+    Field(
+        "evebitda_daily",
+        "EV/EBITDA (Daily)",
+        "Valuation",
+        "fundamental",
+        -1,
+        positive_only=True,
+        description="Signal-day enterprise value against the last filed EBITDA.",
+        coverage_note=_VENDOR_DAILY,
+    ),
+    Field(
         "recent_event_codes",
         "Recent Event Codes",
         "Events",
         "event",
         unit="count",
         rankable=False,
+        allowed_operators=frozenset(
+            {"contains_any", "contains_all", "excludes_any", "is_null", "not_null"}
+        ),
+        value_type=str,
         description="Deduped Sharadar 8-K event codes filed in the lookback "
         "window. Use with `excludes_any` to drop distress "
         "signals — delisting (31), bankruptcy (13), restatement "

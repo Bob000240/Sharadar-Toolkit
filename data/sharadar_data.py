@@ -35,8 +35,9 @@ class SharadarData:
     """Authenticated access to the Sharadar tables.
 
     One method per table: ``fundamentals``, ``insider_transactions``,
-    ``institutional_holdings``, ``equity_prices``, ``fund_prices``, ``tickers``,
-    and ``events``. Every method paginates by default.
+    ``institutional_holdings``, ``daily_valuation``, ``equity_prices``,
+    ``fund_prices``, ``tickers``, and ``events``. Every method paginates by
+    default.
     """
 
     def __init__(self):
@@ -118,6 +119,25 @@ class SharadarData:
             "SHARADAR/SF3",
             **self._params(
                 ticker=tickers, calendardate=self._date_range(start_date, end_date)
+            ),
+            paginate=paginate,
+        )
+
+    def daily_valuation(
+        self,
+        tickers: str | list[str] | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        lastupdated_since: str | None = None,
+        paginate=True,
+    ) -> pd.DataFrame:
+        """Fetch DAILY valuation metrics, bounded by date or by last change."""
+        return nasdaqdatalink.get_table(
+            "SHARADAR/DAILY",
+            **self._params(
+                ticker=tickers,
+                date=self._date_range(start_date, end_date),
+                lastupdated=self._date_range(lastupdated_since, None),
             ),
             paginate=paginate,
         )

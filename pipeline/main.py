@@ -47,6 +47,7 @@ def main():
             ("Fund prices", lambda: daily_update.update_fund_prices(sh)),
             ("Technical features", daily_update.update_technical_features),
             ("Fundamentals", lambda: daily_update.update_fundamentals(sh)),
+            ("Daily valuation", lambda: daily_update.update_daily_valuation(sh)),
             ("Insider", lambda: daily_update.update_insider(sh)),
             ("Events", lambda: daily_update.update_events(sh)),
             ("Tickers", lambda: daily_update.update_tickers(sh)),

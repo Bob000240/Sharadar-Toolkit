@@ -2,6 +2,7 @@ from datetime import date
 
 import pandas as pd
 
+import database.source.daily_repo as daily_repo
 import database.source.equity_repo as equity_repo
 import database.source.fund_repo as fund_repo
 import database.source.institutional_repo as institutional_repo
@@ -114,6 +115,54 @@ def test_technical_feature_update_normalizes_database_dates(monkeypatch):
     assert inserted[0]["date"].tolist() == [pd.Timestamp("2026-07-01")]
 
 
+def test_stale_tickers_rebuild_whole_history_not_just_missing_dates(monkeypatch):
+    """Re-adjusted prices leave feature rows present-but-wrong, which the
+    missing-date scan cannot see. Every rolling window depends on the full
+    series, so the repair has to span the ticker's entire history."""
+    rebuilt = []
+    prices = pd.DataFrame(
+        [
+            {
+                "ticker": "TEST",
+                "date": date(2026, 6, 30),
+                "close": 5.0,
+                "high": 5.5,
+                "low": 4.5,
+                "volume": 100,
+            },
+            {
+                "ticker": "TEST",
+                "date": date(2026, 7, 1),
+                "close": 5.5,
+                "high": 6.0,
+                "low": 5.0,
+                "volume": 110,
+            },
+        ]
+    )
+
+    monkeypatch.setattr(daily_update.technical_features_repo, "is_empty", lambda: False)
+    monkeypatch.setattr(
+        daily_update.technical_features_repo,
+        "get_stale_feature_tickers",
+        lambda: ["TEST"],
+    )
+    monkeypatch.setattr(
+        daily_update.technical_features_repo,
+        "get_missing_feature_dates",
+        lambda: pd.DataFrame([{"ticker": "TEST", "date": date(2026, 7, 1)}]),
+    )
+    monkeypatch.setattr(daily_update.equity_repo, "get", lambda **kwargs: prices.copy())
+    monkeypatch.setattr(
+        daily_update.technical_features_repo, "insert", lambda df: rebuilt.append(df)
+    )
+
+    daily_update.update_technical_features()
+
+    assert len(rebuilt) == 1
+    assert rebuilt[0]["date"].tolist() == [date(2026, 6, 30), date(2026, 7, 1)]
+
+
 def test_ticker_and_institutional_conflicts_update_existing_rows(monkeypatch):
     ticker_engine = _RecordingEngine()
     institutional_engine = _RecordingEngine()
@@ -189,54 +238,6 @@ def test_fundamentals_sync_catches_restatements_of_old_periods(monkeypatch):
     assert calls == [{"lastupdated_since": "2026-07-23"}]
 
 
-def test_stale_tickers_rebuild_whole_history_not_just_missing_dates(monkeypatch):
-    """Re-adjusted prices leave feature rows present-but-wrong, which the
-    missing-date scan cannot see. Every rolling window depends on the full
-    series, so the repair has to span the ticker's entire history."""
-    rebuilt = []
-    prices = pd.DataFrame(
-        [
-            {
-                "ticker": "TEST",
-                "date": date(2026, 6, 30),
-                "close": 5.0,
-                "high": 5.5,
-                "low": 4.5,
-                "volume": 100,
-            },
-            {
-                "ticker": "TEST",
-                "date": date(2026, 7, 1),
-                "close": 5.5,
-                "high": 6.0,
-                "low": 5.0,
-                "volume": 110,
-            },
-        ]
-    )
-
-    monkeypatch.setattr(daily_update.technical_features_repo, "is_empty", lambda: False)
-    monkeypatch.setattr(
-        daily_update.technical_features_repo,
-        "get_stale_feature_tickers",
-        lambda: ["TEST"],
-    )
-    monkeypatch.setattr(
-        daily_update.technical_features_repo,
-        "get_missing_feature_dates",
-        lambda: pd.DataFrame([{"ticker": "TEST", "date": date(2026, 7, 1)}]),
-    )
-    monkeypatch.setattr(daily_update.equity_repo, "get", lambda **kwargs: prices.copy())
-    monkeypatch.setattr(
-        daily_update.technical_features_repo, "insert", lambda df: rebuilt.append(df)
-    )
-
-    daily_update.update_technical_features()
-
-    assert len(rebuilt) == 1
-    assert rebuilt[0]["date"].tolist() == [date(2026, 6, 30), date(2026, 7, 1)]
-
-
 def test_price_and_feature_conflicts_update_existing_rows(monkeypatch):
     """DO NOTHING would fetch Sharadar's re-adjusted rows and then throw them
     away, since the (ticker, date) key already exists."""
@@ -244,6 +245,7 @@ def test_price_and_feature_conflicts_update_existing_rows(monkeypatch):
     for module, name in (
         (equity_repo, "equity"),
         (fund_repo, "fund"),
+        (daily_repo, "daily"),
         (technical_features_repo, "features"),
     ):
         engines[name] = _RecordingEngine()
@@ -254,16 +256,21 @@ def test_price_and_feature_conflicts_update_existing_rows(monkeypatch):
     equity_repo.insert(pd.DataFrame([price_row]))
     fund_repo.insert(pd.DataFrame([price_row]))
 
+    daily_row = {column: None for column in daily_repo._COLUMNS}
+    daily_row.update({"ticker": "TEST", "date": "2026-07-22", "marketcap": 1.0})
+    daily_repo.insert(pd.DataFrame([daily_row]))
+
     feature_row = {column: None for column in technical_features_repo._COLUMNS}
     feature_row.update({"ticker": "TEST", "date": "2026-07-22", "close": 1.0})
     technical_features_repo.insert(pd.DataFrame([feature_row]))
 
-    for name, table in (
-        ("equity", "equity_prices"),
-        ("fund", "fund_prices"),
-        ("features", "technical_features"),
+    for name, table, revised in (
+        ("equity", "equity_prices", "close"),
+        ("fund", "fund_prices", "close"),
+        ("daily", "daily_valuation", "marketcap"),
+        ("features", "technical_features", "close"),
     ):
         sql = engines[name].statements[0][0]
         assert f"INSERT INTO {table}" in sql
         assert "ON CONFLICT (ticker, date) DO UPDATE" in sql, table
-        assert "close = EXCLUDED.close" in sql, table
+        assert f"{revised} = EXCLUDED.{revised}" in sql, table

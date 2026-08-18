@@ -119,6 +119,7 @@ def test_spec_fields_collects_filter_and_rank_fields_without_duplicates():
 def test_sources_requests_only_the_chains_the_spec_references():
     assert orchestrator._sources(("roic", "pe")) == ("fundamental",)
     assert orchestrator._sources(("return_252d",)) == ("technical",)
+    assert orchestrator._sources(("pe_daily",)) == ("fundamental",)
 
 
 def test_sources_maps_the_registry_event_alias_onto_the_loader_name():

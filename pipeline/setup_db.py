@@ -8,6 +8,7 @@ Run once before the initial load::
 from sqlalchemy import text
 from database.db_connection import get_connection
 
+import database.source.daily_repo as daily_repo
 import database.source.equity_repo as equity_repo
 import database.source.fund_repo as fund_repo
 import database.source.technical_features_repo as technical_features_repo
@@ -31,6 +32,7 @@ def drop_all():
         "fundamentals",
         "tickers",
         "technical_features",
+        "daily_valuation",
         "fund_prices",
         "equity_prices",
     ]
@@ -50,6 +52,8 @@ def create_all():
     print("  created equity_prices")
     fund_repo.create_table()
     print("  created fund_prices")
+    daily_repo.create_table()
+    print("  created daily_valuation")
     technical_features_repo.create_table()
     print("  created technical_features")
     tickers_repo.create_table()
