@@ -13,6 +13,11 @@ inside the cell rather than against it.
 ``_OPERATORS``: registering an operator without listing it in the right set
 silently skips its validation in ``FilterCondition.__post_init__``.
 
+``funnel_row`` is the shared attrition schema. It lives here because ``funnel``
+is its main producer, but the orchestrator reports scoring attrition through it
+too, so the two stages cannot drift into different columns and fail to
+concatenate into one report.
+
 Every source in ``SIGNAL_SOURCES`` returns one ticker-indexed row per security,
 which is what lets any column it produces become filterable without this module
 knowing the name. InsiderSignals and InstitutionalSignals are absent on purpose:
@@ -190,6 +195,29 @@ def _coerce_condition(condition: object) -> FilterCondition:
     return FilterCondition(*condition)
 
 
+def funnel_row(
+    condition: str, before: int, after: int, dropped_for_null: int = 0
+) -> dict:
+    """Build one attrition row in the shared funnel schema.
+
+    ``condition`` is the human-readable description of what narrowed the
+    population, ``before`` and ``after`` its size either side, and
+    ``dropped_for_null`` how much of the loss was securities that had no value
+    to test rather than ones that failed the test.
+
+    Every stage that narrows a population reports through this — filter
+    conditions here, scoring attrition in the orchestrator — so a report built
+    from both concatenates on identical columns.
+    """
+    return {
+        "condition": condition,
+        "before": before,
+        "after": after,
+        "dropped": before - after,
+        "dropped_for_null": dropped_for_null,
+    }
+
+
 def _condition_mask(frame: pd.DataFrame, condition: FilterCondition) -> pd.Series:
     """Build the boolean pass/fail mask for one condition.
 
@@ -294,15 +322,7 @@ class Filters:
             condition_text = f"{condition.field} {condition.operator}"
             if condition.operator not in _NULL_OPERATORS:
                 condition_text += f" {condition.value}"
-            rows.append(
-                {
-                    "condition": condition_text,
-                    "before": before,
-                    "after": after,
-                    "dropped": before - after,
-                    "dropped_for_null": dropped_for_null,
-                }
-            )
+            rows.append(funnel_row(condition_text, before, after, dropped_for_null))
         return pd.DataFrame(rows)
 
 

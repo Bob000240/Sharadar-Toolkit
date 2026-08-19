@@ -38,7 +38,7 @@ import pandas as pd
 
 import research.calendar as calendar
 import research.registry as registry
-from research.filters import SIGNAL_SOURCES, Filters, attach_signals
+from research.filters import SIGNAL_SOURCES, Filters, attach_signals, funnel_row
 from research.ranking import Ranking
 from research.signals.sig import Signals
 from research.universe import Universe
@@ -145,6 +145,20 @@ def _sources(fields: tuple[str, ...]) -> tuple[str, ...]:
     return tuple(name for name in SIGNAL_SOURCES if name in needed)
 
 
+def _positive_only(rank: Ranking) -> tuple[str, ...]:
+    """Return the fields whose non-positive values must be masked from a rank.
+
+    The union of what the registry declares for the ranked fields and what the
+    Ranking was built with. The registry is authoritative — a field it marks
+    positive_only is masked whether or not the caller thought to ask, which is
+    the point of registry-driven screening — but a caller's own entries are kept
+    rather than discarded, so a hand-built Ranking is amended instead of
+    silently overruled.
+    """
+    declared = registry.positive_only([metric.field for metric in rank.metrics])
+    return tuple(dict.fromkeys(rank.positive_only + declared))
+
+
 def run(spec: ScreenSpec, signal_day) -> ScreenResult:
     """Run ``spec`` as of ``signal_day`` and return a ScreenResult.
 
@@ -191,18 +205,17 @@ def run(spec: ScreenSpec, signal_day) -> ScreenResult:
             group_by=spec.rank.group_by,
             top_n=spec.rank.top_n,
             min_coverage=spec.rank.min_coverage,
-            positive_only=registry.positive_only([m.field for m in spec.rank.metrics]),
+            positive_only=_positive_only(spec.rank),
         )
         before = len(frame)
         frame = scorer.score(frame)
         scoring_attrition.append(
-            {
-                "condition": f"scored (coverage >= {spec.rank.min_coverage:g})",
-                "before": before,
-                "after": len(frame),
-                "dropped": before - len(frame),
-                "dropped_for_null": before - len(frame),
-            }
+            funnel_row(
+                f"scored (coverage >= {spec.rank.min_coverage:g})",
+                before,
+                len(frame),
+                dropped_for_null=before - len(frame),
+            )
         )
 
     if spec.filters is None:
