@@ -1,13 +1,11 @@
-"""
-Sharadar Toolkit pipeline entrypoint.
+"""Sharadar Toolkit pipeline entrypoint.
 
-Usage:
+Usage::
+
     uv run python -m pipeline.main <command>
 
-Commands:
-    setup                Create all tables
-    load                 Run the initial full data load
-    update               Run the daily incremental update
+Commands: ``setup`` creates all tables, ``load`` runs the initial full load,
+``update`` runs the daily incremental update.
 """
 
 import sys

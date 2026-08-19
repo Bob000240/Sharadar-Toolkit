@@ -1,28 +1,16 @@
 """Field/operator/value predicates over an assembled signal frame.
 
-A ``Filters`` object holds one or more conditions and narrows a frame by ANDing
-them. Conditions name fields by string, so any column a signal source produces
-is filterable without this module knowing the name; ``attach_signals`` at the
-bottom is what puts those columns on the frame.
-
-Most operators compare scalars, but ``recent_event_codes`` holds a list per row,
-so ``contains_any``, ``contains_all``, and ``excludes_any`` test membership
-inside the cell rather than against it.
+A ``Filters`` object ANDs its conditions. Conditions name fields by string, so
+any column a signal source produces is filterable without this module knowing
+the name; ``attach_signals`` puts those columns on the frame.
 
 ``_NULL_OPERATORS`` and ``_COLLECTION_VALUE_OPERATORS`` must stay in step with
 ``_OPERATORS``: registering an operator without listing it in the right set
-silently skips its validation in ``FilterCondition.__post_init__``.
+silently skips its validation. ``funnel_row`` is the attrition schema shared
+with the orchestrator, so the two stages cannot drift apart.
 
-``funnel_row`` is the shared attrition schema. It lives here because ``funnel``
-is its main producer, but the orchestrator reports scoring attrition through it
-too, so the two stages cannot drift into different columns and fail to
-concatenate into one report.
-
-Every source in ``SIGNAL_SOURCES`` returns one ticker-indexed row per security,
-which is what lets any column it produces become filterable without this module
-knowing the name. InsiderSignals and InstitutionalSignals are absent on purpose:
-their ``get_signals`` return raw transactions and holdings rather than one row
-per ticker, so they need their own aggregation before they fit here.
+InsiderSignals and InstitutionalSignals are absent on purpose: their
+``get_signals`` return raw rows rather than one per ticker.
 """
 
 from __future__ import annotations
@@ -142,10 +130,10 @@ class FilterCondition:
     def __post_init__(self) -> None:
         """Reject malformed triples and rewrite collection values as tuples.
 
-        Raise ValueError for an unregistered operator, a value supplied to an
-        operator that takes none, a missing value where one is required, a
-        non-collection value where a collection is required, or a ``between``
-        value that is not exactly two items.
+        :raises ValueError: for an unregistered operator, a value supplied to
+            an operator that takes none, a missing value where one is
+            required, a non-collection value where a collection is required,
+            or a ``between`` value that is not exactly two items.
         """
         if not isinstance(self.field, str) or not self.field.strip():
             raise ValueError("filter field must be a non-empty string")
@@ -200,14 +188,9 @@ def funnel_row(
 ) -> dict:
     """Build one attrition row in the shared funnel schema.
 
-    ``condition`` is the human-readable description of what narrowed the
-    population, ``before`` and ``after`` its size either side, and
-    ``dropped_for_null`` how much of the loss was securities that had no value
-    to test rather than ones that failed the test.
-
-    Every stage that narrows a population reports through this — filter
-    conditions here, scoring attrition in the orchestrator — so a report built
-    from both concatenates on identical columns.
+    Every stage that narrows a population reports through this — filter conditions
+    here, scoring attrition in the orchestrator — so a report built from both
+    concatenates on identical columns.
     """
     return {
         "condition": condition,
@@ -221,13 +204,11 @@ def funnel_row(
 def _condition_mask(frame: pd.DataFrame, condition: FilterCondition) -> pd.Series:
     """Build the boolean pass/fail mask for one condition.
 
-    Nulls never pass. A comparison against NaN yields NaN rather than False, so
-    the raw mask is filled and cast to bool, and every operator except
-    ``is_null`` and ``not_null`` is additionally ANDed with ``notna()``. An
-    unmeasured security is therefore excluded rather than judged.
+    Nulls never pass: a comparison against NaN yields NaN, so the mask is filled
+    and every operator but the null pair is ANDed with ``notna()``. An unmeasured
+    security is excluded rather than judged.
 
-    Return a boolean Series aligned to ``frame.index``. Raise KeyError when the
-    condition names a column ``frame`` does not carry.
+    :raises KeyError: when the condition names a column the frame lacks.
     """
     if condition.field not in frame.columns:
         raise KeyError(f"filter field {condition.field!r} is not attached to the frame")
@@ -242,22 +223,17 @@ def _condition_mask(frame: pd.DataFrame, condition: FilterCondition) -> pd.Serie
 
 
 class Filters:
-    """An ordered set of conditions that a security must satisfy in full.
+    """An ordered set of conditions a security must satisfy in full.
 
-    Public methods are ``apply``, which returns the surviving rows, and
-    ``funnel``, which returns the same narrowing as an attrition report. The
-    coerced conditions are held on the ``conditions`` instance variable.
-
-    Conditions compose as a logical AND, and ``apply`` narrows the frame one
-    condition at a time rather than building a combined mask. Order therefore
-    affects cost but not the result: a cheap numeric gate placed first leaves
-    fewer rows for an expensive per-row operator such as ``excludes_any``.
+    Conditions compose as a logical AND, applied one at a time rather than as a
+    combined mask. Order affects cost but not the result: a cheap numeric gate
+    first leaves fewer rows for an expensive per-row operator.
     """
 
     def __init__(self, *conditions: FilterCondition | tuple) -> None:
         """Coerce each condition and keep them in the order given.
 
-        Raise ValueError when no condition is supplied.
+        :raises ValueError: when no condition is supplied.
         """
         if not conditions:
             raise ValueError("Filters requires at least one condition")
@@ -300,14 +276,10 @@ class Filters:
     def funnel(self, frame: pd.DataFrame) -> pd.DataFrame:
         """Return an attrition report for the narrowing ``apply`` performs.
 
-        One row per condition, with columns ``condition``, ``before``,
-        ``after``, ``dropped``, and ``dropped_for_null``.
-
-        Counts are marginal rather than standalone: each row reports what its
-        condition removed from the survivors of the ones before it.
-        ``dropped_for_null`` separates securities that failed the test from
-        those that had no value to test, which is the difference between a real
-        gate and a coverage gap.
+        Counts are marginal: each row reports what its condition removed from the
+        survivors of the ones before it. ``dropped_for_null`` separates securities that
+        failed the test from those with no value to test — the difference between a
+        real gate and a coverage gap.
         """
         self._validate_fields(frame)
         rows = []
@@ -329,13 +301,10 @@ class Filters:
 def _empty_facts(repo) -> pd.DataFrame:
     """Build a no-row frame carrying the fact columns ``repo`` declares.
 
-    A signal service returns a bare DataFrame with no columns at all for a date
-    that predates its data, which would make a filter naming one of its fields
-    raise KeyError as though the field were misspelled. Preserving the columns
-    produces the honest outcome instead: every fact is null, nothing passes a
-    fact-based filter, and the population for that date is empty.
-
-    Return an empty ticker-indexed frame.
+    A signal service returns a bare DataFrame for a date predating its data, which
+    would make a filter naming one of its fields raise as though misspelled.
+    Preserving the columns gives the honest outcome: every fact null, nothing
+    passes, population empty.
     """
     return pd.DataFrame(
         columns=[column for column in repo._COLUMNS if column != "ticker"]
@@ -394,18 +363,14 @@ def attach_signals(
 ) -> pd.DataFrame:
     """Merge point-in-time facts from the signal layer onto a universe frame.
 
-    ``frame`` must carry a ``ticker`` column. ``sources`` names which
-    SIGNAL_SOURCES chains to merge and defaults to all of them; passing a
-    subset is how a caller skips work it does not need.
+    ``frame`` must carry a ``ticker`` column. ``sources`` names which chains to
+    merge; passing a subset is how a caller skips work it does not need. The signal
+    services own what a fact is and how it is made point-in-time.
 
-    The signal services own what a fact is and how it is made point-in-time;
-    this only joins them on ticker, so adding a filterable field is a
-    signal-layer change rather than an edit here.
-
-    Return ``frame`` plus every column the requested sources produce, merged
-    left so a security missing from a source keeps its row with that source's
-    facts null. Raise ValueError for an unregistered source name, or when a
-    source would overwrite a column the frame already carries.
+    :returns: ``frame`` plus every column the requested sources produce, merged
+        left so a security missing from a source keeps its row with nulls.
+    :raises ValueError: for an unregistered source, or when a source would
+        overwrite a column the frame already carries.
     """
     unknown = tuple(name for name in sources if name not in SIGNAL_SOURCES)
     if unknown:

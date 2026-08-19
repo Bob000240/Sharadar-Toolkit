@@ -1,18 +1,13 @@
 """Point-in-time fundamental facts with optional attachments.
 
 Sharadar dates every filing twice: ``calendardate`` is the period reported on,
-``datekey`` the day it reached the tape, and the two sit months apart. Every
-read here is bounded on ``datekey``, so a report is invisible until the day it
-was actually published.
+``datekey`` the day it reached the tape, months apart. Every read is bounded on
+``datekey``, so a report is invisible until published.
 
-Three dimensions are used. ART carries the latest trailing-twelve-month figures,
-ARQ the quarterly series behind year-over-year growth, and ARY the annual series
-behind the five-year change and volatility features.
-
-``attach_daily_valuation`` adds the SHARADAR/DAILY counterparts of the SF1
-valuation columns. Same ratios, different price date: SF1 freezes both halves
-at the filing date, while DAILY reprices the market-cap half every session, so
-``pe_daily`` is the signal-day price over the last filed earnings.
+Three dimensions: ART for trailing-twelve-month figures, ARQ for the quarterly
+series behind growth, ARY for the annual series behind five-year features.
+``attach_daily_valuation`` adds the SHARADAR/DAILY twins of the SF1 valuation
+columns — same ratios, but repriced at the signal day rather than the filing.
 """
 
 import numpy as np
@@ -192,15 +187,13 @@ class FundamentalSignals(Signals):
     ) -> pd.DataFrame:
         """Attach signal-day-priced valuation ratios from SHARADAR/DAILY.
 
-        Each ticker's most recent DAILY row on or before ``signal_day``,
-        suffixed ``_daily`` because the vendor reuses the SF1 column names:
-        ``pe`` is the filing-date ratio already on the frame and ``pe_daily``
-        the same ratio at the signal-day price. ``marketcap_daily`` and
-        ``ev_daily`` arrive in USD millions and are normalized to USD here, so
-        one threshold means the same thing against either marketcap field.
+        Suffixed ``_daily`` because the vendor reuses the SF1 column names: ``pe`` is
+        the filing-date ratio already on the frame, ``pe_daily`` the same ratio at the
+        signal-day price. ``marketcap_daily`` and ``ev_daily`` arrive in USD millions
+        and are normalized here, so one threshold means the same against either.
 
-        Return a copy of ``frame`` with the columns joined on; a ticker with no
-        DAILY row keeps its row with them null.
+        :returns: a copy of ``frame`` with the columns joined on; a ticker with no
+            DAILY row keeps its row with them null.
         """
         frame = frame.copy()
         daily = daily_repo.get_latest_rows(
@@ -231,20 +224,12 @@ class FundamentalSignals(Signals):
     ) -> pd.DataFrame:
         """Return rows of ``dimension`` covering ``lookback`` and published by now.
 
-        ``lookback`` is any span subtractable from a Timestamp, so a caller can
-        pass calendar days or calendar years as the accounting period requires.
-
-        The repository filters on ``calendardate``, so the query window is
-        padded forward by ``_LABEL_LEAD_MONTHS`` to reach periods that had
-        already closed on the signal day, and ``datekey`` then discards whatever
-        had not actually been published yet.
-
-        Both halves are load-bearing and only one of them is obvious. Without
-        the pad the newest period is missed and every fact lags a quarter.
-        Without the ``datekey`` filter the caller reads reports that did not
-        exist on the signal day, which is lookahead that surfaces as skill
-        rather than as an error, because next quarter's earnings really do
-        predict next quarter's returns.
+        Both halves are load-bearing and only one is obvious. The repository filters on
+        ``calendardate``, so the window is padded forward by ``_LABEL_LEAD_MONTHS`` to
+        reach periods that had already closed — without it the newest period is missed
+        and every fact lags a quarter. The ``datekey`` filter then discards what was
+        not yet published; without it the caller reads reports that did not exist on
+        the signal day, which surfaces as skill rather than as an error.
         """
         frame = fundamentals_repo.get(
             tickers=tickers,

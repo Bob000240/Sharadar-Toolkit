@@ -1,21 +1,14 @@
-"""Full initial data load. Run once after the tables exist.
-
-::
+"""Full initial data load. Run once after the tables exist::
 
     uv run python -m pipeline.load_data
 
-Two stages. Raw Sharadar tables are bulk-exported as zipped CSV through the
-datatables export endpoint and COPY'd into Postgres, which is both faster than
-row-by-row inserts and reproducible, and which includes delisted tickers so the
-history carries no survivorship bias. Technical features are then computed
-locally from the loaded equity prices.
+Raw Sharadar tables are bulk-exported as zipped CSV and COPY'd into Postgres,
+which includes delisted tickers so the history carries no survivorship bias.
+Technical features are then computed locally.
 
 The technical features are local on purpose: no vendor table carries historical
 indicators. SHARADAR/METRICS looked like one but serves a one-row-per-ticker
-snapshot (verified by API probe), so derived history can only be built here.
-
-The incremental delta that keeps this current lives in ``pipeline.daily_update``.
-Requires NDL_APIKEY in the environment.
+snapshot, so derived history can only be built here.
 """
 
 import glob

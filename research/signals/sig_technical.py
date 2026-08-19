@@ -2,7 +2,7 @@
 
 Reads the stored per-session feature rows and derives the columns that only
 make sense cross-sectionally or against a benchmark. Everything is bounded by
-the signal day, so a feature row filed after it is never visible.
+the signal day.
 """
 
 import pandas as pd

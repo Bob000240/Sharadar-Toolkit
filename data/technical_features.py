@@ -8,13 +8,9 @@ from numpy.lib.stride_tricks import sliding_window_view
 def _rolling_trend(close: pd.Series, window: int = 60) -> tuple[pd.Series, pd.Series]:
     """Return the R-squared and annualised slope of a rolling linear fit.
 
-    A closed-form rolling regression of close against time. It replaces a
-    per-window ``rolling.apply`` of corrcoef and polyfit, which ran a Python
-    callable on every window of every ticker and dominated feature-generation
-    runtime.
-
-    Values are identical to the version it replaced: the leading ``window - 1``
-    rows and any window containing a NaN are NaN.
+    A closed-form rolling regression, replacing a per-window ``rolling.apply`` of
+    corrcoef and polyfit that dominated feature-generation runtime. Values are
+    identical: leading ``window - 1`` rows and any window containing a NaN are NaN.
     """
     y = close.to_numpy(dtype=float)
     n = y.size

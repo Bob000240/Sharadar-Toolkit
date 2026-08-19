@@ -1,12 +1,11 @@
 """Persistence for Sharadar fundamentals across all reporting dimensions.
 
-Every filing carries two dates. ``calendardate`` is the period reported on and
-``datekey`` is the day it reached the tape, commonly months later. Point-in-time
+Every filing carries two dates: ``calendardate`` is the period reported on,
+``datekey`` the day it reached the tape, commonly months later. Point-in-time
 reads bound on ``datekey``; period-based reads bound on ``calendardate``.
 
-``dimension`` distinguishes the reporting basis, ART for trailing twelve months,
-ARQ for quarterly, and ARY for annual, and is part of the primary key so all
-three coexist per ticker.
+``dimension`` is part of the primary key — ART, ARQ, and ARY coexist per
+ticker.
 """
 
 from database.db_connection import get_connection
@@ -273,9 +272,12 @@ CONFLICT = f"ON CONFLICT (ticker, dimension, datekey) DO UPDATE SET {_UPDATE_SET
 
 
 def insert(df: pd.DataFrame):
-    """Upsert rows into ``fundamentals``, keyed on ``(ticker, dimension, datekey)``.
+    """Upsert rows into ``fundamentals``, keyed on ``(ticker, dimension,
+    datekey)``.
 
-    Columns outside ``_COLUMNS`` are ignored and NaN/NaT become SQL NULL. A restatement filed under a new ``datekey`` lands as its own row, while a correction to an existing filing overwrites it. No-op on an empty frame.
+    Columns outside ``_COLUMNS`` are ignored and NaN/NaT become SQL NULL. A
+    restatement filed under a new ``datekey`` lands as its own row, while a
+    correction to an existing filing overwrites it. No-op on an empty frame.
     """
     if df.empty:
         return
@@ -299,9 +301,11 @@ def get(
 ) -> pd.DataFrame:
     """Return ``fundamentals`` rows matching the supplied filters.
 
-    Every argument is optional and omitting all of them returns the whole table. ``dimension`` selects the reporting basis: ART for trailing twelve
-    months, ARQ for quarterly, ARY for annual. Dates bound ``calendardate``, the
-    period reported on, which is months earlier than the day it was filed. Ordered by ticker, dimension, then filing date.
+    Every argument is optional and omitting all of them returns the whole
+    table. ``dimension`` selects the reporting basis: ART for trailing twelve
+    months, ARQ for quarterly, ARY for annual. Dates bound ``calendardate``,
+    the period reported on, which is months earlier than the day it was filed.
+    Ordered by ticker, dimension, then filing date.
     """
     q = "SELECT * FROM fundamentals WHERE TRUE"
     params = {}

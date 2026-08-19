@@ -10,7 +10,4 @@ __pycache__/
 
 # Editors / agent tooling
 .vscode/
-.claude/
-
-#past files and reference files
-OUTDATED
+.claude/settings.local.json

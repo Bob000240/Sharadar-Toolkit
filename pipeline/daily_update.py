@@ -1,16 +1,11 @@
 """Daily incremental update steps, run each market day after close.
 
-::
-
-    uv run python -m pipeline.main update
-
-``pipeline.main`` owns the step order and the per-step failure handling; this
+``pipeline.main`` owns the step order and per-step failure handling; this
 module only provides the individual update functions.
 
-Most steps resume from a stored ``lastupdated`` watermark and ask the vendor only
-for rows changed since. Insider filings, events, and 13F holdings use a fixed
-lookback window instead, because those records can appear long after the date
-they describe.
+Most steps resume from a stored ``lastupdated`` watermark. Insider filings,
+events, and 13F holdings use a fixed lookback window instead, because those
+records can appear long after the date they describe.
 """
 
 import time

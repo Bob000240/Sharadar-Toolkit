@@ -57,9 +57,11 @@ def drop_table():
 
 
 def insert(df: pd.DataFrame):
-    """Upsert rows into ``institutional_holdings``, keyed on ``(ticker, investorname, calendardate, securitytype)``.
+    """Upsert rows into ``institutional_holdings``, keyed on ``(ticker,
+    investorname, calendardate, securitytype)``.
 
-    Columns outside ``_COLUMNS`` are ignored and NaN/NaT become SQL NULL. A restated holding overwrites the stored one. No-op on an empty frame.
+    Columns outside ``_COLUMNS`` are ignored and NaN/NaT become SQL NULL. A
+    restated holding overwrites the stored one. No-op on an empty frame.
     """
     if df.empty:
         return
@@ -83,7 +85,8 @@ def get(
 ) -> pd.DataFrame:
     """Return ``institutional_holdings`` rows matching the supplied filters.
 
-    Every argument is optional and omitting all of them returns the whole table. Dates bound ``calendardate``, the quarter reported on, not the
+    Every argument is optional and omitting all of them returns the whole
+    table. Dates bound ``calendardate``, the quarter reported on, not the
     filing date. Ordered by ticker then calendar date.
     """
     q = "SELECT * FROM institutional_holdings WHERE TRUE"

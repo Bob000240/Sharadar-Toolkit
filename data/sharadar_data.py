@@ -1,10 +1,9 @@
 """Thin client for the Nasdaq Data Link Sharadar datatables.
 
 One method per vendor table, each translating keyword arguments into the API's
-filter dicts. Nothing here interprets or reshapes the data; the signal layer
-owns that.
+filter dicts. Nothing here interprets or reshapes the data.
 
-The module patches a connect and read timeout onto the vendor library at import,
+A connect and read timeout is patched onto the vendor library at import,
 because its client otherwise waits indefinitely and an unattended daily update
 would hang rather than fail.
 """
@@ -43,8 +42,8 @@ class SharadarData:
     def __init__(self):
         """Read NDL_APIKEY from the environment and configure the client.
 
-        Raise ValueError when the key is absent, rather than failing later on the first
-        request with an authentication error.
+        :raises ValueError: when the key is absent, rather than failing later
+            on the first request with an authentication error.
         """
         self.key = os.getenv("NDL_APIKEY")
         if not self.key:

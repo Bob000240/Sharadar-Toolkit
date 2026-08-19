@@ -1,32 +1,15 @@
 """Screen orchestration: compose a universe, score it, filter it, cut it.
 
-``run(spec, signal_day)`` is the single entry point a CLI, an agent, or the
-backtest harness calls. Everything it needs is in the ``ScreenSpec``, so the
-same object a user builds is the object the harness replays, which is the only
-way to guarantee that what you tested is what you screened.
+``run(spec, signal_day)`` is the single entry point. The order is deliberate:
+structural universe, derive only the referenced sources, score over the whole
+universe, apply elective filters, cut to top N.
 
-The order of operations is deliberate at every step:
+Scoring before filtering is the load-bearing choice — it makes a score of 82
+mean the same thing across screens, where scoring afterwards would make every
+score relative to a different reference set.
 
-  1. STRUCTURAL universe — non-negotiable listing and recency rules
-  2. derive features — only the sources the spec actually references
-  3. SCORE over the whole structural universe
-  4. ELECTIVE filters — the spec's own conditions, with a per-filter funnel
-  5. cut to the top N
-
-Step 3 before step 4 is the load-bearing choice. Scoring the full universe
-before filtering makes a score of 82 mean the same thing no matter which filters
-the spec picked; scoring afterwards would make every score relative to a
-different reference set and silently incomparable between screens.
-
-This module composes; it does not compute. Universe rules live in
-``research.universe``, feature assembly in ``research.filters.attach_signals``,
-predicates in ``research.filters``, scoring in ``research.ranking``, and the
-field catalog in ``research.registry``.
-
-``_SOURCE_ALIASES`` reconciles one naming mismatch: the registry calls an event
-field's source "event" while the signal loader registers the chain as "events".
-A rename would remove it, but would touch every field declaration in the
-registry and every caller of ``attach_signals``, so the mapping is stated here.
+This module composes; it does not compute. ``_SOURCE_ALIASES`` reconciles one
+naming mismatch: the registry says "event", the signal loader says "events".
 """
 
 from __future__ import annotations
@@ -50,13 +33,9 @@ _SOURCE_ALIASES = {"event": "events"}
 class ScreenSpec:
     """A complete, serialisable screen.
 
-    Instance variables are ``name``, ``description``, ``universe``, ``filters``,
-    and ``rank``. The only public method is ``fields``.
-
-    ``filters=None`` scores without narrowing. ``rank=None`` filters without
-    scoring, which answers "how many names even qualify?" without committing to
-    a ranking judgment. Frozen, so the spec that was tested is the spec that
-    runs.
+    ``filters=None`` scores without narrowing; ``rank=None`` filters without
+    scoring, answering "how many names even qualify?" without committing to a
+    ranking judgment. Frozen, so the spec that was tested is the spec that runs.
     """
 
     name: str = "unnamed"
@@ -148,12 +127,9 @@ def _sources(fields: tuple[str, ...]) -> tuple[str, ...]:
 def _positive_only(rank: Ranking) -> tuple[str, ...]:
     """Return the fields whose non-positive values must be masked from a rank.
 
-    The union of what the registry declares for the ranked fields and what the
-    Ranking was built with. The registry is authoritative — a field it marks
-    positive_only is masked whether or not the caller thought to ask, which is
-    the point of registry-driven screening — but a caller's own entries are kept
-    rather than discarded, so a hand-built Ranking is amended instead of
-    silently overruled.
+    The union of what the registry declares and what the Ranking was built with.
+    The registry is authoritative, but a caller's own entries are kept rather than
+    discarded, so a hand-built Ranking is amended instead of overruled.
     """
     declared = registry.positive_only([metric.field for metric in rank.metrics])
     return tuple(dict.fromkeys(rank.positive_only + declared))
@@ -162,16 +138,13 @@ def _positive_only(rank: Ranking) -> tuple[str, ...]:
 def run(spec: ScreenSpec, signal_day) -> ScreenResult:
     """Run ``spec`` as of ``signal_day`` and return a ScreenResult.
 
-    ``signal_day`` is aligned onto a real trading session first, so a request
-    made on a weekend reports the session it actually used.
+    ``signal_day`` is aligned onto a real trading session first. Scoring is itself
+    attrition: a name carrying too few ranked fields leaves before any elective
+    filter sees it, so it is the funnel's first row and the counts reconcile
+    against ``universe_size``.
 
-    Scoring is itself attrition: a name carrying too few of the ranked fields
-    cannot be scored and leaves the population before any elective filter sees
-    it, so it is reported as the funnel's first row and the counts reconcile
-    against ``universe_size`` instead of starting mid-air.
-
-    Raise ValueError for an invalid spec, rather than returning something
-    plausible-looking from a misspelled field.
+    :raises ValueError: for an invalid spec, rather than returning something
+        plausible-looking from a misspelled field.
     """
     problems = validate(spec)
     if problems:

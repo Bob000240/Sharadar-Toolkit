@@ -1,12 +1,7 @@
 """Forward returns over a fixed horizon of market sessions.
 
-The measurement half of a walk-forward: given a population and a signal day,
-what did those securities go on to do? Nothing here reads a fact from on or
-before the signal day, and nothing elsewhere reads a price after it.
-
-The window closes on an exact session supplied by ``research.calendar`` rather
-than on a calendar-day approximation, so every name is measured over the
-identical wall-clock span.
+The measurement half of a walk-forward. The window closes on an exact session
+from ``research.calendar``, so every name spans the identical wall clock.
 """
 
 from __future__ import annotations
@@ -53,27 +48,31 @@ _QUERY_TEMPLATE = """
 """
 
 
+_PANEL_TEMPLATE = """
+    SELECT ticker, date, {price} AS price
+    FROM {table}
+    WHERE ticker = ANY(:tickers)
+      AND date >  CAST(:as_of AS date)
+      AND date <= CAST(:window_end AS date)
+      AND {price} > 0
+    ORDER BY ticker, date
+"""
+
+
 class ForwardReturns:
     """Return from the first session after the signal day to a fixed horizon.
 
-    Public methods are ``run``, for equities, and ``benchmark``, for funds; the
-    two differ only in which price table they read. ``horizon_sessions`` is the
-    single instance variable.
-
-    The horizon is counted in market sessions, not in the security's own bars:
-    every name is measured over the identical wall-clock window, closing at
-    ``calendar.horizon_end(signal_day, horizon_sessions)``. A name that halts,
-    delists, or trades thinly reaches the window's end with fewer bars, exits on
-    its last one, and reports ``complete=False``. Counting each name's own bars
-    instead would let a sparse security's "252 sessions" span fourteen months
-    and be compared against a liquid one's twelve.
+    The horizon counts market sessions, not each security's own bars: a name
+    that halts or delists exits on its last bar and reports ``complete=False``.
+    Counting its own bars instead would let a sparse security's "252 sessions"
+    span fourteen months against a liquid one's twelve.
     """
 
     def __init__(self, horizon_sessions: int = 252) -> None:
         """Set the horizon in market sessions.
 
-        Raise ValueError below ``_MIN_HORIZON_SESSIONS``, since an entry and an
-        exit cannot come from the same bar.
+        :raises ValueError: below ``_MIN_HORIZON_SESSIONS``, since an entry and
+            an exit cannot come from the same bar.
         """
         if horizon_sessions < _MIN_HORIZON_SESSIONS:
             raise ValueError(
@@ -96,16 +95,13 @@ class ForwardReturns:
     def _returns(self, table: str, tickers, signal_day) -> pd.DataFrame:
         """Measure one population over the horizon against ``table``.
 
-        The window opens strictly after ``signal_day`` and closes on the exact
-        session the horizon lands on, clamped to the end of the data. Clamping
-        is what makes an unfinished horizon report ``complete=False`` rather than
-        raise: near the present there is simply no exit yet.
-
-        Return one row per measurable ticker, carrying the entry and exit dates
-        and prices, the realised ``forward_return``, ``sessions_held``, and
-        ``complete``. A ticker with no price at all after the signal day is
-        absent rather than null.
+        :returns: one row per measurable ticker with entry/exit dates and
+            prices, ``forward_return``, ``sessions_held``, and ``complete``. A
+            ticker with no price after the signal day is absent, not null.
         """
+        # The window closes on the horizon's exact session, clamped to the end
+        # of the data. Clamping is what lets an unfinished horizon report
+        # complete=False rather than raise: near the present there is no exit yet.
         query = text(_QUERY_TEMPLATE.format(table=table, price=_PRICE_COLUMN))
         window_end = calendar.horizon_end(signal_day, self.horizon_sessions)
         frame = pd.read_sql_query(
@@ -133,3 +129,29 @@ class ForwardReturns:
                 "complete",
             ]
         ]
+
+    def panel(self, tickers, signal_day) -> pd.DataFrame:
+        """Return each security's daily returns across the horizon.
+
+        The window ``run`` measures, kept as a series rather than collapsed to
+        one number: a correlation needs the periods behind a return.
+
+        :returns: sessions x tickers of simple returns, aligned on the session
+            grid so a halted name carries NaN rather than shifting its
+            neighbours' dates. A ticker with no price in the window is absent.
+        """
+        query = text(_PANEL_TEMPLATE.format(table=_EQUITY_TABLE, price=_PRICE_COLUMN))
+        window_end = calendar.horizon_end(signal_day, self.horizon_sessions)
+        frame = pd.read_sql_query(
+            query,
+            get_connection(),
+            params={
+                "tickers": list(tickers),
+                "as_of": pd.Timestamp(signal_day).date().isoformat(),
+                "window_end": window_end.isoformat(),
+            },
+        )
+        if frame.empty:
+            return pd.DataFrame()
+        prices = frame.pivot(index="date", columns="ticker", values="price")
+        return prices.sort_index().pct_change().iloc[1:]

@@ -1,8 +1,7 @@
 """Point-in-time corporate event facts, one row per ticker.
 
-The lookback ends the day *before* the signal day, unlike every other signal
-source, which reads up to and including it. An 8-K filed on the signal day is
-therefore not visible to a screen run that same day.
+The lookback ends the day *before* the signal day, unlike every other source,
+so an 8-K filed on the signal day is not visible to a screen run that day.
 
 The module names the Sharadar event codes but takes no position on them:
 whether a code is good, bad, or disqualifying is a strategy judgment.
@@ -48,14 +47,12 @@ class EventSignals(Signals):
     ) -> pd.DataFrame:
         """Aggregate each ticker's recent corporate events into objective facts.
 
-        The window is the ``lookback_days`` ending one day before
-        ``signal_day``, so nothing filed on the signal day itself is visible.
+        The window is ``lookback_days`` ending one day before ``signal_day``.
 
-        Return a ticker-indexed frame with one row per *requested* ticker,
-        carrying earnings recency, 13D recency, and the deduplicated list of
-        event codes. Tickers with no events keep their row with null recencies
-        and an empty list, because absence of events is a fact rather than
-        missing data.
+        :returns: a ticker-indexed frame with one row per *requested* ticker carrying
+            earnings recency, 13D recency, and deduplicated event codes. Tickers with
+            no events keep their row with null recencies and an empty list, because
+            absence of events is a fact rather than missing data.
         """
         signal_day = pd.Timestamp(signal_day) - pd.Timedelta(days=1)
         start = signal_day - pd.Timedelta(days=lookback_days)

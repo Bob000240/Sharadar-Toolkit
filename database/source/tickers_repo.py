@@ -104,7 +104,10 @@ def drop_table():
 def insert(df: pd.DataFrame):
     """Upsert rows into ``tickers``, keyed on ``(ticker, table_code)``.
 
-    Columns outside ``_COLUMNS`` are ignored and NaN/NaT become SQL NULL. Updates preserve any stored value the incoming row leaves null, so a partial vendor row cannot erase descriptors it simply did not carry. No-op on an empty frame.
+    Columns outside ``_COLUMNS`` are ignored and NaN/NaT become SQL NULL.
+    Updates preserve any stored value the incoming row leaves null, so a
+    partial vendor row cannot erase descriptors it simply did not carry. No-op
+    on an empty frame.
     """
     if df.empty:
         return
@@ -125,8 +128,9 @@ def get(
 ) -> pd.DataFrame:
     """Return ``tickers`` rows matching the supplied filters.
 
-    Every argument is optional and omitting all of them returns the whole table. ``table_code`` selects the vendor table the ticker belongs to,
-    SEP for equities and SFP for funds. Ordered by ticker.
+    Every argument is optional and omitting all of them returns the whole
+    table. ``table_code`` selects the vendor table the ticker belongs to, SEP
+    for equities and SFP for funds. Ordered by ticker.
     """
     q = "SELECT * FROM tickers WHERE TRUE"
     params = {}

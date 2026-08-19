@@ -1,13 +1,8 @@
-"""Trading sessions, as observed in the price data.
+"""The trading-session calendar, derived from the loaded price history.
 
-A *session* is a date on which the equity market produced prices. This module is
-the single authority on that question, so callers stop approximating it — no
-weekday arithmetic, no calendar-day fudge factors, no assuming the date handed
-to a screen is a day the market was actually open.
-
-The session list is read once and cached for the life of the process. Call
-`refresh()` after a daily update if a long-running process needs to see dates
-loaded since it started.
+Sessions are whatever dates ``equity_prices`` actually holds, so the calendar
+reflects the data rather than an exchange holiday list. Cached at first use;
+call ``refresh`` after a load.
 """
 
 from __future__ import annotations
@@ -127,9 +122,9 @@ def latest_session(as_of=None) -> date:
 def next_session(day, count: int = 1) -> date:
     """Return the ``count``-th session strictly after ``day``.
 
-    Raise ValueError when ``count`` is below 1, or when the data does not extend
-    that far. Use ``horizon_end`` instead where running off the end of the data
-    is expected rather than exceptional.
+    :raises ValueError: when ``count`` is below 1, or when the data does not
+        extend that far. Use ``horizon_end`` instead where running off the end
+        of the data is expected rather than exceptional.
     """
     if count < 1:
         raise ValueError(f"count must be at least 1; got {count}")
@@ -147,8 +142,8 @@ def next_session(day, count: int = 1) -> date:
 def previous_session(day, count: int = 1) -> date:
     """Return the ``count``-th session strictly before ``day``.
 
-    Raise ValueError when ``count`` is below 1, or when the data does not reach
-    back that far.
+    :raises ValueError: when ``count`` is below 1, or when the data does not
+        reach back that far.
     """
     if count < 1:
         raise ValueError(f"count must be at least 1; got {count}")
@@ -201,20 +196,12 @@ def session_count(start, end) -> int:
 def schedule(start, end, freq: str = "QS", direction: str = "forward") -> list[date]:
     """Return signal days on a pandas frequency, each snapped onto a session.
 
-    ``pd.date_range(freq="QS")`` yields quarter starts, most of which the market
-    is closed for. Snapping keeps the intended cadence while ensuring every
-    signal day is a date the market actually traded.
+    ``pd.date_range(freq="QS")`` yields quarter starts, most of which the market is
+    closed for. ``direction`` decides which way a closed boundary moves: "forward"
+    takes the period's opening session, "backward" the last session of the
+    preceding period. Boundaries with no session on that side are dropped.
 
-    ``direction`` decides which way a closed boundary moves. "forward", the
-    default, takes the period's opening session, which is what a period-start
-    frequency such as "QS" or "MS" means; "backward" takes the last session of
-    the preceding period, which is the right reading for as-of style cadences.
-    Boundaries with no session on the chosen side are dropped rather than
-    silently pulled to the other end of the data, and duplicates are dropped
-    too, so a frequency finer than the session grid cannot emit one session
-    twice.
-
-    Raise ValueError for a direction other than "forward" or "backward".
+    :raises ValueError: for a direction other than "forward" or "backward".
     """
     if direction not in ("forward", "backward"):
         raise ValueError(

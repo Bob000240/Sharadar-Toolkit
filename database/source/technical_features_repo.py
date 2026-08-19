@@ -139,7 +139,9 @@ def drop_table():
 def insert(df: pd.DataFrame):
     """Upsert rows into ``technical_features``, keyed on ``(ticker, date)``.
 
-    Columns outside ``_COLUMNS`` are ignored and NaN/NaT become SQL NULL. Recomputed features overwrite the stored ones, and infinities are stored as NULL. No-op on an empty frame.
+    Columns outside ``_COLUMNS`` are ignored and NaN/NaT become SQL NULL.
+    Recomputed features overwrite the stored ones, and infinities are stored as
+    NULL. No-op on an empty frame.
     """
     if df.empty:
         return
@@ -162,7 +164,9 @@ def get(
 ) -> pd.DataFrame:
     """Return ``technical_features`` rows matching the supplied filters.
 
-    Every argument is optional and omitting all of them returns the whole table. Dates bound the ``date`` column inclusively. Ordered by ticker then date.
+    Every argument is optional and omitting all of them returns the whole
+    table. Dates bound the ``date`` column inclusively. Ordered by ticker then
+    date.
     """
     q = "SELECT * FROM technical_features WHERE TRUE"
     params = {}
@@ -211,8 +215,9 @@ def get_missing_feature_dates() -> pd.DataFrame:
 def get_stale_feature_tickers() -> list[str]:
     """Return tickers whose stored close no longer matches the price table.
 
-    A mismatch means the price was re-adjusted after the features were computed. Every rolling window depends on the full series, so these tickers need their
-    entire history rebuilt rather than just their recent rows.
+    A mismatch means the price was re-adjusted after the features were
+    computed. Every rolling window depends on the full series, so these tickers
+    need their entire history rebuilt rather than just their recent rows.
     """
     q = text("""
         SELECT DISTINCT ep.ticker
@@ -229,14 +234,13 @@ def get_stale_feature_tickers() -> list[str]:
 def get_latest_rows(
     tickers: str | list[str] | None, signal_day: pd.Timestamp
 ) -> pd.DataFrame:
-    """Each ticker's most recent feature row on or before `signal_day`.
+    """Each ticker's most recent feature row on or before ``signal_day``.
 
-    With an explicit ticker list this drives one index seek per ticker against
-    the (ticker, date) primary key. `DISTINCT ON` over the same set instead
-    reads every historical row for every ticker before discarding all but the
-    newest — roughly 14M rows to return 5k, and ~15x slower. There is no lower
-    date bound in either form, so a long-delisted ticker still resolves to its
-    final row.
+    An explicit ticker list drives one index seek per ticker against the (ticker,
+    date) primary key. ``DISTINCT ON`` over the same set instead reads every
+    historical row before discarding all but the newest — roughly 14M rows to
+    return 5k, and ~15x slower. No lower date bound, so a long-delisted ticker
+    still resolves to its final row.
     """
     signal_day = signal_day.date() if hasattr(signal_day, "date") else signal_day
 

@@ -1,36 +1,15 @@
 """The named screen catalog: the screens this toolkit ships with.
 
-A ``ScreenSpec`` says which securities a strategy wants and how to order them.
-That is a judgment — someone's opinion about what makes a holding worth owning —
-and it is kept out of ``research.orchestrator`` on purpose, because §5 of the
-project specification separates objective facts from strategy judgments. The
-orchestrator knows how to run any screen and has no opinion about which are
-worth running; this module is the opinions and contains no logic at all.
+A ``ScreenSpec`` is a judgment about what makes a holding worth owning, kept
+out of ``research.orchestrator`` because §5 separates objective facts from
+strategy judgments. The orchestrator runs any screen and has no opinion; this
+module is the opinions and contains no logic.
 
-Every spec here is data. Adding a screen means adding a constant and listing it
-in ``_CATALOG`` — no new code path, and no new test beyond the catalog-wide
-validation sweep, which asserts that every shipped screen references registered
-fields in roles the registry permits.
-
-Conventions the catalog follows, none of them enforced by the engine:
-
-  - Rank weights sum to 1.0. ``Ranking`` renormalises by coverage anyway, so
-    this buys readability rather than correctness: a 0.4 reads directly as
-    "two fifths of the blend".
-  - Every screen carries a liquidity gate. The structural universe enforces
-    listing and recency but no size or turnover floor, so without one a screen
-    ranks names nobody can actually buy.
-  - Valuation screens carry a solvency gate. A cheap multiple and a broken
-    balance sheet look identical to a percentile rank.
-  - Fields with ``_FIVE_YEAR`` or ``_VENDOR_DAILY`` coverage notes are avoided
-    here. They are legitimate to screen on, but they are empty across early
-    backtest windows or until SHARADAR/DAILY is loaded, and a shipped screen
-    that silently returns nothing is worse than one that is merely simple.
-
-``MOMENTUM_LEADERS`` is deliberately technical-only: no fundamental or event
-field appears in it, so ``orchestrator.run`` resolves a single derive chain and
-skips the fundamentals join entirely. It is the catalog's demonstration that a
-screen computes only what it references.
+Every spec here is data — adding a screen means adding a constant and listing
+it in ``_CATALOG``. Conventions, none enforced by the engine: rank weights sum
+to 1.0 for readability, every screen carries a liquidity gate, valuation
+screens carry a solvency gate, and fields with sparse coverage notes are
+avoided so a shipped screen never silently returns nothing.
 """
 
 from __future__ import annotations
@@ -87,8 +66,7 @@ DEEP_VALUE = ScreenSpec(
 
 QUALITY_COMPOUNDERS = ScreenSpec(
     name="quality_compounders",
-    description="Durably profitable and still growing, ranked without regard "
-    "to price.",
+    description="Durably profitable and still growing, ranked without regard to price.",
     filters=Filters(
         ("marketcap", ">=", 1e9),
         ("dollar_volume_20d_avg", ">=", 3e6),
@@ -139,8 +117,8 @@ SCREENS: dict[str, ScreenSpec] = {spec.name: spec for spec in _CATALOG}
 def get(name: str) -> ScreenSpec:
     """Return the shipped screen called ``name``.
 
-    Raise KeyError naming every available screen, which is the error a CLI user
-    who mistyped a name should see rather than a bare missing key.
+    :raises KeyError: naming every available screen, which is the error a CLI
+        user who mistyped a name should see rather than a bare missing key.
     """
     try:
         return SCREENS[name]

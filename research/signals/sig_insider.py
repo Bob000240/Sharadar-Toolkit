@@ -1,13 +1,12 @@
 """Point-in-time insider transactions and optional activity facts.
 
 Windows are measured on ``filingdate`` rather than ``transactiondate``: a
-purchase is not knowable until it is disclosed, whatever day it was executed.
+purchase is not knowable until disclosed, whatever day it was executed.
 
-The central judgment here is routine versus opportunistic. An insider who buys
-in the same calendar month every year is following a plan, and that purchase
+The central judgment is routine versus opportunistic. An insider who buys in
+the same calendar month every year is following a plan, and that purchase
 carries little information; one who breaks the pattern may be acting on
-something. ``ROUTINE_PATTERN_YEARS`` sets how many prior years must show the
-same month before a purchase counts as routine.
+something. ``ROUTINE_PATTERN_YEARS`` sets how many prior years must match.
 """
 
 from __future__ import annotations
@@ -195,13 +194,11 @@ class InsiderSignals(Signals):
     def _classify_purchases(purchases: pd.DataFrame) -> pd.Series:
         """Label each purchase routine, opportunistic, or unclassified.
 
-        A purchase is routine when the same insider also bought in that same
-        calendar month in each of the previous ``ROUTINE_PATTERN_YEARS`` years,
-        which marks a recurring plan rather than a decision. Prior purchases
-        count only if they were both disclosed and executed earlier, so the
-        label is decidable from what was knowable at the time. A row with no
-        identifiable owner or transaction date is unclassified rather than
-        guessed at.
+        Routine means the same insider also bought in that calendar month in each of
+        the previous ``ROUTINE_PATTERN_YEARS`` years — a recurring plan rather than a
+        decision. Prior purchases count only if both disclosed and executed earlier, so
+        the label is decidable from what was knowable at the time. A row with no
+        identifiable owner or transaction date is unclassified rather than guessed at.
         """
         if purchases.empty:
             return pd.Series(dtype="object", index=purchases.index)

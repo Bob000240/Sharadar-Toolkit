@@ -67,7 +67,8 @@ def drop_table():
 def insert(df: pd.DataFrame):
     """Upsert rows into ``daily_valuation``, keyed on ``(ticker, date)``.
 
-    Columns outside ``_COLUMNS`` are ignored and NaN/NaT become SQL NULL. A revised row overwrites the stored one. No-op on an empty frame.
+    Columns outside ``_COLUMNS`` are ignored and NaN/NaT become SQL NULL. A
+    revised row overwrites the stored one. No-op on an empty frame.
     """
     if df.empty:
         return
@@ -90,7 +91,9 @@ def get(
 ) -> pd.DataFrame:
     """Return ``daily_valuation`` rows matching the supplied filters.
 
-    Every argument is optional and omitting all of them returns the whole table. Dates bound the ``date`` column inclusively. Ordered by ticker then date.
+    Every argument is optional and omitting all of them returns the whole
+    table. Dates bound the ``date`` column inclusively. Ordered by ticker then
+    date.
     """
     q = "SELECT * FROM daily_valuation WHERE TRUE"
     params = {}

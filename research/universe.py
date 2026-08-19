@@ -1,14 +1,9 @@
 """The structural universe: which securities exist and are tradable at all.
 
-These are the non-negotiable listing rules — security type, exchange, and
-recency of trading — as distinct from the elective filters a strategy chooses.
-A screen composes both, but only this half decides whether a security is a
-candidate in principle.
-
-Recency is enforced against the last date the security actually produced a
-price, read per ticker by a lateral join, so a name that quietly stopped
-trading drops out before any strategy sees it. ``_STALE_TRADE_DAYS`` is the
-threshold past which that guarantee weakens enough to warrant a warning.
+Non-negotiable listing rules — security type, exchange, recency of trading — as
+distinct from the elective filters a strategy chooses. Recency is enforced
+against the last date a security actually produced a price, so a name that
+quietly stopped trading drops out before any strategy sees it.
 """
 
 from __future__ import annotations
@@ -82,11 +77,6 @@ _QUERY = text("""
 class Universe:
     """A point-in-time list of securities eligible on structural grounds.
 
-    The only public method is ``run``, which issues the query for one signal
-    day. Instance variables mirror the constructor arguments: ``security_types``,
-    ``exchanges``, ``include_tickers``, ``exclude_tickers``, and
-    ``recent_trade_days``.
-
     Stateless with respect to the signal day, so one instance is built once and
     reused across every date of a sweep.
     """
@@ -103,10 +93,10 @@ class Universe:
 
         ``include_tickers`` are admitted regardless of category and exchange;
         ``exclude_tickers`` are removed regardless of everything else.
-        ``recent_trade_days`` is the tolerated gap since the security last
-        traded. Validation runs here rather than at query time, so a malformed
-        universe cannot reach the database. Raise ValueError for an empty or
-        unregistered security type or exchange, or an out-of-range recency.
+        ``recent_trade_days`` is the tolerated gap since the security last traded.
+
+        :raises ValueError: for an empty or unregistered security type or exchange, or
+            an out-of-range recency.
         """
         self.security_types = tuple(security_types)
         self.exchanges = tuple(exchanges)
@@ -161,10 +151,11 @@ class Universe:
     def _validate_recency(self) -> None:
         """Bound the tolerated trading gap and warn when it grows stale.
 
-        Raise ValueError outside [1, ``_MAX_RECENT_TRADE_DAYS``]. Beyond
-        ``_STALE_TRADE_DAYS`` the population starts admitting securities that
-        have stopped trading but are not yet delisted, which is a warning rather
-        than an error because a wider window is sometimes wanted deliberately.
+        :raises ValueError: outside [1, ``_MAX_RECENT_TRADE_DAYS``]. Beyond
+            ``_STALE_TRADE_DAYS`` the population starts admitting securities
+            that have stopped trading but are not yet delisted, which is a
+            warning rather than an error because a wider window is sometimes
+            wanted deliberately.
         """
         if not 1 <= self.recent_trade_days <= _MAX_RECENT_TRADE_DAYS:
             raise ValueError(
@@ -185,9 +176,8 @@ class Universe:
         ``signal_day`` is treated as an as-of date, so it need not be a trading
         session, though callers that align it first get an honest one.
 
-        Return one row per security with its ticker, permaticker, name,
-        exchange, category, currency, Fama industry, and the date it last
-        traded.
+        :returns: one row per security with ticker, permaticker, name, exchange,
+            category, currency, Fama industry, and the date it last traded.
         """
         return pd.read_sql_query(
             _QUERY,

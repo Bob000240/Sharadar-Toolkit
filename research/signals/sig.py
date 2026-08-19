@@ -1,10 +1,9 @@
 """Shared base class for stateless signal DataFrame services.
 
-The helpers here are the arithmetic every signal service needs and none of them
-should reinvent: division that survives zeros and nulls, growth that survives a
-negative base, and cross-sectional percentile ranks. All of them return NaN
-where the answer is undefined rather than substituting a number, so a missing
-fact stays missing all the way to the filter that would have used it.
+The arithmetic every signal service needs: division that survives zeros and
+nulls, growth that survives a negative base, and cross-sectional percentile
+ranks. All return NaN where the answer is undefined rather than substituting a
+number, so a missing fact stays missing all the way to the filter.
 """
 
 from __future__ import annotations
@@ -118,17 +117,13 @@ class Signals:
     ) -> pd.DataFrame:
         """Attach a direction-free ``{metric}_sector_pct`` per requested metric.
 
-        ``signals`` is the caller's own metric list, or a ``{metric: direction}``
-        dict whose keys alone are read here: which metrics matter is a strategy
-        decision rather than this module's. A metric absent from ``frame``
+        ``signals`` is the caller's metric list, or a ``{metric: direction}`` dict whose
+        keys alone are read: which metrics matter is a strategy decision.
+        ``positive_only`` names metrics whose non-positive values are undefined rather
+        than extreme and are masked out of the rank. A metric absent from ``frame``
         yields an all-NaN rank rather than raising.
 
-        ``positive_only`` names metrics whose non-positive values are undefined
-        rather than merely extreme, such as a loss-maker's P/E, and are masked
-        out of the rank instead of ranked as cheapest.
-
-        Return a copy of ``frame`` with the rank columns added. Raise ValueError
-        when ``frame`` carries no ``sector`` column.
+        :raises ValueError: when ``frame`` carries no ``sector`` column.
         """
         if "sector" not in frame.columns:
             raise ValueError(

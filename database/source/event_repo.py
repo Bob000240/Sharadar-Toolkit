@@ -43,7 +43,9 @@ def drop_table():
 def insert(df: pd.DataFrame):
     """Upsert rows into ``events``, keyed on ``(ticker, date)``.
 
-    Columns outside ``_COLUMNS`` are ignored and NaN/NaT become SQL NULL. A duplicate is discarded rather than overwritten, since an event that already landed does not change. No-op on an empty frame.
+    Columns outside ``_COLUMNS`` are ignored and NaN/NaT become SQL NULL. A
+    duplicate is discarded rather than overwritten, since an event that already
+    landed does not change. No-op on an empty frame.
     """
     if df.empty:
         return
@@ -63,7 +65,9 @@ def get(
 ) -> pd.DataFrame:
     """Return ``events`` rows matching the supplied filters.
 
-    Every argument is optional and omitting all of them returns the whole table. Dates bound the ``date`` column inclusively. Ordered by ticker then date.
+    Every argument is optional and omitting all of them returns the whole
+    table. Dates bound the ``date`` column inclusively. Ordered by ticker then
+    date.
     """
     q = "SELECT * FROM events WHERE TRUE"
     params = {}

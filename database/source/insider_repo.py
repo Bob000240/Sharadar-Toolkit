@@ -88,9 +88,12 @@ def drop_table():
 
 
 def insert(df: pd.DataFrame):
-    """Upsert rows into ``insider_transactions``, keyed on ``(ticker, filingdate, ownername, transactiondate, transactioncode)``.
+    """Upsert rows into ``insider_transactions``, keyed on ``(ticker, filingdate,
+    ownername, transactiondate, transactioncode)``.
 
-    Columns outside ``_COLUMNS`` are ignored and NaN/NaT become SQL NULL. A duplicate filing is discarded rather than overwritten. No-op on an empty frame.
+    Columns outside ``_COLUMNS`` are ignored and NaN/NaT become SQL NULL. A
+    duplicate filing is discarded rather than overwritten. No-op on an empty
+    frame.
     """
     if df.empty:
         return
@@ -113,8 +116,10 @@ def get(
 ) -> pd.DataFrame:
     """Return ``insider_transactions`` rows matching the supplied filters.
 
-    Every argument is optional and omitting all of them returns the whole table. Dates bound ``filingdate`` inclusively, which is the point-in-time
-    bound: a filing is invisible before the day it appeared. Ordered by ticker then filing date.
+    Every argument is optional and omitting all of them returns the whole
+    table. Dates bound ``filingdate`` inclusively, which is the point-in-time
+    bound: a filing is invisible before the day it appeared. Ordered by ticker
+    then filing date.
     """
     q = "SELECT * FROM insider_transactions WHERE TRUE"
     params = {}

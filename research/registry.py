@@ -1,40 +1,18 @@
 """The field catalog: one declarative description per selectable field.
 
-This is the single source of truth about *what a user may screen or rank on*,
-and it exists because that knowledge previously lived in four incompatible
-places — dicts in the strategy, `positive_only` tuples, WHERE clauses in
-eligibility SQL, and prose in docstrings. Every consumer now reads it from here:
+The single source of truth about what a user may screen or rank on. It exists
+because that knowledge once lived in four incompatible places — strategy dicts,
+``positive_only`` tuples, eligibility SQL, and docstrings.
 
-  - `filters.validate` rejects unknown fields before a query is ever issued
-  - `ranker` takes `direction` and `positive_only` from the field, not from
-    strategy-level constants, so a user who picks `pe` gets the loss-maker
-    masking automatically instead of silently ranking negative multiples as
-    "cheapest"
-  - a GUI generates its controls from `group`, `label`, `unit`, `coverage_note`
-  - the retrieval layer embeds `description` + `citation` to map a natural
-    language request onto real field keys
+Consumers: ``orchestrator.validate`` rejects unknown fields, the ranker takes
+``direction`` and ``positive_only`` from the field rather than a strategy
+constant, ``sources`` decides which derive chains run, and a GUI or retrieval
+layer reads the prose.
 
-Deliberately NOT registered: raw statement line items (`assets`, `ncfo`,
-`shareswa`), moving-average levels (`sma_50`, `volume_sma_10`), and the price
-levels the derived technical fields are built from (`atr_14`, `high_52w`,
-`rolling_20d_high`, `macd`, `macd_signal`, `obv`, `dollar_volume`). They are
-inputs to the derived fields below, not things anyone screens on directly — a
-raw `sma_200` percentile is meaningless, whereas `pct_from_sma_50` is not, and
-a level that scales with price ranks companies by share price rather than by
-anything about them. `ev_daily` is excluded as a vendor duplicate: it restates
-size, which `marketcap_daily` already carries. `close` is the one exception,
-registered as a filter only: the structural universe enforces no price floor,
-so a penny-stock gate has nowhere else to live. The underlying columns remain
-available in the frame; they are simply not offered.
-
-``direction`` is None where no canonical better/worse exists: ``volatility_20``
-is rankable, but whether low or high is "good" depends on the question being
-asked, so the caller must supply a direction rather than inherit a fake default.
-
-``_FIVE_YEAR`` is the shared coverage note for the ``*_change_5y`` and
-``*_volatility_5y`` fields. All of them need roughly six years of annual history
-before they resolve, so all of them are effectively empty in early backtest
-windows.
+Raw inputs are deliberately unregistered — statement line items, moving-average
+levels, and the price levels derived fields are built from. A raw ``sma_200``
+percentile is meaningless where ``pct_from_sma_50`` is not. ``close`` is the
+exception, filter-only, because the universe enforces no price floor.
 """
 
 from dataclasses import dataclass
@@ -44,33 +22,17 @@ from dataclasses import dataclass
 class Field:
     """One declarative description of a field a user may screen or rank on.
 
-    ``key`` is the frame column name and ``label`` its display name. ``group``
-    buckets the field for a grouped control. ``source`` names the derive chain
-    that produces it: "technical", "fundamental", or "event".
+    ``key`` is the frame column, ``group`` buckets it for a control, and ``source``
+    names the derive chain: "technical", "fundamental", or "event".
 
-    ``direction`` encodes which end is good as +1 for higher-is-better, -1 for
-    lower, or None where no canonical direction exists. It is a sign only, never
-    a magnitude — weighting is the ranker's business. ``unit`` is one of ratio,
-    pct, usd, days, count, or score. ``positive_only`` marks a field whose
-    non-positive values are undefined rather than extreme, so they are masked
-    out of a rank instead of occupying its good end.
+    ``direction`` is +1, -1, or None where no canonical better end exists — a sign
+    only, never a magnitude. ``positive_only`` marks a field whose non-positive
+    values are undefined rather than extreme, so they are masked out of a rank.
 
-    ``filterable`` and ``rankable`` gate which roles the field may be used in.
-    ``description``, ``citation``, and ``coverage_note`` are prose for a GUI or
-    a retrieval layer.
-
-    ``allowed_operators`` restricts which filter operators the field accepts,
-    and None means every scalar operator. Only a field whose cells are not
-    scalars needs it: ``recent_event_codes`` holds a list per row, so ``>=``
-    against it is not an error anyone catches — every comparison simply returns
-    False and the screen silently empties. ``value_type`` is the type a filter
-    value is compared as, and for a collection-valued field it is the type of
-    the items inside the cell rather than of the cell itself. It marks a type
-    category rather than a storage width: a count stays ``float`` because every
-    numeric column here is nullable and therefore float64 whatever its values
-    are, and ``unit="count"`` already carries the "whole number" reading.
-
-    The only public member is the ``needs_direction`` property.
+    ``allowed_operators`` is None for every scalar operator; only a field whose
+    cells are not scalars needs it, since ``>=`` against a list silently empties a
+    screen rather than erroring. ``value_type`` marks a type category, not a
+    storage width — counts stay ``float`` because every numeric column is nullable.
     """
 
     key: str
@@ -923,8 +885,8 @@ FIELDS: dict[str, Field] = {field.key: field for field in _FIELDS}
 def get(key: str) -> Field:
     """Return the registered field named ``key``.
 
-    Raise KeyError with the key spelled out, which is the error a GUI or an
-    agent that invented a field name should see.
+    :raises KeyError: with the key spelled out, which is the error a GUI or an
+        agent that invented a field name should see.
     """
     try:
         return FIELDS[key]
