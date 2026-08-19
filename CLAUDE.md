@@ -6,13 +6,16 @@ and the decisions already settled. This file is how to work in it.
 ## Commands
 
 ```bash
-PYTHONPATH=
-uv run ruff format .                 # format
-uv run ruff check .                  # lint
+PYTHONPATH=. uv run pytest -q   # tests — PYTHONPATH is required
+uv run ruff format .            # format
+uv run ruff check .             # lint
 ```
 
 ## Conventions
 
-**PEP 287 – reStructuredText Docstring Format.** Oneline imperative summary; a body only where
+**PEP 287 – reStructuredText Docstring Format.** One line imperative summary; a body only where
   something is not obvious.
 
+**Inline comments.** Use sparingly. Reserve them for a line whose *reason* is
+not obvious from reading it — a workaround, a constraint, a choice that looks
+arbitrary but is not. Never restate what the code already says.

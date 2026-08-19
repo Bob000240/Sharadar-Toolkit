@@ -99,9 +99,8 @@ class ForwardReturns:
             prices, ``forward_return``, ``sessions_held``, and ``complete``. A
             ticker with no price after the signal day is absent, not null.
         """
-        # The window closes on the horizon's exact session, clamped to the end
-        # of the data. Clamping is what lets an unfinished horizon report
-        # complete=False rather than raise: near the present there is no exit yet.
+        # Clamping to the end of the data is what lets an unfinished horizon
+        # report complete=False rather than raise.
         query = text(_QUERY_TEMPLATE.format(table=table, price=_PRICE_COLUMN))
         window_end = calendar.horizon_end(signal_day, self.horizon_sessions)
         frame = pd.read_sql_query(

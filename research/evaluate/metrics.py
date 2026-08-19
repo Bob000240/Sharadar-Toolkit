@@ -117,7 +117,7 @@ def _median_return(context: EvalContext) -> float:
 
 
 def _return_dispersion(context: EvalContext) -> float:
-    """Standard deviation of forward returns across the population.
+    """Return the standard deviation of forward returns across the population.
 
     Wide dispersion means the mean weakly describes any single position.
     """
@@ -169,10 +169,7 @@ AVG_PAIRWISE_CORRELATION = EvalMetric(
 )
 SECTOR_CONCENTRATION = EvalMetric("sector_concentration", _sector_concentration)
 
-#: The rank-quality pair, for a population selected by a ``Ranking``.
 RANK_QUALITY = (INFORMATION_COEFFICIENT, TOP_MINUS_BOTTOM_DECILE)
 
-#: The concentration pair, for asking whether a population is diversified.
-#: ``AVG_PAIRWISE_CORRELATION`` triggers the panel query; drop it for the
-#: cheap half.
+# AVG_PAIRWISE_CORRELATION triggers the panel query; drop it for the cheap half.
 CONCENTRATION = (AVG_PAIRWISE_CORRELATION, SECTOR_CONCENTRATION)

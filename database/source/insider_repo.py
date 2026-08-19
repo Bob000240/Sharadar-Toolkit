@@ -88,12 +88,11 @@ def drop_table():
 
 
 def insert(df: pd.DataFrame):
-    """Upsert rows into ``insider_transactions``, keyed on ``(ticker, filingdate,
-    ownername, transactiondate, transactioncode)``.
+    """Upsert rows into ``insider_transactions``.
 
+    Keyed on ticker, filing date, owner, transaction date, and transaction code.
     Columns outside ``_COLUMNS`` are ignored and NaN/NaT become SQL NULL. A
-    duplicate filing is discarded rather than overwritten. No-op on an empty
-    frame.
+    duplicate filing is discarded rather than overwritten. No-op on an empty frame.
     """
     if df.empty:
         return

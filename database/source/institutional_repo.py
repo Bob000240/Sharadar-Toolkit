@@ -57,11 +57,11 @@ def drop_table():
 
 
 def insert(df: pd.DataFrame):
-    """Upsert rows into ``institutional_holdings``, keyed on ``(ticker,
-    investorname, calendardate, securitytype)``.
+    """Upsert rows into ``institutional_holdings``.
 
-    Columns outside ``_COLUMNS`` are ignored and NaN/NaT become SQL NULL. A
-    restated holding overwrites the stored one. No-op on an empty frame.
+    Keyed on ticker, investor, calendar date, and security type. Columns outside
+    ``_COLUMNS`` are ignored and NaN/NaT become SQL NULL. A restated holding
+    overwrites the stored one. No-op on an empty frame.
     """
     if df.empty:
         return

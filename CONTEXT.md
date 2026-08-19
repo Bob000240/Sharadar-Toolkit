@@ -100,7 +100,7 @@ not fit the generic filter/rank path. Deliberate, not a gap.
 **No portfolio optimizer.** Mean-variance weights answer "how many dollars of
 each," which is implementation, not research. It would also need a QP solver.
 
-## Evaluation
+## How evaluation works
 
 `WalkForward` measures each date independently — a population is rebuilt,
 measured over a forward horizon, and compared against SPY over the same window.
@@ -113,6 +113,126 @@ Beyond the six baseline figures, `EvalMetric` plugs in more: rank quality
 pairwise correlation, sector Herfindahl). Concentration matters because a cut
 can measure concentration while appearing to measure quality — that already
 happened once with a roic/fcf_yield/accruals blend.
+
+## Requirements
+
+What the system must do. Behaviour here is covered by tests; treat a conflict
+between this list and the code as a bug, not a licence to change the list.
+
+### A.1 Data ingestion
+- Create required PostgreSQL tables in an empty database
+- Bulk-load every required Sharadar dataset, retaining records for
+  later-delisted securities
+- Incremental updates insert new records and update revised ones, without
+  duplication on repeat runs
+- Recompute affected technical features when equity-price history changes
+- Report failed dataset updates clearly; return nonzero exit status after
+  attempting the remaining independent datasets
+
+### A.2 Data availability
+- Historical queries must not use information that became available after the
+  effective research date
+- Fundamentals selected by filing/availability date, not fiscal period alone
+- Event, insider, and institutional data use explicit availability rules
+  matched to their publication delays
+- Delisted securities remain available for historical universe reconstruction
+- Missing values remain missing — never silently zero
+- Every result identifies the trading session its data is effective for
+
+### A.3 Universe construction
+- Constructed independently per effective research date
+- Configurable by security type, exchange, explicit inclusions/exclusions, and
+  recent trading activity
+- Only securities with a qualifying price record on or before the effective
+  date are included
+- Later-delisted securities remain eligible on earlier qualifying dates
+- Invalid type/exchange/recency settings rejected before querying
+- No more than one row per security
+
+### A.4 Signal calculation
+- Technical signals derived from price data available on or before the date
+- Fundamental signals from the latest qualifying filing available by then
+- Corporate events aggregated to ticker-level facts without exposing an event
+  before its availability date
+- Insider transactions retrieved and aggregated using filing-safe dates
+- Institutional holdings retrieved using a conservative availability delay,
+  supporting ownership-change calculations
+- Insider/institutional exposed as standalone facts only — **not required to
+  participate in generic filtering or ranking** (see Deferred)
+- Derived ratios, growth rates, historical features, and percentiles calculated
+  deterministically
+- Screen execution calculates only the signal sources actually required
+- Signals are objective facts — no desirability judgment
+
+### A.5 Filtering
+- Configurable conditions on registered filterable fields
+- Numeric comparisons, set membership, collection membership, ranges, and
+  explicit null checks
+- A security qualifies only if it passes every configured filter
+- Unknown or non-filterable fields rejected before querying
+- Reports how many securities each filter removed
+- Distinguishes removal for missing data from removal for a failed condition
+- A missing value fails an ordinary comparison unless a null-checking condition
+  is explicitly selected
+
+### A.6 Ranking
+- Configurable metrics, high/low direction, positive weights
+- Unknown or non-rankable fields rejected before querying
+- Metrics with different units converted to cross-sectional percentiles before
+  combining
+- Percentiles calculated over the **structural universe**, before elective
+  filters apply, so a score means the same thing across screens
+- A missing ranking value scores from the available metrics with coverage
+  reported; it does not contribute a zero
+- Securities below the configured minimum coverage are excluded and reported
+- Ranking across the full set or within a group such as sector
+- Top-N overall or per group
+
+### A.7 Screen execution
+- One run combines universe construction, required signal calculation,
+  filtering, and ranking
+- A non-session as-of date resolves to, and reports, the latest loaded session
+  on or before it
+- A date earlier than the loaded calendar is rejected, not moved forward
+- Elective filters and ranking may each be omitted
+- Ranked results come back in ranked order; unranked results carry no scores
+- Same configuration and same stored data produce the same result
+
+### A.8 Results and explainability
+- Every result includes effective session, configuration, initial universe
+  size, and final qualifying count
+- Retains the signal values used by its filters and ranking metrics
+- An ordered funnel: condition, population before and after, total removed, and
+  removed-for-missing-data count
+- Ranked results include score, rank, coverage, and supporting percentiles
+- A valid screen with zero qualifying securities returns empty, not an error
+- The CLI presents a readable summary and supports machine-readable export
+
+### A.9 Historical evaluation
+- Evaluate a selected population across a sequence of historical sessions,
+  rebuilding it independently on each date under the same point-in-time rules
+- Forward returns over configured session horizons; a horizon extending past
+  the loaded history is marked incomplete, not treated as a zero return
+- Per-date output reports measured population size, mean return, hit rate,
+  benchmark return, excess return, and completeness
+- Compare multiple population variants over the same universe and dates
+- Additional per-date statistics are pluggable, covering rank quality and
+  population concentration
+
+Not built: significance testing. There is no t-statistic, p-value, or
+confidence interval on any of the above — a median excess return is reported
+without a claim about whether it is distinguishable from noise.
+
+### A.10 Command-line interface
+- Commands for database setup, initial load, incremental update, and screen
+  execution
+- The screen command accepts an as-of date and a named screen configuration
+- Pre-execution validation of dates, fields, operators, directions, weights,
+  and universe settings, with actionable messages
+- Successful execution prints screen name, effective session, universe size,
+  filter funnel, and selected securities
+- Writes results to a user-selected output file
+- A command that cannot complete returns a nonzero exit status
 
 ## Status
 

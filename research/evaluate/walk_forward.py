@@ -22,9 +22,6 @@ from research.evaluate.forward import ForwardReturns
 from research.evaluate.metrics import EvalContext, EvalMetric
 from research.universe import Universe
 
-#: Columns every per-date row carries, whatever metrics were requested. A
-#: custom metric may not take one of these names, since it would overwrite a
-#: figure the specification requires.
 BASELINE_COLUMNS = (
     "signal_day",
     "measured",
@@ -39,11 +36,6 @@ BASELINE_COLUMNS = (
 _VARIANT_COLUMN = "variant"
 
 
-#: Columns carried from the selection onto the measured frame when present.
-#: ``score`` is what rank-quality metrics correlate against and ``sector`` what
-#: the concentration metric counts; everything else a signal frame holds is
-#: left behind, since a metric that needed it would be describing the selection
-#: rather than its outcome.
 CARRIED_COLUMNS = ("score", "sector")
 
 

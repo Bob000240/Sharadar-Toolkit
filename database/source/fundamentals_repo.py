@@ -272,8 +272,7 @@ CONFLICT = f"ON CONFLICT (ticker, dimension, datekey) DO UPDATE SET {_UPDATE_SET
 
 
 def insert(df: pd.DataFrame):
-    """Upsert rows into ``fundamentals``, keyed on ``(ticker, dimension,
-    datekey)``.
+    """Upsert rows into ``fundamentals``, keyed on ticker/dimension/datekey.
 
     Columns outside ``_COLUMNS`` are ignored and NaN/NaT become SQL NULL. A
     restatement filed under a new ``datekey`` lands as its own row, while a

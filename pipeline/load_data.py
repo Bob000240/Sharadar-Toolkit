@@ -1,4 +1,6 @@
-"""Full initial data load. Run once after the tables exist::
+"""Full initial data load, run once after the tables exist.
+
+::
 
     uv run python -m pipeline.load_data
 
