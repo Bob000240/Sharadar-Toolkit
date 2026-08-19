@@ -1,4 +1,4 @@
-"""Screen orchestration: compose a universe, score it, filter it, cut it.
+"""Run a screen: compose a universe, score it, filter it, cut it.
 
 ``run(spec, signal_day)`` is the single entry point. The order is deliberate:
 structural universe, derive only the referenced sources, score over the whole
@@ -8,54 +8,26 @@ Scoring before filtering is the load-bearing choice — it makes a score of 82
 mean the same thing across screens, where scoring afterwards would make every
 score relative to a different reference set.
 
-This module composes; it does not compute. ``_SOURCE_ALIASES`` reconciles one
-naming mismatch: the registry says "event", the signal loader says "events".
+This module composes; it does not compute. What a spec *is* lives in
+``research.spec``. ``_SOURCE_ALIASES`` reconciles one naming mismatch: the
+registry says "event", the signal loader says "events".
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import date
 
 import pandas as pd
 
 import research.calendar as calendar
 import research.registry as registry
-from research.filters import SIGNAL_SOURCES, Filters, attach_signals, funnel_row
+from research.filters import SIGNAL_SOURCES, attach_signals, funnel_row
 from research.ranking import Ranking
 from research.signals.sig import Signals
-from research.universe import Universe
+from research.spec import ScreenSpec, validate
 
 _SOURCE_ALIASES = {"event": "events"}
-
-
-@dataclass(frozen=True)
-class ScreenSpec:
-    """A complete, serialisable screen.
-
-    ``filters=None`` scores without narrowing; ``rank=None`` filters without
-    scoring, answering "how many names even qualify?" without committing to a
-    ranking judgment. Frozen, so the spec that was tested is the spec that runs.
-    """
-
-    name: str = "unnamed"
-    description: str = ""
-    universe: Universe = field(default_factory=Universe)
-    filters: Filters | None = None
-    rank: Ranking | None = None
-
-    def fields(self) -> tuple[str, ...]:
-        """Return every registry field this spec references, in first-use order.
-
-        Covers filter conditions and rank metrics alike, deduplicated, so the
-        caller can resolve exactly which derive chains the spec needs.
-        """
-        referenced: list[str] = []
-        if self.filters is not None:
-            referenced.extend(c.field for c in self.filters.conditions)
-        if self.rank is not None:
-            referenced.extend(m.field for m in self.rank.metrics)
-        return tuple(dict.fromkeys(referenced))
 
 
 @dataclass(frozen=True)
@@ -77,32 +49,6 @@ class ScreenResult:
     def __len__(self) -> int:
         """Return how many candidates survived."""
         return len(self.frame)
-
-
-def validate(spec: ScreenSpec) -> list[str]:
-    """Return every problem with ``spec``, or an empty list when it is sound.
-
-    Checked against the registry alone, with no database and no frame, so a CLI
-    or an agent can call it before submitting. Catches unknown field names and
-    fields used in a role the registry does not permit.
-    """
-    problems: list[str] = []
-
-    if spec.filters is not None:
-        for condition in spec.filters.conditions:
-            if condition.field not in registry.FIELDS:
-                problems.append(f"unknown filter field {condition.field!r}")
-            elif not registry.get(condition.field).filterable:
-                problems.append(f"field {condition.field!r} is not filterable")
-
-    if spec.rank is not None:
-        for metric in spec.rank.metrics:
-            if metric.field not in registry.FIELDS:
-                problems.append(f"unknown rank field {metric.field!r}")
-            elif not registry.get(metric.field).rankable:
-                problems.append(f"field {metric.field!r} is not rankable")
-
-    return problems
 
 
 def _sources(fields: tuple[str, ...]) -> tuple[str, ...]:
@@ -207,23 +153,10 @@ def run(spec: ScreenSpec, signal_day) -> ScreenResult:
 
 
 if __name__ == "__main__":
-    spec = ScreenSpec(
-        name="quality_at_a_price",
-        description="Profitable large caps in an uptrend, best-scoring per sector.",
-        filters=Filters(
-            ("marketcap", ">=", 1e10),
-            ("dollar_volume_20d_avg", ">=", 5e6),
-            ("netinccmnusd", ">", 0),
-            ("pct_from_sma_200", ">", 0),
-        ),
-        rank=Ranking(
-            ("roic", "high", 0.4),
-            ("fcf_yield", "high", 0.3),
-            ("pe", "low", 0.3),
-            group_by="sector",
-            top_n=3,
-        ),
-    )
+    import research.spec as spec_module
+
+    screens = spec_module.catalog()
+    spec = screens["quality_at_a_price"]
 
     print(f"spec fields: {spec.fields()}")
     print(f"sources needed: {_sources(spec.fields())}")
@@ -243,7 +176,3 @@ if __name__ == "__main__":
                 index=False, formatters={"score": "{:.1f}".format}
             )
         )
-
-    print("\nAN INVALID SPEC FAILS BEFORE ANY QUERY")
-    broken = ScreenSpec(filters=Filters(("marketcapp", ">=", 1e10)))
-    print(f"  {validate(broken)}")

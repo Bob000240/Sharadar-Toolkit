@@ -1,0 +1,107 @@
+# The screens this toolkit ships with.
+#
+# Each top-level table is one screen, invoked by its table name. Filter rows are
+# [field, operator, value]; a null-checking operator takes no value. Rank metric
+# rows are [field, direction, weight].
+#
+# Conventions, none enforced by the engine:
+#   - Rank weights sum to 1.0. Ranking renormalises by coverage anyway, so this
+#     buys readability: 0.4 reads directly as "two fifths of the blend".
+#   - Every screen carries a liquidity gate. The structural universe enforces
+#     listing and recency but no size or turnover floor, so without one a screen
+#     ranks names nobody can actually buy.
+#   - Valuation screens carry a solvency gate. A cheap multiple and a broken
+#     balance sheet look identical to a percentile rank.
+#   - Fields needing ~6 years of history are avoided here; they are empty across
+#     early backtest windows, and a screen that silently returns nothing is
+#     worse than one that is merely simple.
+
+
+[quality_at_a_price]
+description = "Profitable large caps in an uptrend, best-scoring per sector."
+filters = [
+  ["marketcap", ">=", 1e10],
+  ["dollar_volume_20d_avg", ">=", 5e6],
+  ["netinccmnusd", ">", 0],
+  ["pct_from_sma_200", ">", 0],
+]
+
+[quality_at_a_price.rank]
+group_by = "sector"
+top_n = 3
+metrics = [
+  ["roic", "high", 0.4],
+  ["fcf_yield", "high", 0.3],
+  ["pe", "low", 0.3],
+]
+
+
+[deep_value]
+description = "Cheap on several multiples at once, with solvency and distress-event floors."
+# Distress codes: delisting (31), bankruptcy (13), restatement (42), late
+# filing (36), material impairment (26). Excluded rather than ranked — these
+# are reasons a multiple is cheap, not evidence that it is a bargain.
+filters = [
+  ["marketcap", ">=", 2e9],
+  ["dollar_volume_20d_avg", ">=", 2e6],
+  ["close", ">=", 5],
+  ["de", "<=", 2.0],
+  ["interest_coverage", ">=", 3.0],
+  ["recent_event_codes", "excludes_any", ["31", "13", "42", "36", "26"]],
+]
+
+[deep_value.rank]
+top_n = 25
+metrics = [
+  ["pe", "low", 0.30],
+  ["evebitda", "low", 0.25],
+  ["fcf_yield", "high", 0.25],
+  ["pb", "low", 0.20],
+]
+
+
+[quality_compounders]
+description = "Durably profitable and still growing, ranked without regard to price."
+filters = [
+  ["marketcap", ">=", 1e9],
+  ["dollar_volume_20d_avg", ">=", 3e6],
+  ["gross_profitability", ">", 0],
+  ["revenue_growth_yoy", ">", 0],
+]
+
+[quality_compounders.rank]
+group_by = "sector"
+top_n = 5
+metrics = [
+  ["gross_profitability", "high", 0.3],
+  ["roic", "high", 0.3],
+  ["cfo_to_assets", "high", 0.2],
+  ["revenue_growth_yoy", "high", 0.2],
+]
+
+
+[momentum_leaders]
+description = "Liquid names in a smooth, established uptrend near their 52-week high."
+# Technical-only on purpose: no fundamental or event field appears, so
+# orchestrator.run resolves a single derive chain and skips the fundamentals
+# join entirely. pct_from_52w_high is negative by construction, so -15 means
+# "within 15% of the high".
+filters = [
+  ["dollar_volume_20d_avg", ">=", 1e7],
+  ["close", ">=", 5],
+  ["pct_from_sma_200", ">", 0],
+  ["pct_from_52w_high", ">=", -15],
+  ["return_252d", ">", 0],
+]
+
+# A momentum name that stopped trading is not a momentum name.
+[momentum_leaders.universe]
+recent_trade_days = 5
+
+[momentum_leaders.rank]
+top_n = 20
+metrics = [
+  ["return_252d", "high", 0.40],
+  ["vol_adjusted_momentum", "high", 0.35],
+  ["r_squared_60d", "high", 0.25],
+]

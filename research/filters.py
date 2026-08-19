@@ -111,6 +111,11 @@ _COLLECTION_VALUE_OPERATORS = {
     "excludes_any",
 }
 
+# Narrower than _COLLECTION_VALUE_OPERATORS on purpose: `between` also takes a
+# collection but applies to a scalar column, so sharing it would reject `pe`.
+MEMBERSHIP_OPERATORS = frozenset({"contains_any", "contains_all", "excludes_any"})
+SCALAR_OPERATORS = frozenset(_OPERATORS) - MEMBERSHIP_OPERATORS
+
 
 @dataclass(frozen=True)
 class FilterCondition:
