@@ -201,8 +201,12 @@ def unmapped_categories() -> list[str]:
     maps to is silently absent from every universe.
     """
     known = pd.read_sql_query(
-        text("SELECT DISTINCT category FROM tickers WHERE category IS NOT NULL"),
+        text(
+            "SELECT DISTINCT category FROM tickers "
+            "WHERE category IS NOT NULL AND table_code = :table_code"
+        ),
         get_connection(),
+        params={"table_code": _EQUITY_TABLE_CODE},
     )
     claimed = {c for group in _CATEGORIES_BY_SECURITY_TYPE.values() for c in group}
     return sorted(set(known["category"]) - claimed)

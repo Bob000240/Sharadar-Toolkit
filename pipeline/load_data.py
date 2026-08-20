@@ -24,7 +24,6 @@ import pandas as pd
 import nasdaqdatalink
 from dotenv import load_dotenv
 
-from pipeline.config import BENCHMARK_SYMBOLS
 from data.technical_features import compute_technical_features
 
 import database.source.daily_repo as daily_repo
@@ -45,25 +44,44 @@ START_DATE = "2016-01-01"
 END_DATE = pd.Timestamp.today().strftime("%Y-%m-%d")
 
 SHARADAR_TABLES = {
-    "TICKERS": (tickers_repo, "tickers", None, None),
-    "SEP": (equity_repo, "equity_prices", "date", None),
-    "SFP": (fund_repo, "fund_prices", "date", BENCHMARK_SYMBOLS),
-    "SF1": (fundamentals_repo, "fundamentals", "calendardate", None),
-    "SF2": (insider_repo, "insider_transactions", "filingdate", None),
-    "SF3": (institutional_repo, "institutional_holdings", "calendardate", None),
-    "EVENTS": (event_repo, "events", "date", None),
-    "DAILY": (daily_repo, "daily_valuation", "date", None),
+    "TICKERS": (tickers_repo, "tickers", None),
+    "SEP": (equity_repo, "equity_prices", "date"),
+    "SFP": (fund_repo, "fund_prices", "date"),
+    "SF1": (fundamentals_repo, "fundamentals", "calendardate"),
+    "SF2": (insider_repo, "insider_transactions", "filingdate"),
+    "SF3A": (institutional_repo, "institutional_ownership", "date"),
+    "EVENTS": (event_repo, "events", "date"),
+    "DAILY": (daily_repo, "daily_valuation", "date"),
 }
 _RENAMES = {"TICKERS": {"table": "table_code"}}
+_TICKER_TABLE_CODES = ("SEP", "SFP")
 _ROW_FILTERS = {
-    "TICKERS": lambda df: df[(df["table_code"] == "SEP") & df["ticker"].notna()],
+    "TICKERS": lambda df: df[df["table_code"].isin(_TICKER_TABLE_CODES)],
 }
+
+
+def _rescale_holdings(chunk: pd.DataFrame) -> pd.DataFrame:
+    """Restore SF3 v3 holdings to whole shares and whole dollars.
+
+    v3 reports every ``*units`` column in thousands and every ``*value`` column
+    in millions, checked against the previous version's rows and against the
+    close that value over units implies. Stored raw they would be off by orders
+    of magnitude, invisibly. ``percentoftotal`` is already a percentage.
+    """
+    chunk = chunk.copy()
+    for column in chunk.columns:
+        if column.endswith("units"):
+            chunk[column] = chunk[column] * 1e3
+        elif column.endswith("value"):
+            chunk[column] = chunk[column] * 1e6
+    return chunk
+
+
+_TRANSFORMS = {"SF3A": _rescale_holdings}
 _CHUNK = 200_000
 
 
-def _export(
-    code: str, dest: str, date_field: str | None, tickers: list | None
-) -> list[str]:
+def _export(code: str, dest: str, date_field: str | None, start_date: str) -> list[str]:
     """Export one Sharadar table to zipped CSV and unpack it.
 
     Return the paths of the extracted CSV parts. Raise RuntimeError when the export
@@ -71,9 +89,7 @@ def _export(
     """
     filters: dict = {}
     if date_field:
-        filters[date_field] = {"gte": START_DATE}
-    if tickers:
-        filters["ticker"] = list(tickers)
+        filters[date_field] = {"gte": start_date}
     zip_path = os.path.join(dest, f"{code}.zip")
     print(f"  exporting SHARADAR/{code} ...")
     nasdaqdatalink.export_table(f"SHARADAR/{code}", filename=zip_path, **filters)
@@ -85,27 +101,39 @@ def _export(
     return files
 
 
-def load_sharadar_table(code: str) -> None:
+def load_sharadar_table(
+    code: str, start_date: str = START_DATE, upsert: bool = False
+) -> None:
     """Bulk-load one Sharadar table into its Postgres table.
 
     Streamed in chunks so a multi-gigabyte export never has to fit in memory. Rows
     with no ticker are dropped, since they cannot be joined to anything.
+    ``upsert``
+    overwrites what a refresh re-exports rather than skipping it, and deduplicates
+    each chunk, because Postgres refuses a DO UPDATE touching one row twice.
     """
-    repo, table, date_field, tickers = SHARADAR_TABLES[code]
+    repo, table, date_field = SHARADAR_TABLES[code]
     rename = _RENAMES.get(code)
     row_filter = _ROW_FILTERS.get(code)
+    transform = _TRANSFORMS.get(code)
+    conflict = repo.CONFLICT if upsert else "ON CONFLICT DO NOTHING"
     print(f"Bulk loading {code} -> {table} ...")
     total = 0
     with tempfile.TemporaryDirectory() as dest:
-        for part in _export(code, dest, date_field, tickers):
+        for part in _export(code, dest, date_field, start_date):
             for chunk in pd.read_csv(part, chunksize=_CHUNK):
                 if rename:
                     chunk = chunk.rename(columns=rename)
-                chunk = chunk[chunk["ticker"].notna()]
+                if "ticker" in chunk.columns:
+                    chunk = chunk[chunk["ticker"].notna()]
                 if row_filter is not None:
                     chunk = row_filter(chunk)
+                if transform is not None:
+                    chunk = transform(chunk)
+                if upsert:
+                    chunk = chunk.drop_duplicates(list(repo.KEY_COLUMNS), keep="last")
                 if not chunk.empty:
-                    total += copy_insert(table, repo._COLUMNS, chunk)
+                    total += copy_insert(table, repo._COLUMNS, chunk, conflict)
     print(f"  {code} total: {total:,} rows")
 
 

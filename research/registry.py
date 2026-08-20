@@ -23,7 +23,8 @@ class Field:
     """One declarative description of a field a user may screen or rank on.
 
     ``key`` is the frame column, ``group`` buckets it for a control, and ``source``
-    names the derive chain: "technical", "fundamental", or "event".
+    names the derive chain: "technical", "fundamental", "event",
+    "institutional", or "insider".
 
     ``direction`` is +1, -1, or None where no canonical better end exists — a sign
     only, never a magnitude. ``positive_only`` marks a field whose non-positive
@@ -60,6 +61,22 @@ class Field:
 
 
 _FIVE_YEAR = "Requires ~6y of annual history; largely unpopulated before ~2022."
+
+_INSIDER = (
+    "Filed activity in a 30- or 90-day window, so zero means nothing was "
+    "disclosed rather than nothing is known. Only ~7% of traded names carry a "
+    "purchase in 30 days, which is why these select rather than rank."
+)
+
+_INSTITUTIONAL = (
+    "From SHARADAR/SF3A, summarised by ticker: quarterly, and held back 45 days "
+    "for the 13F filing lag, so a value can be up to ~4.5 months old."
+)
+
+_INSTITUTIONAL_OPTIONS = (
+    "Options rows are sparse — roughly 2% of 13F positions are calls and 2% "
+    "puts — so this is null for most tickers."
+)
 
 _WITHIN_FRAME = (
     "Ranked across the population being screened, not the whole market, so the "
@@ -876,6 +893,387 @@ _FIELDS = [
         unit="days",
         rankable=False,
         description="Sessions since the last Schedule 13D activist filing.",
+    ),
+    Field(
+        "inst_holders",
+        "Institutional Holders",
+        "Ownership",
+        "institutional",
+        None,
+        unit="count",
+        description="Institutions reporting a common-share position in the "
+        "latest 13F quarter available on the signal day. A crowd "
+        "reads as validation or as crowding, so no direction.",
+        coverage_note=_INSTITUTIONAL,
+    ),
+    Field(
+        "inst_holders_change",
+        "Holder Count Change (QoQ)",
+        "Ownership",
+        "institutional",
+        None,
+        unit="count",
+        description="Net change in reporting institutions against the prior "
+        "quarter. Net only: a flat count can hide heavy two-way "
+        "turnover, which the by-ticker summary cannot see.",
+        coverage_note=_INSTITUTIONAL,
+    ),
+    Field(
+        "inst_units",
+        "Institutional Shares Held",
+        "Ownership",
+        "institutional",
+        None,
+        unit="count",
+        filterable=True,
+        rankable=False,
+        description="Common shares held by all reporting institutions. A raw "
+        "level that scales with the company, so filter-only.",
+        coverage_note=_INSTITUTIONAL,
+    ),
+    Field(
+        "inst_value",
+        "Institutional Value Held",
+        "Ownership",
+        "institutional",
+        None,
+        unit="currency",
+        rankable=False,
+        description="Dollar value of institutional common-share positions. A "
+        "raw level, so filter-only; rank on the changes instead.",
+        coverage_note=_INSTITUTIONAL,
+    ),
+    Field(
+        "inst_pct_of_all_holdings",
+        "Share of All Institutional Holdings",
+        "Ownership",
+        "institutional",
+        None,
+        unit="pct",
+        description="This ticker's value as a percentage of every institutional "
+        "holding reported that quarter. A weight within the 13F "
+        "universe, NOT the percentage of shares outstanding held.",
+        coverage_note=_INSTITUTIONAL,
+    ),
+    Field(
+        "inst_units_change_pct",
+        "Institutional Share Change (QoQ)",
+        "Ownership",
+        "institutional",
+        None,
+        unit="pct",
+        description="Quarter-over-quarter change in shares held, the "
+        "accumulation-or-distribution reading. Direction is a "
+        "strategy judgment: accumulation confirms or crowds.",
+        coverage_note=_INSTITUTIONAL,
+    ),
+    Field(
+        "inst_value_change_pct",
+        "Institutional Value Change (QoQ)",
+        "Ownership",
+        "institutional",
+        None,
+        unit="pct",
+        description="Quarter-over-quarter change in dollar value held. Moves "
+        "with the share price as well as with the position, so "
+        "read it beside inst_units_change_pct.",
+        coverage_note=_INSTITUTIONAL,
+    ),
+    Field(
+        "inst_put_call_ratio",
+        "Institutional Put/Call Ratio",
+        "Ownership",
+        "institutional",
+        None,
+        unit="ratio",
+        description="Value of reported put positions over call positions. "
+        "Institutional options positioning, thinly reported: most "
+        "tickers have no options rows at all.",
+        coverage_note=_INSTITUTIONAL_OPTIONS,
+    ),
+    Field(
+        "buy_count_30d",
+        "Insider Buys (30d)",
+        "Insider",
+        "insider",
+        unit="count",
+        rankable=False,
+        description="Open-market insider purchases filed in the last 30 days. "
+        "Counted on filing date: a purchase is not knowable until "
+        "disclosed, whatever day it was executed.",
+        coverage_note=_INSIDER,
+    ),
+    Field(
+        "buy_value_30d",
+        "Insider Buy Value (30d)",
+        "Insider",
+        "insider",
+        unit="currency",
+        rankable=False,
+        description="Dollar value of those purchases.",
+        coverage_note=_INSIDER,
+    ),
+    Field(
+        "opportunistic_buy_count_30d",
+        "Opportunistic Insider Buys (30d)",
+        "Insider",
+        "insider",
+        unit="count",
+        rankable=False,
+        description="Purchases that break the buyer's own calendar pattern. An "
+        "insider who buys the same month every year is following a "
+        "plan; one who breaks it may be acting on something.",
+        citation="Cohen, Malloy & Pomorski (2012), routine vs opportunistic",
+        coverage_note=_INSIDER,
+    ),
+    Field(
+        "opportunistic_buy_value_30d",
+        "Opportunistic Buy Value (30d)",
+        "Insider",
+        "insider",
+        unit="currency",
+        rankable=False,
+        description="Dollar value of the off-pattern purchases.",
+        coverage_note=_INSIDER,
+    ),
+    Field(
+        "opportunistic_value_to_marketcap",
+        "Opportunistic Buying / Market Cap",
+        "Insider",
+        "insider",
+        unit="ratio",
+        rankable=False,
+        description="Off-pattern purchase value against signal-day market cap, "
+        "so a $1m buy reads differently at a microcap than at a "
+        "megacap.",
+        coverage_note=_INSIDER,
+    ),
+    Field(
+        "unique_buyers_30d",
+        "Distinct Insider Buyers (30d)",
+        "Insider",
+        "insider",
+        unit="count",
+        rankable=False,
+        description="Distinct insiders buying. Several buying independently is "
+        "a different fact from one buying repeatedly.",
+        coverage_note=_INSIDER,
+    ),
+    Field(
+        "unique_opportunistic_buyers_30d",
+        "Distinct Off-Pattern Buyers (30d)",
+        "Insider",
+        "insider",
+        unit="count",
+        rankable=False,
+        description="Distinct insiders whose purchase broke their own pattern: "
+        "cluster buying with the routine filings stripped out.",
+        coverage_note=_INSIDER,
+    ),
+    Field(
+        "officer_buys_30d",
+        "Officer Buys (30d)",
+        "Insider",
+        "insider",
+        unit="count",
+        rankable=False,
+        description="Purchases by officers, who see operations before the market does.",
+        coverage_note=_INSIDER,
+    ),
+    Field(
+        "director_buys_30d",
+        "Director Buys (30d)",
+        "Insider",
+        "insider",
+        unit="count",
+        rankable=False,
+        description="Purchases by directors.",
+        coverage_note=_INSIDER,
+    ),
+    Field(
+        "sell_count_30d",
+        "Insider Sells (30d)",
+        "Insider",
+        "insider",
+        unit="count",
+        rankable=False,
+        description="Open-market sales filed in the last 30 days. Weak "
+        "evidence on its own — insiders sell to diversify, pay tax, "
+        "and exercise options — so read it beside the buys.",
+        coverage_note=_INSIDER,
+    ),
+    Field(
+        "net_buy_ratio_90d",
+        "Net Insider Buy Ratio (90d)",
+        "Insider",
+        "insider",
+        unit="ratio",
+        rankable=False,
+        description="Buy value less sell value over their sum across 90 days. "
+        "+1 is all buying, -1 all selling; null where neither "
+        "occurred.",
+        coverage_note=_INSIDER,
+    ),
+    Field(
+        "days_since_last_buy",
+        "Days Since Insider Buy",
+        "Insider",
+        "insider",
+        unit="days",
+        rankable=False,
+        description="Days since the most recent disclosed purchase. Null where "
+        "the lookback window holds none.",
+        coverage_note=_INSIDER,
+    ),
+    Field(
+        "days_since_last_sell",
+        "Days Since Insider Sale",
+        "Insider",
+        "insider",
+        unit="days",
+        rankable=False,
+        description="Days since the most recent disclosed sale. Null where the "
+        "lookback window holds none.",
+        coverage_note=_INSIDER,
+    ),
+    Field(
+        "buy_count_90d",
+        "Insider Buys (90d)",
+        "Insider",
+        "insider",
+        unit="count",
+        rankable=False,
+        description="Open-market purchases filed in the last 90 days, the wider "
+        "window behind net_buy_ratio_90d.",
+        coverage_note=_INSIDER,
+    ),
+    Field(
+        "buy_value_90d",
+        "Insider Buy Value (90d)",
+        "Insider",
+        "insider",
+        unit="currency",
+        rankable=False,
+        description="Dollar value of purchases over 90 days.",
+        coverage_note=_INSIDER,
+    ),
+    Field(
+        "sell_count_90d",
+        "Insider Sells (90d)",
+        "Insider",
+        "insider",
+        unit="count",
+        rankable=False,
+        description="Open-market sales filed in the last 90 days.",
+        coverage_note=_INSIDER,
+    ),
+    Field(
+        "sell_value_30d",
+        "Insider Sell Value (30d)",
+        "Insider",
+        "insider",
+        unit="currency",
+        rankable=False,
+        description="Dollar value of sales over 30 days. Large only in absolute "
+        "terms at a large company, so read it against buy value "
+        "rather than alone.",
+        coverage_note=_INSIDER,
+    ),
+    Field(
+        "sell_value_90d",
+        "Insider Sell Value (90d)",
+        "Insider",
+        "insider",
+        unit="currency",
+        rankable=False,
+        description="Dollar value of sales over 90 days.",
+        coverage_note=_INSIDER,
+    ),
+    Field(
+        "unique_sellers_30d",
+        "Distinct Insider Sellers (30d)",
+        "Insider",
+        "insider",
+        unit="count",
+        rankable=False,
+        description="Distinct insiders selling. Several selling independently "
+        "is a different fact from one unwinding a position in "
+        "instalments.",
+        coverage_note=_INSIDER,
+    ),
+    Field(
+        "opportunistic_officer_buys_30d",
+        "Off-Pattern Officer Buys (30d)",
+        "Insider",
+        "insider",
+        unit="count",
+        rankable=False,
+        description="Officer purchases that break the buyer's own calendar "
+        "pattern: the narrowest cut, and the one the routine "
+        "versus opportunistic literature finds informative.",
+        citation="Cohen, Malloy & Pomorski (2012), routine vs opportunistic",
+        coverage_note=_INSIDER,
+    ),
+    Field(
+        "opportunistic_director_buys_30d",
+        "Off-Pattern Director Buys (30d)",
+        "Insider",
+        "insider",
+        unit="count",
+        rankable=False,
+        description="Director purchases breaking the buyer's own pattern.",
+        coverage_note=_INSIDER,
+    ),
+    Field(
+        "routine_buy_count_30d",
+        "Routine Insider Buys (30d)",
+        "Insider",
+        "insider",
+        unit="count",
+        rankable=False,
+        description="Purchases matching the buyer's own calendar pattern in "
+        "each of the last three years. Registered to be filtered "
+        "*out*: a plan purchase carries little information.",
+        coverage_note=_INSIDER,
+    ),
+    Field(
+        "unclassified_buy_count_30d",
+        "Unclassified Insider Buys (30d)",
+        "Insider",
+        "insider",
+        unit="count",
+        rankable=False,
+        description="Purchases with no identifiable filer or execution date, so "
+        "routine and opportunistic cannot be told apart. A count of "
+        "what the classification could not decide, not a third kind "
+        "of behaviour.",
+        coverage_note=_INSIDER,
+    ),
+    Field(
+        "max_purchase_fraction_of_post_holdings_30d",
+        "Largest Buy / Resulting Stake",
+        "Insider",
+        "insider",
+        unit="ratio",
+        rankable=False,
+        description="The largest off-pattern purchase as a fraction of what "
+        "that insider held afterwards. Near 1 means the position "
+        "was built here rather than topped up. Null where holdings "
+        "are missing or irreconcilable.",
+        coverage_note=_INSIDER,
+    ),
+    Field(
+        "inst_stale_days",
+        "13F Age (Days)",
+        "Ownership",
+        "institutional",
+        None,
+        unit="days",
+        rankable=False,
+        description="Days from the reported quarter end to the signal day. A "
+        "staleness gate: quarterly data is up to ~4.5 months old by "
+        "the time the next quarter is filed.",
+        coverage_note=_INSTITUTIONAL,
     ),
 ]
 

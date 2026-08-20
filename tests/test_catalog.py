@@ -1,7 +1,15 @@
 import pytest
 
+import research.filters as filters
+import research.registry as registry
 import research.screen as screen
 import research.spec as spec
+from research.signals.sig_events import EVENT_FACT_COLUMNS
+from research.signals.sig_insider import ACTIVITY_FACT_COLUMNS, MARKETCAP_FACT_COLUMN
+from research.signals.sig_institutional import (
+    OWNERSHIP_FACT_COLUMNS,
+    PROVENANCE_COLUMNS,
+)
 
 _CATALOG = spec.catalog()
 _SPECS = list(_CATALOG.values())
@@ -67,3 +75,60 @@ def test_catalog_keys_match_the_name_on_each_spec():
 
 def test_the_catalog_ships_more_than_one_screen():
     assert len(_CATALOG) > 1
+
+
+# ── the registry against the signal loader ───────────────────────────────────
+
+
+@pytest.mark.parametrize("key", sorted(registry.FIELDS))
+def test_every_registered_field_resolves_to_a_signal_loader(key):
+    """A field whose source has no loader raises only when a screen names it.
+
+    The registry says "event" where the loader says "events"; any future source
+    added on one side alone fails here instead of at a user's next run.
+    """
+    assert screen._sources((key,))[0] in filters.SIGNAL_SOURCES
+
+
+@pytest.mark.parametrize(
+    "key", sorted(k for k, f in registry.FIELDS.items() if f.source == "insider")
+)
+def test_insider_fields_select_rather_than_rank(key):
+    """Only ~7% of traded names carry an insider purchase in 30 days, so a
+    percentile over the structural universe is a tie block at zero, and a blend
+    containing one would be decided by the tie-break rather than by the fact."""
+    assert not registry.get(key).rankable
+
+
+# ── the registry against what the sources actually emit ──────────────────────
+
+_EMITTED_FACTS = {
+    "event": (frozenset(EVENT_FACT_COLUMNS), frozenset()),
+    "insider": (
+        frozenset(ACTIVITY_FACT_COLUMNS) | {MARKETCAP_FACT_COLUMN},
+        frozenset(),
+    ),
+    "institutional": (
+        frozenset(OWNERSHIP_FACT_COLUMNS),
+        frozenset(PROVENANCE_COLUMNS),
+    ),
+}
+
+
+@pytest.mark.parametrize("source", sorted(_EMITTED_FACTS))
+def test_every_emitted_fact_is_registered_or_declared_provenance(source):
+    """A fact reaching the frame without a registry entry is invisible to the
+    CLI and to a GUI, and silently unscreenable; the only ones allowed to stay
+    unregistered are the provenance columns each source declares."""
+    emitted, provenance = _EMITTED_FACTS[source]
+    registered = {key for key, f in registry.FIELDS.items() if f.source == source}
+    assert emitted - registered == provenance
+
+
+@pytest.mark.parametrize("source", sorted(_EMITTED_FACTS))
+def test_no_registered_field_outlives_the_fact_behind_it(source):
+    """The other direction: a registered field its source stopped emitting
+    passes validation and then raises a KeyError against the assembled frame."""
+    emitted, _ = _EMITTED_FACTS[source]
+    registered = {key for key, f in registry.FIELDS.items() if f.source == source}
+    assert registered - emitted == set()

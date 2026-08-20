@@ -1,67 +1,77 @@
-"""Persistence for 13F institutional holdings, one row per investor per quarter.
+"""Persistence for institutional ownership summarised by ticker.
 
-Holdings are reported quarterly and filed weeks later, so a caller reading these
+SHARADAR/SF3A: one row per ticker per quarter, holding counts, share counts and
+dollar values split by security type. Summarised rather than per-investor, so a
+row lines up with everything else the research layer joins on a ticker.
+
+13F filings appear up to 45 days after the quarter they report on, so a caller
 must apply its own filing-delay assumption before treating a quarter as known.
+``units`` are shares and ``value`` dollars, rescaled by the load from the
+thousands and millions SF3A serves.
 """
 
 from database.db_connection import get_connection
 import pandas as pd
 from sqlalchemy import text
 
-_COLUMNS = [
-    "ticker",
-    "investorname",
-    "calendardate",
-    "value",
-    "units",
-    "price",
-    "securitytype",
+SECURITY_TYPES = ("shr", "cll", "put", "wnt", "dbt", "prf", "fnd", "und")
+
+_COUNT_COLUMNS = [f"{kind}holders" for kind in SECURITY_TYPES]
+_AMOUNT_COLUMNS = [
+    *[f"{kind}units" for kind in SECURITY_TYPES],
+    *[f"{kind}value" for kind in SECURITY_TYPES],
+    "totalvalue",
+    "percentoftotal",
 ]
+_COLUMNS = ["ticker", "date", "name", *_COUNT_COLUMNS, *_AMOUNT_COLUMNS]
 _COL_LIST = ", ".join(_COLUMNS)
 _BIND_LIST = ", ".join(f":{c}" for c in _COLUMNS)
-KEY_COLUMNS = ("ticker", "investorname", "calendardate", "securitytype")
-_UPDATE_SET = ", ".join(
-    f"{column} = EXCLUDED.{column}" for column in _COLUMNS if column not in KEY_COLUMNS
-)
+KEY_COLUMNS = ("ticker", "date")
+_NON_PK = [c for c in _COLUMNS if c not in KEY_COLUMNS]
+_UPDATE_SET = ", ".join(f"{c} = EXCLUDED.{c}" for c in _NON_PK)
 
-CONFLICT = f"ON CONFLICT ({', '.join(KEY_COLUMNS)}) DO UPDATE SET {_UPDATE_SET}"
+CONFLICT = f"ON CONFLICT (ticker, date) DO UPDATE SET {_UPDATE_SET}"
+
+_DEFINITIONS = ",\n                ".join(
+    [
+        "ticker TEXT NOT NULL",
+        "date DATE NOT NULL",
+        "name TEXT",
+        *[f"{c} INTEGER" for c in _COUNT_COLUMNS],
+        *[f"{c} DOUBLE PRECISION" for c in _AMOUNT_COLUMNS],
+    ]
+)
 
 
 def create_table():
-    """Create the ``institutional_holdings`` table and its indexes if absent.
+    """Create the ``institutional_ownership`` table and its index if absent.
 
     Idempotent, so setup can be re-run safely.
     """
     with get_connection().begin() as conn:
         conn.execute(
-            text("""
-            CREATE TABLE IF NOT EXISTS institutional_holdings (
-                ticker TEXT,
-                investorname TEXT,
-                calendardate DATE,
-                value DOUBLE PRECISION,
-                units DOUBLE PRECISION,
-                price DOUBLE PRECISION,
-                securitytype TEXT,
-                PRIMARY KEY (ticker, investorname, calendardate, securitytype)
+            text(f"""
+            CREATE TABLE IF NOT EXISTS institutional_ownership (
+                {_DEFINITIONS},
+                PRIMARY KEY (ticker, date)
             );
-            CREATE INDEX IF NOT EXISTS idx_institutional_date ON institutional_holdings (calendardate);
+            CREATE INDEX IF NOT EXISTS idx_institutional_ownership_date
+                ON institutional_ownership (date);
         """)
         )
 
 
 def drop_table():
-    """Drop ``institutional_holdings`` and everything depending on it."""
+    """Drop ``institutional_ownership`` and everything depending on it."""
     with get_connection().begin() as conn:
-        conn.execute(text("DROP TABLE IF EXISTS institutional_holdings CASCADE"))
+        conn.execute(text("DROP TABLE IF EXISTS institutional_ownership CASCADE"))
 
 
 def insert(df: pd.DataFrame):
-    """Upsert rows into ``institutional_holdings``.
+    """Upsert rows into ``institutional_ownership``, keyed on ``(ticker, date)``.
 
-    Keyed on ticker, investor, calendar date, and security type. Columns outside
-    ``_COLUMNS`` are ignored and NaN/NaT become SQL NULL. A restated holding
-    overwrites the stored one. No-op on an empty frame.
+    Columns outside ``_COLUMNS`` are ignored and NaN/NaT become SQL NULL. A
+    restated quarter overwrites the stored one. No-op on an empty frame.
     """
     if df.empty:
         return
@@ -70,9 +80,8 @@ def insert(df: pd.DataFrame):
     with get_connection().begin() as conn:
         conn.execute(
             text(
-                f"INSERT INTO institutional_holdings ({_COL_LIST}) "
-                f"VALUES ({_BIND_LIST}) "
-                f"{CONFLICT}"
+                f"INSERT INTO institutional_ownership ({_COL_LIST}) "
+                f"VALUES ({_BIND_LIST}) {CONFLICT}"
             ),
             records,
         )
@@ -83,22 +92,36 @@ def get(
     start_date: str | None = None,
     end_date: str | None = None,
 ) -> pd.DataFrame:
-    """Return ``institutional_holdings`` rows matching the supplied filters.
+    """Return ``institutional_ownership`` rows matching the supplied filters.
 
-    Every argument is optional and omitting all of them returns the whole
-    table. Dates bound ``calendardate``, the quarter reported on, not the
-    filing date. Ordered by ticker then calendar date.
+    Every argument is optional and omitting all of them returns the whole table.
+    Dates bound ``date``, the quarter reported on, not the filing date. Ordered
+    by ticker then quarter.
     """
-    q = "SELECT * FROM institutional_holdings WHERE TRUE"
+    q = "SELECT * FROM institutional_ownership WHERE TRUE"
     params = {}
     if tickers is not None:
         params["tickers"] = [tickers] if isinstance(tickers, str) else tickers
         q += " AND ticker = ANY(:tickers)"
     if start_date is not None:
         params["start"] = start_date
-        q += " AND calendardate >= :start"
+        q += " AND date >= :start"
     if end_date is not None:
         params["end"] = end_date
-        q += " AND calendardate <= :end"
-    q += " ORDER BY ticker, calendardate"
+        q += " AND date <= :end"
+    q += " ORDER BY ticker, date"
     return pd.read_sql_query(text(q), get_connection(), params=params)
+
+
+def get_sync_cursor() -> str | None:
+    """Return the newest quarter on record, or None if empty.
+
+    The incremental-load watermark. A quarter rather than the ``lastupdated``
+    stamp the other repositories resume from, since SF3A carries no such stamp,
+    and re-exported inclusively because the newest quarter is still filling in.
+    """
+    with get_connection().connect() as conn:
+        result = conn.execute(
+            text("SELECT MAX(date) FROM institutional_ownership")
+        ).scalar()
+        return str(result) if result else None

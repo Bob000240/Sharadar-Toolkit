@@ -56,12 +56,42 @@ def test_ticker_refresh_includes_delisted_rows(monkeypatch):
     daily_update.update_tickers(FakeSharadar())
 
     assert calls[0] == {"table": "SEP", "lastupdated_since": "2026-07-20"}
-    assert calls[1] == {
-        "table": "SFP",
-        "tickers": daily_update.BENCHMARK_SYMBOLS,
-        "lastupdated_since": "2026-07-20",
-    }
+    assert calls[1] == {"table": "SFP", "lastupdated_since": "2026-07-20"}
     assert len(inserted[0]) == 2
+
+
+def test_institutional_update_re_exports_the_newest_stored_quarter(monkeypatch):
+    """A quarter is partial until its 13F filings arrive, so the newest stored
+    one is re-exported rather than skipped."""
+    calls = []
+    monkeypatch.setattr(
+        daily_update.institutional_repo, "get_sync_cursor", lambda: "2026-06-30"
+    )
+    monkeypatch.setattr(
+        daily_update,
+        "load_sharadar_table",
+        lambda code, start_date, upsert: calls.append((code, start_date, upsert)),
+    )
+
+    daily_update.update_institutional()
+
+    assert calls == [("SF3A", "2026-06-30", True)]
+
+
+def test_institutional_update_backfills_when_nothing_is_stored(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        daily_update.institutional_repo, "get_sync_cursor", lambda: None
+    )
+    monkeypatch.setattr(
+        daily_update,
+        "load_sharadar_table",
+        lambda code, start_date, upsert: calls.append((code, start_date, upsert)),
+    )
+
+    daily_update.update_institutional()
+
+    assert calls == [("SF3A", daily_update.START_DATE, True)]
 
 
 def test_technical_feature_update_normalizes_database_dates(monkeypatch):
@@ -179,15 +209,8 @@ def test_ticker_and_institutional_conflicts_update_existing_rows(monkeypatch):
     institutional_repo.insert(
         pd.DataFrame(
             [
-                {
-                    "ticker": "TEST",
-                    "investorname": "Investor",
-                    "calendardate": "2026-03-31",
-                    "value": 2.0,
-                    "units": 1.0,
-                    "price": 2.0,
-                    "securitytype": "SHR",
-                }
+                {column: None for column in institutional_repo._COLUMNS}
+                | {"ticker": "TEST", "date": "2026-03-31", "shrholders": 4}
             ]
         )
     )
@@ -195,8 +218,9 @@ def test_ticker_and_institutional_conflicts_update_existing_rows(monkeypatch):
     ticker_sql = ticker_engine.statements[0][0]
     institutional_sql = institutional_engine.statements[0][0]
     assert "ON CONFLICT (ticker, table_code) DO UPDATE" in ticker_sql
+    assert "ON CONFLICT (ticker, date)" in institutional_sql
     assert "isdelisted = COALESCE(EXCLUDED.isdelisted" in ticker_sql
-    assert "DO UPDATE SET value = EXCLUDED.value" in institutional_sql
+    assert "shrholders = EXCLUDED.shrholders" in institutional_sql
 
 
 def test_equity_price_sync_uses_lastupdated_not_date(monkeypatch):

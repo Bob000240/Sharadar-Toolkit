@@ -34,9 +34,12 @@ class SharadarData:
     """Authenticated access to the Sharadar tables.
 
     One method per table: ``fundamentals``, ``insider_transactions``,
-    ``institutional_holdings``, ``daily_valuation``, ``equity_prices``,
-    ``fund_prices``, ``tickers``, and ``events``. Every method paginates by
-    default.
+    ``daily_valuation``, ``equity_prices``, ``fund_prices``, ``tickers``, and
+    ``events``. Every method paginates by default.
+
+    No SF3 method: a quarter of institutional holdings spans every ticker, which
+    is one bulk export against dozens of paginated ticker batches here, so
+    ``pipeline.load_data`` refreshes it instead.
     """
 
     def __init__(self):
@@ -102,22 +105,6 @@ class SharadarData:
             "SHARADAR/SF2",
             **self._params(
                 ticker=tickers, filingdate=self._date_range(start_date, end_date)
-            ),
-            paginate=paginate,
-        )
-
-    def institutional_holdings(
-        self,
-        tickers: str | list[str] | None = None,
-        start_date: str | None = None,
-        end_date: str | None = None,
-        paginate=True,
-    ) -> pd.DataFrame:
-        """Fetch SF3 institutional holdings, bounded by the quarter reported on."""
-        return nasdaqdatalink.get_table(
-            "SHARADAR/SF3",
-            **self._params(
-                ticker=tickers, calendardate=self._date_range(start_date, end_date)
             ),
             paginate=paginate,
         )

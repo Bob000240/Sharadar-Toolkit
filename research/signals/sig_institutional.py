@@ -1,8 +1,12 @@
-"""Point-in-time 13F holdings and optional ticker-level facts.
+"""Point-in-time institutional ownership, one row per ticker.
 
 A 13F is filed up to 45 days after the quarter it reports on, so a quarter is
 treated as unavailable until that lag has passed. ``FILING_DELAY_DAYS`` encodes
-the assumption; ``availability_is_estimated`` records that it is one.
+the assumption; ``inst_availability_is_estimated`` records that it is one.
+
+Sourced from SF3A, which the vendor summarises by ticker. Holder identity is no
+part of that summary, so who holds a position, and who opened or closed one,
+cannot be answered from these facts at all.
 """
 
 from __future__ import annotations
@@ -15,30 +19,32 @@ from research.signals.sig import Signals
 
 
 FILING_DELAY_DAYS = 45
-SHARE_SECURITY_TYPE = "SHR"
 
-HOLDING_FACT_COLUMNS = (
-    "quarter_end",
-    "assumed_available_from",
-    "stale_days",
-    "availability_is_estimated",
-    "total_holders",
-    "total_value_b",
-    "total_units",
-    "holders_change",
-    "value_change_pct",
-    "units_change_pct",
-    "new_holders",
-    "closed_positions",
+PROVENANCE_COLUMNS = (
+    "inst_quarter_end",
+    "inst_available_from",
+    "inst_availability_is_estimated",
+)
+
+OWNERSHIP_FACT_COLUMNS = PROVENANCE_COLUMNS + (
+    "inst_stale_days",
+    "inst_holders",
+    "inst_units",
+    "inst_value",
+    "inst_pct_of_all_holdings",
+    "inst_put_call_ratio",
+    "inst_holders_change",
+    "inst_units_change_pct",
+    "inst_value_change_pct",
 )
 
 
 class InstitutionalSignals(Signals):
-    """SQL-backed 13F rows with opt-in ticker-level fact attachments.
+    """Quarterly 13F ownership reduced to ticker-level facts.
 
-    ``get_signals`` returns raw holdings, one row per investor per quarter, and
-    ``attach_holding_facts`` aggregates them to one row per ticker. The two are
-    separate because the raw rows are useful on their own.
+    ``get_signals`` returns the stored quarters conservatively assumed available
+    and ``attach_ownership_facts`` reduces them to one row per requested ticker,
+    which is the shape the filter and ranking path consumes.
     """
 
     @classmethod
@@ -48,11 +54,11 @@ class InstitutionalSignals(Signals):
         signal_day: pd.Timestamp,
         history_days: int = 200,
     ) -> pd.DataFrame:
-        """Return raw holdings from quarters conservatively assumed available.
+        """Return stored quarters conservatively assumed available on that day.
 
         Quarters ending within ``FILING_DELAY_DAYS`` of the signal day are
-        excluded, since their filings may not have appeared yet. Return one row
-        per investor per quarter, not one per ticker.
+        excluded, since their filings may not have appeared yet. The default
+        history spans two quarters, enough for a quarter-over-quarter change.
         """
         signal_day = pd.Timestamp(signal_day)
         available_quarter_cutoff = signal_day - pd.Timedelta(days=FILING_DELAY_DAYS)
@@ -66,118 +72,100 @@ class InstitutionalSignals(Signals):
             return frame.copy()
 
         frame = frame.copy()
-        frame["calendardate"] = pd.to_datetime(frame["calendardate"])
+        frame["date"] = pd.to_datetime(frame["date"])
         return frame
 
     @classmethod
-    def attach_holding_facts(
+    def attach_ownership_facts(
         cls,
         frame: pd.DataFrame,
         tickers: list[str],
         signal_day: pd.Timestamp,
     ) -> pd.DataFrame:
-        """Aggregate raw 13F rows into latest-quarter and quarter-over-quarter facts.
+        """Reduce the available quarters to one row per requested ticker.
 
-        Only common-share positions are counted. Return a ticker-indexed frame
-        with one row per requested ticker; a ticker with no holdings keeps its
-        row with zero counts and null changes.
+        A ticker no institution reported keeps its row with null facts, since
+        absence of a 13F is not the same fact as an ownership level of zero.
         """
         signal_day = pd.Timestamp(signal_day)
-        if frame.empty:
-            grouped: dict[str, pd.DataFrame] = {}
-        else:
-            holdings = frame.copy()
-            holdings["calendardate"] = pd.to_datetime(holdings["calendardate"])
-            holdings = holdings[holdings["securitytype"] == SHARE_SECURITY_TYPE]
-            grouped = {
-                str(ticker): group
-                for ticker, group in holdings.groupby("ticker", sort=False)
+        grouped = (
+            {}
+            if frame.empty
+            else {
+                str(ticker): group.sort_values("date")
+                for ticker, group in frame.groupby("ticker", sort=False)
             }
-
+        )
         rows = [
             {
                 "ticker": ticker,
-                **cls._aggregate_ticker(grouped.get(str(ticker)), signal_day),
+                **cls._ticker_facts(grouped.get(str(ticker)), signal_day),
             }
             for ticker in tickers
         ]
         if not rows:
-            return pd.DataFrame(columns=HOLDING_FACT_COLUMNS).rename_axis("ticker")
+            return pd.DataFrame(columns=OWNERSHIP_FACT_COLUMNS).rename_axis("ticker")
         return pd.DataFrame(rows).set_index("ticker")
 
     @classmethod
-    def _aggregate_ticker(
+    def _ticker_facts(
         cls,
         frame: pd.DataFrame | None,
         signal_day: pd.Timestamp,
     ) -> dict:
-        """Reduce one ticker's holdings to a fact dict.
+        """Reduce one ticker's available quarters to a fact dict.
 
-        Quarter-over-quarter changes need two quarters and stay at their empty
-        defaults with only one.
+        Quarter-over-quarter changes need two quarters and stay null with only
+        one, rather than reading as no change.
         """
-        empty = {
-            "quarter_end": None,
-            "assumed_available_from": None,
-            "stale_days": None,
-            "availability_is_estimated": True,
-            "total_holders": 0,
-            "total_value_b": 0.0,
-            "total_units": 0.0,
-            "holders_change": 0,
-            "value_change_pct": np.nan,
-            "units_change_pct": np.nan,
-            "new_holders": 0,
-            "closed_positions": 0,
-        }
+        empty = dict.fromkeys(OWNERSHIP_FACT_COLUMNS, np.nan)
+        empty["inst_availability_is_estimated"] = True
         if frame is None or frame.empty:
             return empty
 
-        quarters = sorted(frame["calendardate"].dropna().unique())
-        if not quarters:
-            return empty
-
-        latest_quarter = pd.Timestamp(quarters[-1])
-        current = frame[frame["calendardate"] == latest_quarter]
-        current_holders = current["investorname"].nunique()
-        current_value = float(
-            pd.to_numeric(current["value"], errors="coerce").fillna(0).sum()
-        )
-        current_units = float(
-            pd.to_numeric(current["units"], errors="coerce").fillna(0).sum()
-        )
+        latest = frame.iloc[-1]
+        quarter_end = pd.Timestamp(latest["date"])
         facts = {
             **empty,
-            "quarter_end": latest_quarter,
-            "assumed_available_from": latest_quarter
-            + pd.Timedelta(days=FILING_DELAY_DAYS),
-            "stale_days": int(
-                (signal_day.normalize() - latest_quarter.normalize()).days
+            "inst_quarter_end": quarter_end,
+            "inst_available_from": quarter_end + pd.Timedelta(days=FILING_DELAY_DAYS),
+            "inst_stale_days": int(
+                (signal_day.normalize() - quarter_end.normalize()).days
             ),
-            "total_holders": int(current_holders),
-            "total_value_b": current_value / 1e9,
-            "total_units": current_units,
+            "inst_holders": cls._number(latest["shrholders"]),
+            "inst_units": cls._number(latest["shrunits"]),
+            "inst_value": cls._number(latest["shrvalue"]),
+            "inst_pct_of_all_holdings": cls._number(latest["percentoftotal"]),
+            "inst_put_call_ratio": cls._ratio(latest["putvalue"], latest["cllvalue"]),
         }
-        if len(quarters) < 2:
+        if len(frame) < 2:
             return facts
 
-        prior = frame[frame["calendardate"] == pd.Timestamp(quarters[-2])]
-        prior_holders = prior["investorname"].nunique()
-        prior_value = float(
-            pd.to_numeric(prior["value"], errors="coerce").fillna(0).sum()
-        )
-        prior_units = float(
-            pd.to_numeric(prior["units"], errors="coerce").fillna(0).sum()
-        )
-        current_names = set(current["investorname"].dropna())
-        prior_names = set(prior["investorname"].dropna())
+        prior = frame.iloc[-2]
         facts.update(
             {
-                "holders_change": int(current_holders - prior_holders),
-                "value_change_pct": cls.safe_growth(current_value, prior_value),
-                "units_change_pct": cls.safe_growth(current_units, prior_units),
-                "new_holders": len(current_names - prior_names),
-                "closed_positions": len(prior_names - current_names),
+                "inst_holders_change": cls._number(latest["shrholders"])
+                - cls._number(prior["shrholders"]),
+                "inst_units_change_pct": cls.safe_growth(
+                    cls._number(latest["shrunits"]), cls._number(prior["shrunits"])
+                ),
+                "inst_value_change_pct": cls.safe_growth(
+                    cls._number(latest["shrvalue"]), cls._number(prior["shrvalue"])
+                ),
             }
         )
         return facts
+
+    @staticmethod
+    def _number(value) -> float:
+        """Return ``value`` as a float, or NaN where the vendor left it null."""
+        return float(pd.to_numeric(value, errors="coerce"))
+
+    @staticmethod
+    def _ratio(numerator, denominator) -> float:
+        """Divide two vendor amounts, returning NaN where the answer is undefined."""
+        numerator = float(pd.to_numeric(numerator, errors="coerce"))
+        denominator = float(pd.to_numeric(denominator, errors="coerce"))
+        if pd.isna(numerator) or pd.isna(denominator) or denominator == 0:
+            return float("nan")
+        return numerator / denominator

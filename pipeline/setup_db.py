@@ -27,7 +27,7 @@ def drop_all():
     """
     tables = [
         "events",
-        "institutional_holdings",
+        "institutional_ownership",
         "insider_transactions",
         "fundamentals",
         "tickers",
@@ -63,7 +63,7 @@ def create_all():
     insider_repo.create_table()
     print("  created insider_transactions")
     institutional_repo.create_table()
-    print("  created institutional_holdings")
+    print("  created institutional_ownership")
     event_repo.create_table()
     print("  created events")
 

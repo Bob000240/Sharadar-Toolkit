@@ -11,8 +11,7 @@ records can appear long after the date they describe.
 import time
 
 import pandas as pd
-from pipeline.config import BENCHMARK_SYMBOLS
-from pipeline.load_data import START_DATE
+from pipeline.load_data import START_DATE, load_sharadar_table
 from data.sharadar_data import SharadarData
 from data.technical_features import compute_technical_features
 
@@ -97,13 +96,12 @@ def update_equity_prices(sh: SharadarData):
 
 
 def update_fund_prices(sh: SharadarData):
-    """Fetch benchmark fund bars changed since the stored watermark."""
+    """Fetch fund bars changed since the stored watermark."""
     _fetch(
         sh.fund_prices,
         fund_repo.insert,
         "Fund prices",
         lastupdated_since=fund_repo.get_sync_cursor() or START_DATE,
-        tickers=BENCHMARK_SYMBOLS,
     )
 
 
@@ -239,20 +237,24 @@ def update_insider(sh: SharadarData):
     )
 
 
-def update_institutional(sh: SharadarData):
-    """Fetch 13F holdings for every equity ticker, in batches.
+def _reexport_quarters(code: str, repo, label: str) -> None:
+    """Re-export one quarterly table from its newest stored quarter onward.
 
-    Batched because the ticker list is too long for one request.
+    The 13F step skips the JSON datatable, so its rows arrive already rescaled by
+    the bulk loader. Restarted at the newest stored quarter rather than after it,
+    because filings arrive for weeks and the largest holders are missing from a
+    quarter until they do.
     """
-    _fetch(
-        sh.institutional_holdings,
-        institutional_repo.insert,
-        "Institutional",
-        batch_size=500,
-        tickers=tickers_repo.get(table_code="SEP")["ticker"].tolist(),
-        start_date=_lookback(60),
-        end_date=TODAY,
-    )
+    since = repo.get_sync_cursor() or START_DATE
+    print(f"{label}: re-exporting quarters from {since} ...", flush=True)
+    started = time.perf_counter()
+    load_sharadar_table(code, start_date=since, upsert=True)
+    print(f"{label}: done [{time.perf_counter() - started:.1f}s]")
+
+
+def update_institutional():
+    """Re-export recent quarters of by-ticker 13F ownership."""
+    _reexport_quarters("SF3A", institutional_repo, "Institutional ownership")
 
 
 def update_events(sh: SharadarData):
@@ -267,10 +269,10 @@ def update_events(sh: SharadarData):
 
 
 def update_tickers(sh: SharadarData):
-    """Fetch equity and benchmark descriptors changed since the watermark."""
+    """Fetch equity and fund descriptors changed since the watermark."""
     since = tickers_repo.get_sync_cursor()
     equities = sh.tickers(table="SEP", lastupdated_since=since)
-    funds = sh.tickers(table="SFP", tickers=BENCHMARK_SYMBOLS, lastupdated_since=since)
+    funds = sh.tickers(table="SFP", lastupdated_since=since)
     df = pd.concat([equities, funds], ignore_index=True)
     if df.empty:
         print("Tickers: up to date")

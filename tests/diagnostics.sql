@@ -196,16 +196,17 @@ FROM (
     UNION ALL SELECT 'fundamentals(datekey)', max(datekey) FROM fundamentals
     UNION ALL SELECT 'insider(filingdate)', max(filingdate) FROM insider_transactions
     UNION ALL SELECT 'events', max(date) FROM events
-    UNION ALL SELECT 'institutional', max(calendardate) FROM institutional_holdings
+    UNION ALL SELECT 'institutional', max(date) FROM institutional_ownership
     UNION ALL SELECT 'macro', max(date) FROM macro
 ) s ORDER BY 3 DESC;
 
--- E2. SF3 quarterly holes. Sharadar thinned older SF3 to one quarter per year
--- before 2022, so quarter-over-quarter ownership signals are unusable there.
-SELECT 'E2 sf3_quarters_' || yr, 'KNOWN-GAP', q, 'quarters present'
-FROM (SELECT extract(year FROM calendardate)::int yr,
-             count(DISTINCT calendardate) q
-      FROM institutional_holdings GROUP BY 1) x
+-- E2. SF3A quarterly holes. SF3 v1 thinned pre-2022 history to one quarter per
+-- year; v3 restored it, so a year short of four quarters now means an
+-- incomplete load rather than a known vendor gap.
+SELECT 'E2 sf3a_quarters_' || yr, 'MEDIUM', q, 'quarters present'
+FROM (SELECT extract(year FROM date)::int yr,
+             count(DISTINCT date) q
+      FROM institutional_ownership GROUP BY 1) x
 WHERE q < 4 ORDER BY yr;
 
 -- E3. Macro columns that are entirely NULL, meaning a FRED series never loaded.

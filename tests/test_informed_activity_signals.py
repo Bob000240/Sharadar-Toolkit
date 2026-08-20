@@ -55,7 +55,9 @@ def test_event_facts_fetch_window_and_aggregation(monkeypatch):
         )
 
     monkeypatch.setattr("research.signals.sig_events.event_repo.get", fake_get)
+    frame = EventSignals.get_signals(["AAA", "NO_EVENTS"], pd.Timestamp("2026-07-20"))
     facts = EventSignals.attach_event_facts(
+        frame,
         ["AAA", "NO_EVENTS"],
         pd.Timestamp("2026-07-20"),
     )
@@ -90,7 +92,48 @@ def test_purchase_classification_is_an_explicit_attachment():
     assert result.iloc[5]["purchase_classification"] == "unclassified"
 
 
-def test_insider_activity_facts_include_missing_tickers_and_normalize_marketcap():
+def test_a_pattern_disclosed_late_does_not_make_a_purchase_routine():
+    """The label must be decidable from what was knowable when the purchase was
+    filed, so a prior April buy disclosed afterwards cannot establish the pattern."""
+    transactions = pd.DataFrame(
+        [
+            _purchase("Owner", "2023-04-10", "2026-05-01"),
+            _purchase("Owner", "2024-04-10", "2024-04-12"),
+            _purchase("Owner", "2025-04-10", "2025-04-12"),
+            _purchase("Owner", "2026-04-10", "2026-04-12"),
+        ]
+    )
+
+    result = InsiderSignals.attach_purchase_classification(transactions)
+
+    assert result.iloc[3]["purchase_classification"] == "opportunistic"
+
+
+def test_a_ticker_with_no_filings_counts_zero_but_ratios_stay_null(monkeypatch):
+    """No disclosed transaction is a fact, so counts are zero — but a ratio over
+    no transactions is undefined, and zero there would read as balanced trading."""
+    monkeypatch.setattr(
+        "research.signals.sig_insider.daily_repo.get_latest_rows",
+        lambda tickers, signal_day: pd.DataFrame(),
+    )
+
+    facts = InsiderSignals.attach_activity_facts(
+        pd.DataFrame(), ["QUIET"], pd.Timestamp("2026-05-01")
+    )
+    facts = InsiderSignals.attach_marketcap_normalization(
+        facts, pd.Timestamp("2026-05-01")
+    )
+
+    assert facts.loc["QUIET", "buy_count_30d"] == 0
+    assert facts.loc["QUIET", "buy_value_30d"] == 0.0
+    assert np.isnan(facts.loc["QUIET", "net_buy_ratio_90d"])
+    assert np.isnan(facts.loc["QUIET", "days_since_last_buy"])
+    assert np.isnan(facts.loc["QUIET", "opportunistic_value_to_marketcap"])
+
+
+def test_insider_activity_facts_include_missing_tickers_and_normalize_marketcap(
+    monkeypatch,
+):
     transactions = pd.DataFrame(
         [
             _purchase("Routine Owner", "2023-04-10", "2023-04-12"),
@@ -122,14 +165,28 @@ def test_insider_activity_facts_include_missing_tickers_and_normalize_marketcap(
         ]
     )
 
+    monkeypatch.setattr(
+        "research.signals.sig_insider.daily_repo.get_latest_rows",
+        lambda tickers, signal_day: pd.DataFrame(
+            {"ticker": ["TEST", "EMPTY"], "marketcap": [1_000.0, 1_000.0]}
+        ),
+    )
+
+    monkeypatch.setattr(
+        "research.signals.sig_insider.insider_repo.get",
+        lambda **kwargs: transactions,
+    )
+
+    frame = InsiderSignals.get_signals(["TEST", "EMPTY"], pd.Timestamp("2026-05-01"))
+    labelled = InsiderSignals.attach_purchase_classification(frame)
     facts = InsiderSignals.attach_activity_facts(
-        transactions,
+        labelled,
         ["TEST", "EMPTY"],
         pd.Timestamp("2026-05-01"),
     )
     facts = InsiderSignals.attach_marketcap_normalization(
         facts,
-        pd.Series({"TEST": 1_000_000_000, "EMPTY": 1_000_000_000}),
+        pd.Timestamp("2026-05-01"),
     )
 
     assert facts.loc["TEST", "buy_count_30d"] == 3
@@ -139,6 +196,7 @@ def test_insider_activity_facts_include_missing_tickers_and_normalize_marketcap(
     assert facts.loc[
         "TEST", "max_purchase_fraction_of_post_holdings_30d"
     ] == pytest.approx(0.2)
+    # 1,000 USD millions is a $1bn cap, so $400k of opportunistic buying is 4bp.
     assert facts.loc["TEST", "opportunistic_value_to_marketcap"] == pytest.approx(
         0.0004
     )
@@ -146,51 +204,79 @@ def test_insider_activity_facts_include_missing_tickers_and_normalize_marketcap(
     assert facts.loc["EMPTY", "opportunistic_value_to_marketcap"] == 0.0
 
 
-def test_institutional_get_enforces_availability_and_attachment_computes_qoq(
+def test_institutional_ownership_enforces_availability_and_computes_qoq(
     monkeypatch,
 ):
     captured = {}
-    holdings = pd.DataFrame(
+    quarters = pd.DataFrame(
         {
-            "ticker": ["AAA", "AAA", "AAA", "AAA"],
-            "investorname": ["Old", "Closed", "Old", "New"],
-            "calendardate": [
-                "2025-12-31",
-                "2025-12-31",
-                "2026-03-31",
-                "2026-03-31",
-            ],
-            "value": [100.0, 100.0, 150.0, 150.0],
-            "units": [10.0, 10.0, 15.0, 15.0],
-            "securitytype": ["SHR", "SHR", "SHR", "SHR"],
+            "ticker": ["AAA", "AAA"],
+            "date": ["2025-12-31", "2026-03-31"],
+            "shrholders": [200, 240],
+            "shrunits": [10_000.0, 15_000.0],
+            "shrvalue": [100.0, 150.0],
+            "percentoftotal": [0.01, 0.02],
+            "putvalue": [4.0, 6.0],
+            "cllvalue": [2.0, 3.0],
         }
     )
 
     def fake_get(**kwargs):
         captured.update(kwargs)
-        return holdings
+        return quarters
 
     monkeypatch.setattr(
         "research.signals.sig_institutional.institutional_repo.get",
         fake_get,
     )
-    raw = InstitutionalSignals.get_signals(
+
+    frame = InstitutionalSignals.get_signals(
+        ["AAA", "EMPTY"], pd.Timestamp("2026-06-30")
+    )
+    facts = InstitutionalSignals.attach_ownership_facts(
+        frame,
         ["AAA", "EMPTY"],
         pd.Timestamp("2026-06-30"),
     )
 
     assert captured["end_date"] == "2026-05-16"
-    assert "total_holders" not in raw
+    assert facts.loc["AAA", "inst_quarter_end"] == pd.Timestamp("2026-03-31")
+    assert facts.loc["AAA", "inst_holders"] == 240
+    assert facts.loc["AAA", "inst_holders_change"] == 40
+    assert facts.loc["AAA", "inst_units_change_pct"] == pytest.approx(0.5)
+    assert facts.loc["AAA", "inst_value_change_pct"] == pytest.approx(0.5)
+    assert facts.loc["AAA", "inst_put_call_ratio"] == pytest.approx(2.0)
 
-    facts = InstitutionalSignals.attach_holding_facts(
-        raw,
-        ["AAA", "EMPTY"],
-        pd.Timestamp("2026-06-30"),
+
+def test_institutional_absence_stays_null_rather_than_zero(monkeypatch):
+    """No 13F reporting a ticker is missing data, not ownership of zero."""
+    facts = InstitutionalSignals.attach_ownership_facts(
+        pd.DataFrame(), ["EMPTY"], pd.Timestamp("2026-06-30")
     )
 
-    assert facts.loc["AAA", "quarter_end"] == pd.Timestamp("2026-03-31")
-    assert facts.loc["AAA", "total_holders"] == 2
-    assert facts.loc["AAA", "value_change_pct"] == pytest.approx(0.5)
-    assert facts.loc["AAA", "new_holders"] == 1
-    assert facts.loc["AAA", "closed_positions"] == 1
-    assert np.isnan(facts.loc["EMPTY", "value_change_pct"])
+    assert np.isnan(facts.loc["EMPTY", "inst_holders"])
+    assert np.isnan(facts.loc["EMPTY", "inst_units_change_pct"])
+
+
+def test_a_single_available_quarter_leaves_changes_null(monkeypatch):
+    """One quarter cannot show a change; zero would read as no change."""
+    quarter = pd.DataFrame(
+        {
+            "ticker": ["AAA"],
+            "date": [pd.Timestamp("2026-03-31")],
+            "shrholders": [240],
+            "shrunits": [15_000.0],
+            "shrvalue": [150.0],
+            "percentoftotal": [0.02],
+            "putvalue": [None],
+            "cllvalue": [None],
+        }
+    )
+
+    facts = InstitutionalSignals.attach_ownership_facts(
+        quarter, ["AAA"], pd.Timestamp("2026-06-30")
+    )
+
+    assert facts.loc["AAA", "inst_holders"] == 240
+    assert np.isnan(facts.loc["AAA", "inst_holders_change"])
+    assert np.isnan(facts.loc["AAA", "inst_put_call_ratio"])

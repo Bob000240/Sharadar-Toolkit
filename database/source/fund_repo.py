@@ -1,8 +1,9 @@
 """Persistence for daily fund and ETF bars.
 
 Separate from ``equity_prices`` because Sharadar publishes funds in their own
-table. Benchmarks are read from here, which is why measuring a benchmark and
-measuring a population are separate calls.
+table, and every SFP fund is loaded, not just the benchmarks. Benchmarks are
+read from here, which is why measuring a benchmark and measuring a population
+are separate calls.
 """
 
 from database.db_connection import get_connection

@@ -9,8 +9,9 @@ the name; ``attach_signals`` puts those columns on the frame.
 silently skips its validation. ``funnel_row`` is the attrition schema shared
 with the orchestrator, so the two stages cannot drift apart.
 
-InsiderSignals and InstitutionalSignals are absent on purpose: their
-``get_signals`` return raw rows rather than one per ticker.
+Every signal service reaches this path through ``SIGNAL_SOURCES``. Their raw
+rows stay available directly: registration adds screening rather than replacing
+the services.
 """
 
 from __future__ import annotations
@@ -23,6 +24,8 @@ import pandas as pd
 import database.source.fundamentals_repo as fundamentals_repo
 import database.source.technical_features_repo as technical_features_repo
 from research.signals.sig_events import EventSignals
+from research.signals.sig_insider import InsiderSignals
+from research.signals.sig_institutional import InstitutionalSignals
 from research.signals.sig_fundamentals import FundamentalSignals
 from research.signals.sig_technical import TechnicalSignals
 
@@ -351,13 +354,39 @@ def _event_facts(tickers: list[str], signal_day) -> pd.DataFrame:
     recencies and an empty code list where nothing happened. Absence of events
     is a fact here rather than missing data.
     """
-    return EventSignals.attach_event_facts(tickers, signal_day)
+    frame = EventSignals.get_signals(tickers, signal_day)
+    return EventSignals.attach_event_facts(frame, tickers, signal_day)
+
+
+def _insider_facts(tickers: list[str], signal_day) -> pd.DataFrame:
+    """Assemble ticker-indexed insider activity facts.
+
+    Emits a row per requested ticker with zero counts where nothing was filed:
+    no disclosed purchase is a fact here, unlike a missing fundamental. Needs no
+    ``_empty_facts`` fallback for the same reason.
+    """
+    frame = InsiderSignals.get_signals(tickers, signal_day)
+    frame = InsiderSignals.attach_purchase_classification(frame)
+    facts = InsiderSignals.attach_activity_facts(frame, tickers, signal_day)
+    return InsiderSignals.attach_marketcap_normalization(facts, signal_day)
+
+
+def _institutional_facts(tickers: list[str], signal_day) -> pd.DataFrame:
+    """Assemble ticker-indexed 13F ownership facts.
+
+    Like the event source it needs no ``_empty_facts`` fallback: it already emits
+    a row per requested ticker, null where no institution reported the name.
+    """
+    frame = InstitutionalSignals.get_signals(tickers, signal_day)
+    return InstitutionalSignals.attach_ownership_facts(frame, tickers, signal_day)
 
 
 SIGNAL_SOURCES = {
     "technical": _technical_facts,
     "fundamental": _fundamental_facts,
     "events": _event_facts,
+    "institutional": _institutional_facts,
+    "insider": _insider_facts,
 }
 
 

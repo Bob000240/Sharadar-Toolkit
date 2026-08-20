@@ -29,7 +29,7 @@ These settle scope arguments. When a change conflicts with one, the principle wi
 - **Reproducibility.** The spec that was tested is the spec that runs.
 - **Objective facts separated from strategy judgments.** The signal layer
   computes facts and takes no position on whether a value is desirable;
-  `screens.py` holds the opinions.
+  `strategy.toml` holds the opinions.
 - **Research support, not automated trading.** Screening and ranking answer
   "which securities are interesting." Position sizing, portfolio optimization,
   and order generation are out of scope.
@@ -43,12 +43,13 @@ pipeline/      setup / load / update orchestration + CLI entry point
 research/
   universe     structural eligibility (type, exchange, recency)
   signals/     point-in-time facts: technical, fundamental, event,
-               insider, institutional
+               insider, institutional — every one reaching the filter path
   registry     the field catalog — what may be screened or ranked on
   filters      field/operator/value predicates + attrition funnel
   ranking      weighted blend of percentile ranks
-  orchestrator composes the above into one screen run
-  screens      the named screens that ship
+  screen       composes the above into one screen run
+  spec         validates and loads the named screens from `strategy.toml`
+  calendar     resolves an as-of date to a loaded trading session
   evaluate/    forward returns, walk-forward, pluggable metrics
 ```
 
@@ -81,7 +82,43 @@ reference set and silently incomparable.
 SHARADAR/DAILY reprice the market-cap half at the signal day — a stock that ran
 61% since its last 10-Q shows P/E 13.7 in SF1 and 22.0 in DAILY. Prefer `_daily`
 for valuation screens; SF1 remains the fallback where DAILY has no row
-(9,622 tickers vs 13,285 in `equity_prices`).
+(9,632 tickers vs 13,294 in `equity_prices`).
+
+**Institutional ownership is stored summarised by ticker, not by investor.**
+SF3 detail is one row per investor per ticker per quarter: ~57M rows and ~7 GB
+for the loaded span, against ~535k rows and ~150 MB for SF3A, which the vendor
+summarises by ticker. The aggregates are exact, not approximations — SF3A
+reports 6,108 AAPL holders for 2026-03-31 and counting the raw rows gives 6,108.
+Storage was never the argument at ~$0.80 a month; the grain was. SF3A is one row
+per ticker per quarter, the shape the filter and ranking path already consumes,
+so ownership became registered fields instead of a standalone service.
+
+SF3B, the by-investor summary, was loaded and then dropped: with no SF3 detail
+stored there are no `investorid` codes anywhere to join it to.
+
+**What that gives up, measured.** Holder identity: who holds a name, who opened
+or closed a position, conviction as a share of a filer's own portfolio, and
+holder overlap between tickers. It is more than it sounds — between 2026-03-31
+and 2026-06-30 the average ticker saw 61 investors enter or exit against a net
+holder change of 16, and 409 of 8,225 tickers moved by 2 or fewer holders while
+20 or more churned underneath. `inst_holders_change` is a net number and says so.
+The decision is reversible: SF3 detail can be re-exported at any time, and
+pruning it to the top 25 holders per ticker-quarter keeps 64–79% of the value in
+~1.9 GB.
+
+**SHARADAR/SF3 moved to v3 in 2026.** `calendardate` became `date`, filer names
+became `investorid` codes (`BLACKROCK INC` → `BLKROK`), `price` is gone, and
+pre-2022 history went from annual back to quarterly. Both endpoints moved: the
+bulk export rejects a `calendardate` filter exactly as the datatable does. v3
+also reports every `*units` column in thousands and every `*value` column in
+millions; the loader rescales to shares and dollars, verified against the
+previous version's rows and against the close that value over units implies.
+
+**SF3A is refreshed by bulk export, not the datatable.** One export and one COPY
+against dozens of paginated batches, and it reuses the rescaling the loader
+already applies. It restarts at the newest stored quarter *inclusive*, because
+13F filings arrive for weeks after a quarter closes and the largest holders are
+absent from it until they do.
 
 **The registry is not just validation.** It also drives behavior
 (`positive_only` masks loss-makers out of a rank rather than crowning them
@@ -93,9 +130,19 @@ averages, and the price levels derived fields are built from. A raw `sma_200`
 percentile ranks by share price; `pct_from_sma_50` does not. `close` is the one
 exception, registered filter-only, because the universe enforces no price floor.
 
-**Insider and institutional signals stay standalone.** Their `get_signals`
-return raw transactions and holdings rather than one row per ticker, so they do
-not fit the generic filter/rank path. Deliberate, not a gap.
+**Insider facts select; they do not rank.** Every signal source now reaches the
+filter path, but all 24 insider fields are registered `rankable=False`. Only
+~6% of recently traded names carry a disclosed purchase in a 30-day window
+(measured: 25 of a 400-ticker sample), so a percentile over the structural
+universe is one enormous tie at zero, and a weighted blend containing it would be
+decided by the tie-break rather than by the fact. "Two officers bought off
+pattern" is a filter, not a score.
+
+**Zero and null mean different things across those two sources.** An insider
+fact of zero is a fact — nothing was disclosed in the window. An institutional
+fact of null is missing data — no filer reported the name. Both services encode
+this already, and it is why the insider source needs no `_empty_facts` fallback
+while a fundamental one does.
 
 **No portfolio optimizer.** Mean-variance weights answer "how many dollars of
 each," which is implementation, not research. It would also need a QP solver.
@@ -155,10 +202,12 @@ between this list and the code as a bug, not a licence to change the list.
 - Corporate events aggregated to ticker-level facts without exposing an event
   before its availability date
 - Insider transactions retrieved and aggregated using filing-safe dates
-- Institutional holdings retrieved using a conservative availability delay,
-  supporting ownership-change calculations
-- Insider/institutional exposed as standalone facts only — **not required to
-  participate in generic filtering or ranking** (see Deferred)
+- Institutional ownership retrieved using a conservative availability delay,
+  supporting quarter-over-quarter ownership-change calculations
+- Insider transactions participate in generic filtering; they are deliberately
+  not rankable, being absent for ~94% of names in a 30-day window
+- Institutional ownership participates in generic filtering and ranking, at
+  quarterly grain held back for the 13F filing lag
 - Derived ratios, growth rates, historical features, and percentiles calculated
   deterministically
 - Screen execution calculates only the signal sources actually required
@@ -249,7 +298,7 @@ in `pipeline/`:
 
 Not gaps — deliberately later:
 
-- insider/institutional wired into generic filtering and ranking
+- SF3 investor-level detail, if holder identity is ever wanted back
 - SEC document ingestion and retrieval
 - an AI-assisted workflow combining structured facts with cited evidence,
   respecting the selected as-of date and distinguishing interpretation from
