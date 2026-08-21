@@ -59,7 +59,7 @@ dataset: a failed dataset is reported and the rest still run, so
 ## What gets loaded
 
 | dataset | source | grain |
-|---|---|---|---|
+|---|---|---|
 | `equity_prices` | SEP | ticker × session |
 | `technical_features` | *computed locally* | ticker × session |
 | `daily_valuation` | DAILY | ticker × session |
