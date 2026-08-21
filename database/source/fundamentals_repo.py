@@ -143,7 +143,7 @@ def create_table():
                 dimension TEXT NOT NULL,
                 calendardate DATE,
                 datekey DATE NOT NULL,
-                reportperiod DATE,
+                reportperiod DATE NOT NULL,
                 fiscalperiod TEXT,
                 lastupdated DATE,
                 accoci DOUBLE PRECISION,
@@ -251,7 +251,7 @@ def create_table():
                 taxliabilities DOUBLE PRECISION,
                 tbvps DOUBLE PRECISION,
                 workingcapital DOUBLE PRECISION,
-                PRIMARY KEY (ticker, dimension, datekey)
+                PRIMARY KEY (ticker, dimension, datekey, reportperiod)
             );
             CREATE INDEX IF NOT EXISTS idx_fundamentals_date ON fundamentals (calendardate);
         """)
@@ -264,11 +264,11 @@ def drop_table():
         conn.execute(text("DROP TABLE IF EXISTS fundamentals CASCADE"))
 
 
-KEY_COLUMNS = ("ticker", "dimension", "datekey")
+KEY_COLUMNS = ("ticker", "dimension", "datekey", "reportperiod")
 _NON_PK = [c for c in _COLUMNS if c not in KEY_COLUMNS]
 _UPDATE_SET = ", ".join(f"{c} = EXCLUDED.{c}" for c in _NON_PK)
 
-CONFLICT = f"ON CONFLICT (ticker, dimension, datekey) DO UPDATE SET {_UPDATE_SET}"
+CONFLICT = f"ON CONFLICT ({', '.join(KEY_COLUMNS)}) DO UPDATE SET {_UPDATE_SET}"
 
 
 def insert(df: pd.DataFrame):

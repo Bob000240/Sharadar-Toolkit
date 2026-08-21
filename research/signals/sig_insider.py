@@ -205,8 +205,10 @@ class InsiderSignals(Signals):
         Routine means the same insider also bought in that calendar month in each
         of the previous ``ROUTINE_PATTERN_YEARS`` years — a plan rather than a
         decision. A prior purchase counts only if disclosed before this one, so
-        the label is decidable from what was knowable at the time. A row with no
-        identifiable owner or transaction date is unclassified, not guessed at.
+        the label is decidable from what was knowable at the time; being a year
+        or more back it was necessarily executed earlier, which is why only the
+        disclosure date is compared. A row with no identifiable owner or
+        transaction date is unclassified, not guessed at.
         """
         if purchases.empty:
             return pd.Series(dtype="object", index=purchases.index)

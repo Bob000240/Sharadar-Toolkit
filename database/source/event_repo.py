@@ -11,6 +11,7 @@ from sqlalchemy import text
 _COLUMNS = ["ticker", "date", "eventcodes"]
 _COL_LIST = ", ".join(_COLUMNS)
 
+KEY_COLUMNS = ("ticker", "date")
 CONFLICT = "ON CONFLICT DO NOTHING"
 _BIND_LIST = ", ".join(f":{c}" for c in _COLUMNS)
 

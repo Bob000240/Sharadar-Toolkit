@@ -217,7 +217,7 @@ def test_ticker_and_institutional_conflicts_update_existing_rows(monkeypatch):
 
     ticker_sql = ticker_engine.statements[0][0]
     institutional_sql = institutional_engine.statements[0][0]
-    assert "ON CONFLICT (ticker, table_code) DO UPDATE" in ticker_sql
+    assert "ON CONFLICT (ticker, table_code, permaticker) DO UPDATE" in ticker_sql
     assert "ON CONFLICT (ticker, date)" in institutional_sql
     assert "isdelisted = COALESCE(EXCLUDED.isdelisted" in ticker_sql
     assert "shrholders = EXCLUDED.shrholders" in institutional_sql

@@ -41,14 +41,14 @@ _COLUMNS = [
 ]
 _COL_LIST = ", ".join(_COLUMNS)
 _BIND_LIST = ", ".join(f":{c}" for c in _COLUMNS)
-KEY_COLUMNS = ("ticker", "table_code")
+KEY_COLUMNS = ("ticker", "table_code", "permaticker")
 _UPDATE_SET = ", ".join(
     f"{column} = COALESCE(EXCLUDED.{column}, tickers.{column})"
     for column in _COLUMNS
     if column not in KEY_COLUMNS
 )
 
-CONFLICT = f"ON CONFLICT (ticker, table_code) DO UPDATE SET {_UPDATE_SET}"
+CONFLICT = f"ON CONFLICT ({', '.join(KEY_COLUMNS)}) DO UPDATE SET {_UPDATE_SET}"
 
 
 def create_table():
@@ -62,7 +62,7 @@ def create_table():
             CREATE TABLE IF NOT EXISTS tickers (
                 ticker TEXT NOT NULL,
                 table_code TEXT NOT NULL,
-                permaticker TEXT,
+                permaticker TEXT NOT NULL,
                 name TEXT,
                 exchange TEXT,
                 isdelisted TEXT,
@@ -88,7 +88,7 @@ def create_table():
                 lastquarter DATE,
                 secfilings TEXT,
                 companysite TEXT,
-                PRIMARY KEY (ticker, table_code)
+                PRIMARY KEY (ticker, table_code, permaticker)
             );
             CREATE INDEX IF NOT EXISTS idx_tickers_sector ON tickers (sector);
         """)

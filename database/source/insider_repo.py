@@ -12,6 +12,7 @@ _COLUMNS = [
     "ticker",
     "filingdate",
     "formtype",
+    "rownum",
     "issuername",
     "ownername",
     "officertitle",
@@ -36,10 +37,11 @@ _COLUMNS = [
 _COL_LIST = ", ".join(_COLUMNS)
 _BIND_LIST = ", ".join(f":{c}" for c in _COLUMNS)
 
-CONFLICT = (
-    "ON CONFLICT (ticker, filingdate, ownername, transactiondate, transactioncode) "
-    "DO NOTHING"
-)
+KEY_COLUMNS = ("ticker", "filingdate", "formtype", "ownername", "rownum")
+_NON_PK = [c for c in _COLUMNS if c not in KEY_COLUMNS]
+_UPDATE_SET = ", ".join(f"{c} = EXCLUDED.{c}" for c in _NON_PK)
+
+CONFLICT = f"ON CONFLICT ({', '.join(KEY_COLUMNS)}) DO UPDATE SET {_UPDATE_SET}"
 
 
 def create_table():
@@ -52,10 +54,11 @@ def create_table():
             text("""
             CREATE TABLE IF NOT EXISTS insider_transactions (
                 ticker TEXT NOT NULL,
-                filingdate DATE,
-                formtype TEXT,
+                filingdate DATE NOT NULL,
+                formtype TEXT NOT NULL,
+                rownum INTEGER NOT NULL,
                 issuername TEXT,
-                ownername TEXT,
+                ownername TEXT NOT NULL,
                 officertitle TEXT,
                 isdirector TEXT,
                 isofficer TEXT,
@@ -74,7 +77,7 @@ def create_table():
                 dateexercisable DATE,
                 expirationdate DATE,
                 priceexercisable DOUBLE PRECISION,
-                UNIQUE (ticker, filingdate, ownername, transactiondate, transactioncode)
+                PRIMARY KEY (ticker, filingdate, formtype, ownername, rownum)
             );
             CREATE INDEX IF NOT EXISTS idx_insider_filingdate ON insider_transactions (filingdate);
         """)
