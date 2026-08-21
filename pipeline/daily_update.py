@@ -24,6 +24,7 @@ import database.source.fundamentals_repo as fundamentals_repo
 import database.source.insider_repo as insider_repo
 import database.source.institutional_repo as institutional_repo
 import database.source.event_repo as event_repo
+from pipeline import report
 
 TODAY = pd.Timestamp.today().strftime("%Y-%m-%d")
 
@@ -33,79 +34,50 @@ def _lookback(days: int) -> str:
     return (pd.Timestamp.today() - pd.Timedelta(days=days)).strftime("%Y-%m-%d")
 
 
-def _fetch(sh_fn, repo_insert, label: str, batch_size: int = 0, **filters) -> None:
-    """Fetch one vendor endpoint and upsert what it returns.
+def _fetch(sh_fn, repo_insert, **filters) -> report.StepResult:
+    """Fetch one vendor endpoint, upsert what it returns, and report the outcome.
 
-    With ``batch_size`` set, the ticker list is split into batches and each is
-    fetched and written before the next, so a large request cannot time out as one
-    call. Progress and timings are printed because this runs unattended.
+    Fetch and insert are timed separately because a slow step is usually one or
+    the other, and the difference decides whether to look at the vendor or the
+    database.
     """
-    scope = ", ".join(f"{k}={v}" for k, v in filters.items() if k != "tickers")
-
-    if batch_size:
-        tickers = list(filters.pop("tickers"))
-        n_batches = -(-len(tickers) // batch_size)
-        print(
-            f"{label}: fetching {len(tickers):,} tickers "
-            f"in {n_batches} batches ({scope})...",
-            flush=True,
-        )
-        started = time.perf_counter()
-        total = 0
-        for i in range(0, len(tickers), batch_size):
-            df = sh_fn(tickers=tickers[i : i + batch_size], **filters)
-            if not df.empty:
-                repo_insert(df)
-                total += len(df)
-            print(
-                f"  {label} batch {i // batch_size + 1}/{n_batches} (+{total:,} rows)",
-                flush=True,
-            )
-        elapsed = time.perf_counter() - started
-        print(f"{label}: {total:,} rows upserted ({scope}) [{elapsed:.1f}s]")
-        return
-
-    print(f"{label}: fetching ({scope})...", flush=True)
+    scope = ", ".join(f"{key}={value}" for key, value in filters.items())
     started = time.perf_counter()
-    df = sh_fn(**filters)
-    fetch_elapsed = time.perf_counter() - started
-    if df.empty:
-        print(f"{label}: up to date [{fetch_elapsed:.1f}s]")
-        return
-    print(
-        f"{label}: got {len(df):,} rows in {fetch_elapsed:.1f}s, upserting...",
-        flush=True,
-    )
-    insert_started = time.perf_counter()
-    repo_insert(df)
-    insert_elapsed = time.perf_counter() - insert_started
-    print(
-        f"{label}: {len(df):,} rows upserted ({scope}) "
-        f"[fetch {fetch_elapsed:.1f}s, insert {insert_elapsed:.1f}s]"
+    frame = sh_fn(**filters)
+    fetched = time.perf_counter() - started
+
+    if frame.empty:
+        return report.StepResult(rows=0, note=f"({scope})", detail=f"{fetched:.1f}s")
+
+    started = time.perf_counter()
+    repo_insert(frame)
+    inserted = time.perf_counter() - started
+    return report.StepResult(
+        rows=len(frame),
+        note=f"({scope})",
+        detail=f"fetch {fetched:.1f}s · insert {inserted:.1f}s",
     )
 
 
-def update_equity_prices(sh: SharadarData):
+def update_equity_prices(sh: SharadarData) -> report.StepResult:
     """Fetch equity bars changed since the stored watermark."""
-    _fetch(
+    return _fetch(
         sh.equity_prices,
         equity_repo.insert,
-        "Equity prices",
         lastupdated_since=equity_repo.get_sync_cursor() or START_DATE,
     )
 
 
-def update_fund_prices(sh: SharadarData):
+def update_fund_prices(sh: SharadarData) -> report.StepResult:
     """Fetch fund bars changed since the stored watermark."""
-    _fetch(
+    return _fetch(
         sh.fund_prices,
         fund_repo.insert,
-        "Fund prices",
         lastupdated_since=fund_repo.get_sync_cursor() or START_DATE,
     )
 
 
-def update_daily_valuation(sh: SharadarData):
+def update_daily_valuation(sh: SharadarData) -> report.StepResult:
     """Fetch DAILY valuation rows changed since the stored watermark.
 
     An empty table is refused rather than backfilled: a decade of daily rows
@@ -114,17 +86,10 @@ def update_daily_valuation(sh: SharadarData):
     """
     cursor = daily_repo.get_sync_cursor()
     if cursor is None:
-        print(
-            "Daily valuation: empty — bulk load it first: "
-            "load_data.load_sharadar_table('DAILY')"
+        raise RuntimeError(
+            "empty — bulk load it first: uv run python -m pipeline.main load daily"
         )
-        return
-    _fetch(
-        sh.daily_valuation,
-        daily_repo.insert,
-        "Daily valuation",
-        lastupdated_since=cursor,
-    )
+    return _fetch(sh.daily_valuation, daily_repo.insert, lastupdated_since=cursor)
 
 
 def _recompute_history(symbols: list[str], batch_size: int) -> int:
@@ -150,7 +115,7 @@ def _recompute_history(symbols: list[str], batch_size: int) -> int:
     return total
 
 
-def update_technical_features(batch_size: int = 200):
+def update_technical_features(batch_size: int = 200) -> report.StepResult:
     """Rebuild stale feature histories, then fill in missing dates.
 
     Stale tickers are rebuilt in full first and then excluded from the gap fill, so
@@ -158,23 +123,19 @@ def update_technical_features(batch_size: int = 200):
     earliest missing date to warm the longest rolling window.
     """
     if technical_features_repo.is_empty():
-        print("Technical features: no base data")
-        return
+        raise RuntimeError("no base data — load equity prices first")
 
+    rebuilt = 0
     stale = technical_features_repo.get_stale_feature_tickers()
     if stale:
         rebuilt = _recompute_history(stale, batch_size)
-        print(
-            f"Technical features: rebuilt {rebuilt:,} rows for "
-            f"{len(stale):,} re-adjusted tickers"
-        )
+        print(f"  rebuilt {rebuilt:,} rows for {len(stale):,} re-adjusted tickers")
 
     missing = technical_features_repo.get_missing_feature_dates()
     if stale:
         missing = missing[~missing["ticker"].isin(stale)].copy()
     if missing.empty:
-        print("Technical features: up to date")
-        return
+        return report.StepResult(rows=rebuilt, note="(rebuilt only)" if rebuilt else "")
     missing["date"] = pd.to_datetime(missing["date"])
     missing_dates = {
         ticker: set(group["date"])
@@ -201,43 +162,38 @@ def update_technical_features(batch_size: int = 200):
         if not new_rows.empty:
             technical_features_repo.insert(new_rows)
             total += len(new_rows)
-        print(
-            f"  technical features batch {i // batch_size + 1}/{n_batches}  "
-            f"(+{total:,} rows)"
-        )
-    print(f"Technical features: {total:,} new rows ({len(symbols):,} tickers)")
+        print(f"  batch {i // batch_size + 1}/{n_batches}  (+{total:,} rows)")
+    return report.StepResult(rows=total + rebuilt, note=f"({len(symbols):,} tickers)")
 
 
-def update_fundamentals(sh: SharadarData):
+def update_fundamentals(sh: SharadarData) -> report.StepResult:
     """Fetch fundamentals changed since the stored watermark.
 
     Falls back to a 90-day window when nothing is stored yet, which is wide enough
     to catch restatements of recently closed periods.
     """
-    _fetch(
+    return _fetch(
         sh.fundamentals,
         fundamentals_repo.insert,
-        "Fundamentals",
         lastupdated_since=fundamentals_repo.get_sync_cursor() or _lookback(90),
     )
 
 
-def update_insider(sh: SharadarData):
+def update_insider(sh: SharadarData) -> report.StepResult:
     """Fetch insider filings disclosed in the last two weeks.
 
     Windowed by filing date rather than a watermark, because a filing can appear
     long after the trade it reports.
     """
-    _fetch(
+    return _fetch(
         sh.insider_transactions,
         insider_repo.insert,
-        "Insider",
         start_date=_lookback(14),
         end_date=TODAY,
     )
 
 
-def _reexport_quarters(code: str, repo, label: str) -> None:
+def _reexport_quarters(code: str, repo) -> report.StepResult:
     """Re-export one quarterly table from its newest stored quarter onward.
 
     The 13F step skips the JSON datatable, so its rows arrive already rescaled by
@@ -246,36 +202,32 @@ def _reexport_quarters(code: str, repo, label: str) -> None:
     quarter until they do.
     """
     since = repo.get_sync_cursor() or START_DATE
-    print(f"{label}: re-exporting quarters from {since} ...", flush=True)
-    started = time.perf_counter()
-    load_sharadar_table(code, start_date=since, upsert=True)
-    print(f"{label}: done [{time.perf_counter() - started:.1f}s]")
+    rows = load_sharadar_table(code, start_date=since, upsert=True)
+    return report.StepResult(rows=rows, note=f"(quarters from {since})")
 
 
-def update_institutional():
+def update_institutional() -> report.StepResult:
     """Re-export recent quarters of by-ticker 13F ownership."""
-    _reexport_quarters("SF3A", institutional_repo, "Institutional ownership")
+    return _reexport_quarters("SF3A", institutional_repo)
 
 
-def update_events(sh: SharadarData):
+def update_events(sh: SharadarData) -> report.StepResult:
     """Fetch corporate events from the last week."""
-    _fetch(
+    return _fetch(
         sh.events,
         event_repo.insert,
-        "Events",
         start_date=_lookback(7),
         end_date=TODAY,
     )
 
 
-def update_tickers(sh: SharadarData):
+def update_tickers(sh: SharadarData) -> report.StepResult:
     """Fetch equity and fund descriptors changed since the watermark."""
     since = tickers_repo.get_sync_cursor()
     equities = sh.tickers(table="SEP", lastupdated_since=since)
     funds = sh.tickers(table="SFP", lastupdated_since=since)
-    df = pd.concat([equities, funds], ignore_index=True)
-    if df.empty:
-        print("Tickers: up to date")
-        return
-    tickers_repo.insert(df)
-    print(f"Tickers: {len(df):,} upserted")
+    frame = pd.concat([equities, funds], ignore_index=True)
+    if frame.empty:
+        return report.StepResult(rows=0)
+    tickers_repo.insert(frame)
+    return report.StepResult(rows=len(frame))

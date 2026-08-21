@@ -75,7 +75,7 @@ def test_client_flag_matches_the_real_function_signature(step):
     """Checked against the real functions, not the fakes the dispatch tests
     patch in: a step whose flag disagrees with its signature is handed a
     SharadarData as its first positional argument, whatever that means there."""
-    _, _, function_name, needs_client = step
+    _, function_name, needs_client = step
     parameters = inspect.signature(getattr(daily_update, function_name)).parameters
     assert needs_client == ("sh" in parameters)
 

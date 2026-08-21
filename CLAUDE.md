@@ -1,7 +1,8 @@
 # Working in this repo
 
-Read `CONTEXT.md` for what this project is, the constraints it holds itself to,
-and the decisions already settled. This file is how to work in it.
+Read `.claude/CONTEXT.md` for what this project is, the constraints it holds
+itself to, and the decisions already settled. This file is how to work in it;
+`README.md` is the one written for people.
 
 ## Commands
 

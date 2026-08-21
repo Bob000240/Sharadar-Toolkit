@@ -273,26 +273,24 @@ confidence interval on any of the above — a median excess return is reported
 without a claim about whether it is distinguishable from noise.
 
 ### A.10 Command-line interface
-- Commands for database setup, initial load, incremental update, and screen
-  execution
+- Commands for database setup, initial load, incremental update, screen
+  execution, and historical evaluation
 - The screen command accepts an as-of date and a named screen configuration
 - Pre-execution validation of dates, fields, operators, directions, weights,
   and universe settings, with actionable messages
 - Successful execution prints screen name, effective session, universe size,
   filter funnel, and selected securities
-- Writes results to a user-selected output file
+- Writes results to a user-selected output file, in CSV or JSON
 - A command that cannot complete returns a nonzero exit status
 
 ## Status
 
-Research engine is complete and tested. Remaining for the first milestone, all
-in `pipeline/`:
+First milestone complete. Data ingestion, the research engine, and the CLI all
+ship: `setup`, `load`, `update`, `screen`, and `evaluate`, with a README and an
+end-to-end test of the screen and evaluate workflows.
 
-- a `screen` subcommand taking an as-of date and a named screen
-- a presenter printing session, universe size, funnel, and selections
-- export of results to a file
-- an end-to-end test of the CLI workflow
-- a README with setup and a reproducible demonstration
+Evaluation output states the absence of significance testing in the output
+itself, not only here, because a table of excess returns reads as evidence.
 
 ## Deferred
 

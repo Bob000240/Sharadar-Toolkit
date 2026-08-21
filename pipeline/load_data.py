@@ -25,6 +25,7 @@ import nasdaqdatalink
 from dotenv import load_dotenv
 
 from data.technical_features import compute_technical_features
+from pipeline import datasets, report
 
 import database.source.daily_repo as daily_repo
 import database.source.equity_repo as equity_repo
@@ -78,6 +79,11 @@ def _rescale_holdings(chunk: pd.DataFrame) -> pd.DataFrame:
 
 
 _TRANSFORMS = {"SF3A": _rescale_holdings}
+_LABELS = {
+    datasets.code(name): datasets.label(name)
+    for name in datasets.DATASETS
+    if datasets.code(name)
+}
 _CHUNK = 200_000
 
 
@@ -91,7 +97,6 @@ def _export(code: str, dest: str, date_field: str | None, start_date: str) -> li
     if date_field:
         filters[date_field] = {"gte": start_date}
     zip_path = os.path.join(dest, f"{code}.zip")
-    print(f"  exporting SHARADAR/{code} ...")
     nasdaqdatalink.export_table(f"SHARADAR/{code}", filename=zip_path, **filters)
     with zipfile.ZipFile(zip_path) as archive:
         archive.extractall(dest)
@@ -103,7 +108,7 @@ def _export(code: str, dest: str, date_field: str | None, start_date: str) -> li
 
 def load_sharadar_table(
     code: str, start_date: str = START_DATE, upsert: bool = False
-) -> None:
+) -> int:
     """Bulk-load one Sharadar table into its Postgres table.
 
     Streamed in chunks so a multi-gigabyte export never has to fit in memory. Rows
@@ -117,7 +122,6 @@ def load_sharadar_table(
     row_filter = _ROW_FILTERS.get(code)
     transform = _TRANSFORMS.get(code)
     conflict = repo.CONFLICT if upsert else "ON CONFLICT DO NOTHING"
-    print(f"Bulk loading {code} -> {table} ...")
     total = 0
     with tempfile.TemporaryDirectory() as dest:
         for part in _export(code, dest, date_field, start_date):
@@ -134,16 +138,17 @@ def load_sharadar_table(
                     chunk = chunk.drop_duplicates(list(repo.KEY_COLUMNS), keep="last")
                 if not chunk.empty:
                     total += copy_insert(table, repo._COLUMNS, chunk, conflict)
-    print(f"  {code} total: {total:,} rows")
+    return total
 
 
-def load_sharadar_bulk() -> None:
-    """Load every configured Sharadar table in order."""
+def load_sharadar_bulk(run: report.Run) -> None:
+    """Load every configured Sharadar table in order, reporting each."""
     for code in SHARADAR_TABLES:
-        load_sharadar_table(code)
+        with run.step(_LABELS[code], f"exporting SHARADAR/{code}") as result:
+            result.rows = load_sharadar_table(code)
 
 
-def load_technical_features() -> None:
+def load_technical_features() -> int:
     """Compute technical features for every ticker and store them.
 
     Batched by ticker, and each ticker's full price history is passed in one piece
@@ -151,7 +156,6 @@ def load_technical_features() -> None:
     NULL, since a ratio against a zero denominator is not a number the database
     should carry.
     """
-    print("Computing technical features from equity prices (all tickers)...")
     symbols = equity_repo.get_latest_dates()["ticker"].tolist()
     total = 0
     for i in range(0, len(symbols), 50):
@@ -176,19 +180,23 @@ def load_technical_features() -> None:
             f"  batch {i // 50 + 1}/{-(-len(symbols) // 50)}: "
             f"{len(feature_frame):,} rows"
         )
-    print(f"  total: {total:,} rows  ({len(symbols):,} tickers)")
+    return total
 
 
-def main() -> None:
-    """Run the full load: raw tables first, then derived features."""
-    print("=== Sharadar Toolkit full load ===")
-    print(f"Date range: {START_DATE} → {END_DATE}\n")
-    load_sharadar_bulk()
-    load_technical_features()
-    print("\n=== Load complete ===")
+def main() -> list[str]:
+    """Run the full load: raw tables first, then derived features.
+
+    Return the labels that failed, so a caller can set an exit status. A failed
+    dataset no longer abandons the rest, since they are independent.
+    """
+    run = report.Run("load", "all datasets", f"{START_DATE} → {END_DATE}")
+    load_sharadar_bulk(run)
+    with run.step(datasets.label("technicals"), "computing from equity prices") as step:
+        step.rows = load_technical_features()
+    return run.finish()
 
 
 if __name__ == "__main__":
     if not os.getenv("NDL_APIKEY"):
         sys.exit("Set NDL_APIKEY (your Nasdaq Data Link key) in .env")
-    main()
+    sys.exit(1 if main() else 0)
